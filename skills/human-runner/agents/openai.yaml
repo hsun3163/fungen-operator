@@ -1,0 +1,6 @@
+interface:
+  display_name: "Human Runner"
+  short_description: "Run work through the simplest human path"
+  default_prompt: "Use $human-runner to execute this work through the simplest practitioner-native path and report only supported claims."
+policy:
+  allow_implicit_invocation: true
