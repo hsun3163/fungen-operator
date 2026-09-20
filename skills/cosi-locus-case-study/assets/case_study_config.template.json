@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "gene": {
+    "gene_id": "ENSG00000000000",
+    "gene_symbol": "GENE"
+  },
+  "case_type": "concordant_retained_cs",
+  "focal_gwas": "GWAS_DATASET_ID",
+  "plot_contexts": [],
+  "plot_window": {
+    "chromosome": null,
+    "start": null,
+    "end": null
+  },
+  "canonical_union": "apps/string_core_explorer/data/intact_union.rds",
+  "direction_statistic": "Z_acat_num",
+  "membership_pp_threshold": 0.95,
+  "membership_pp_operator": ">",
+  "credible_set_rule": "retained susie_result_trimmed sets only",
+  "sensitivity_evidence": [],
+  "ld": {
+    "reference_source": "authoritative regional LD metadata",
+    "display_min_abs_r": 0.2,
+    "display_max_abs_r": 0.99,
+    "signed_orientation": "COSI ALT allele"
+  },
+  "artifacts": {
+    "notebook": "GENE_modality_ggplot.ipynb",
+    "svg": "figures/GENE_LD_three_panel.svg",
+    "pdf": "figures/GENE_LD_three_panel.pdf",
+    "png": "figures/GENE_LD_three_panel.png",
+    "context_direction": "inputs/GENE_context_direction.tsv",
+    "finemap_status": "inputs/GENE_finemap_status.tsv",
+    "gwas_track": "inputs/GENE_gwas_track.tsv.gz",
+    "evidence_track": "inputs/GENE_sumstat_cs_annotated.tsv.gz",
+    "cs_membership": "inputs/GENE_cs_membership.tsv",
+    "ld_variant_map": "inputs/GENE_ld_variant_map.tsv",
+    "ld_pairs": "inputs/GENE_ld_pairs.tsv.gz",
+    "gene_track": "inputs/GENE_gene_track.tsv",
+    "input_manifest": "provenance/GENE_input_manifest.tsv",
+    "build_checks": "checks/GENE_build_qa.tsv",
+    "notebook_checks": "checks/GENE_notebook_qa.tsv"
+  },
+  "notes": []
+}

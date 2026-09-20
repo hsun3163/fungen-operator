@@ -1,0 +1,4 @@
+interface:
+  display_name: "COSI Sketch LD"
+  short_description: "Compute audited LD from COSI sketch genotypes"
+  default_prompt: "Use $cosi-sketch-ld to compute a complete allele-audited LD matrix from the canonical COSI sketch genotype."

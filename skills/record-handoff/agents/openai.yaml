@@ -1,0 +1,4 @@
+interface:
+  display_name: "Handoff Notes"
+  short_description: "Write timestamped handoff notes"
+  default_prompt: "Use $record-handoff to write a timestamped handoff note in `handoff/` summarizing the current situation, progress, open questions, and next steps."

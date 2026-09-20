@@ -1,0 +1,4 @@
+interface:
+  display_name: "Sumstat Munger"
+  short_description: "Run and validate the COSI Snakemake_38 sumstat munger."
+  default_prompt: "Use the sumstat-munger skill to prepare a COSI-compatible munged VCF from supplied summary statistics."

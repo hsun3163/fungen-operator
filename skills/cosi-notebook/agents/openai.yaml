@@ -1,0 +1,4 @@
+interface:
+  display_name: "COSI Notebook"
+  short_description: "Create COSI R-kernel notebooks with plot provenance."
+  default_prompt: "Use this skill when creating or editing COSI notebooks, plotting notebooks, or notebook-ready analysis artifacts."

@@ -1,0 +1,4 @@
+interface:
+  display_name: "LSF Queue Move"
+  short_description: "Inspect and move pending LSF jobs between queues safely"
+  default_prompt: "Inspect my pending LSF jobs and safely move only the jobs I authorize between queues."

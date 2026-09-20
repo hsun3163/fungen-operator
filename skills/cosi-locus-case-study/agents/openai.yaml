@@ -1,0 +1,4 @@
+interface:
+  display_name: "COSI Gene Locus Case Study"
+  short_description: "Build validated multi-context locus-zoom packets"
+  default_prompt: "Use $cosi-locus-case-study to build a validated R/ggplot locus case-study notebook for this gene."

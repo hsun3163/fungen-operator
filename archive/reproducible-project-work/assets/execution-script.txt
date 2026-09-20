@@ -1,0 +1,5 @@
+<interpreter declaration required by the project's existing convention>
+<execution-platform directives, when the target environment requires them>
+
+<activate the exact environment built from the tracked environment spec>
+<invoke the canonical program or engine once> <pass caller-supplied arguments through unchanged>

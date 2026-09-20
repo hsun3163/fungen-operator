@@ -1,0 +1,4 @@
+interface:
+  display_name: "xQTL Route3 Analysis"
+  short_description: "Run and repair evidence-backed xQTL Route3"
+  default_prompt: "Use $xqtl-route3-analysis to run or repair this Route3 xQTL analysis from the narrowest verified checkpoint."

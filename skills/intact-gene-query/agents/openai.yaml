@@ -1,0 +1,4 @@
+interface:
+  display_name: "INTACT Gene Query"
+  short_description: "Refresh and query INTACT gene hits"
+  default_prompt: "Run the INTACT gene query workflow for a requested gene, refresh cached results if stale, and return the top hits."

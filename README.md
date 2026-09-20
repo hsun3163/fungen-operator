@@ -1,19 +1,51 @@
-# Runner skills
+# fungen-operator
 
-Three skills for operating existing research workflows through visible, reproducible commands.
+Functional-genomics operator skills and the retained history of attempts to make agent work reproducible, scoped, and verifiable.
 
-| Skill | Purpose |
-| --- | --- |
-| [human-runner](skills/human-runner/SKILL.md) | Use the project-native execution path and retain a clear command and result trail. |
-| [xqtl-runner](skills/xqtl-runner/SKILL.md) | Operate MESA, AIDA, and CARDIA through the shared xQTL Snakemake, SoS, and LSF workflow. |
-| [cosi-runner](skills/cosi-runner/SKILL.md) | Operate COSI workflows from a visible operator notebook and YAML configuration. |
+This repository incorporates the original `hsun3163/runner-skills` Git history and refreshes its skill files from the local installation on 2026-09-20. The original repository remains available.
 
-## Contents and use
+## Current skill collection
 
-Each directory under `skills/` is a complete skill folder. Copy the desired folders into your agent's skill directory, retaining their subdirectories. Apply `human-runner` before the domain-specific runner.
+All locally installed `cosi-*` and `xqtl-*` skills are included, along with the common runner and workflow-support skills. Each folder contains its original instructions and available templates, references, scripts, and agent metadata.
 
-The skills and bundled operator notebook templates are preserved from the local skill installation. Historical archives and backup files are excluded. This repository contains instructions and templates, not the analysis workflows, environments, or research datasets.
+- [debug-pipeline](skills/debug-pipeline/SKILL.md)
+- [snakemake-sos-parser](skills/snakemake-sos-parser/SKILL.md)
+- [cosi-locus-case-study](skills/cosi-locus-case-study/SKILL.md)
+- [cosi-locus-zoom](skills/cosi-locus-zoom/SKILL.md)
+- [cosi-notebook](skills/cosi-notebook/SKILL.md)
+- [cosi-run](skills/cosi-run/SKILL.md)
+- [cosi-runner](skills/cosi-runner/SKILL.md)
+- [cosi-sketch-ld](skills/cosi-sketch-ld/SKILL.md)
+- [cosi-weight-scan](skills/cosi-weight-scan/SKILL.md)
+- [cosi-workflow-edit](skills/cosi-workflow-edit/SKILL.md)
+- [human-runner](skills/human-runner/SKILL.md)
+- [intact-gene-query](skills/intact-gene-query/SKILL.md)
+- [lsf-queue-move](skills/lsf-queue-move/SKILL.md)
+- [record-handoff](skills/record-handoff/SKILL.md)
+- [sos-status-sampler](skills/sos-status-sampler/SKILL.md)
+- [sumstat-munger](skills/sumstat-munger/SKILL.md)
+- [todoist-task-completion](skills/todoist-task-completion/SKILL.md)
+- [xqtl-runner](skills/xqtl-runner/SKILL.md)
+- [xqtl-snakemake-analysis](skills/xqtl-snakemake-analysis/SKILL.md)
 
-The domain runners target an existing Minerva environment and retain site-specific paths, queues, project names, and historical examples. Follow each skill's instructions to adapt its notebook copy and configuration to the intended run before execution. Never execute the bundled templates directly.
+## Earlier attempts and reviews
 
-The runners have distinct execution contracts: xQTL requires a successful exact-graph dry-run before production; COSI uses its documented production submission path without adding a dry-run stage.
+These files preserve earlier approaches and critiques, including attempts the owner describes as unsuccessful at taming agent behavior. Inclusion does not establish that every archived skill failed, and the reviews are historical assessments rather than newly reproduced evaluations.
+
+- [reproducible-project-work](archive/reproducible-project-work/SKILL.md): earlier general reproducibility rules, references, and artifact templates.
+- [human-runner backup](archive/human-runner/SKILL.md.orig) and [legacy references](archive/human-runner/archive/legacy-references/): retained earlier text and supporting material.
+- [xqtl-route3-analysis](archive/xqtl-route3-analysis-20260821/SKILL.md): retired Route3 approach, including both original and retired-active references and scripts.
+- [snakemake-lsf-triage](archive/snakemake-lsf-triage/SKILL.md): earlier memory-maintained debugging guidance.
+- [reproducibility reviews](archive/reproducibility-reviews/): retained audit prompt and critical reviews, including a proposed replacement embedded in `latest-response.md`.
+
+## Use and interpretation
+
+Copy selected folders from `skills/` into your agent's skill directory, retaining their supporting files. Apply `human-runner` before a domain runner. Archived files are retained for study and comparison; do not install the whole archive as a combined instruction set.
+
+The collection preserves different generations of operating policy. Their instructions can conflict: for example, `xqtl-runner` requires an exact-graph dry-run, while `cosi-runner` forbids adding a dry-run stage. Select the skill appropriate to the task and follow the applicable instruction hierarchy rather than combining all rules indiscriminately.
+
+These are site-specific Minerva skills. Paths, environments, queue settings, project references, and historical examples are preserved. Adapt copied notebook templates to the intended run before execution; never execute the bundled templates directly. Analysis datasets and external workflow implementations are not bundled.
+
+## Provenance
+
+[Source manifest](docs/source-manifest.tsv) records each imported file's original location relative to the source user's home directory and SHA-256 digest. Imported files are preserved byte-for-byte. Generated caches are excluded. Source paths describe provenance and are not portable runtime dependencies supplied by this repository.

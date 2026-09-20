@@ -1,0 +1,4 @@
+interface:
+  display_name: "COSI Workflow Edit"
+  short_description: "Edit COSI Snakemake/SoS workflows and reruns safely."
+  default_prompt: "Use this skill when editing COSI workflow files, configs, rerun scripts, OTTERS backends, or Snakemake/SoS submission logic."
