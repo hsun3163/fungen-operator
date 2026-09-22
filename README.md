@@ -2,7 +2,7 @@
 
 **Fungen Operator is an experimental reliability layer for coding agents operating established functional-genomics workflows.**
 
-It is not a new workflow engine and not an autonomous scientist. The intended operator composes existing scientific mini-protocols, runs them through the project's native execution path, recovers from operational failures, and reaches the authorized endpoint without silently changing the scientific analysis.
+It is not a new workflow engine and not an autonomous scientist. The first product stage operates fixed analyses through the project's existing runner/workflow paths, recovers from operational failures, and reaches the authorized endpoint without silently changing the scientific analysis. Composition is a second-stage capability: after the fixed-operation trust gate, the operator may assemble maintained `.smk` mini-protocols into a full analysis with the scientist approving the composition before execution.
 
 > **Maximum initiative inside the delegated scientific and operational contract; minimum invention outside it.**
 
@@ -43,7 +43,7 @@ select -> compose -> execute -> recover -> verify -> report/stop
 
 The scientific task and established project own the method and workflow semantics. The operator owns the reasoning needed to carry out that authorized operation.
 
-The intended model is **composition, not reconstruction**. Snakemake/SoS workflows, notebooks, scripts, and maintained helpers are building blocks. New wrappers, controllers, validators, environments, or execution paths must demonstrate that they fill a real gap and reduce net operational complexity.
+The long-term model is **composition, not reconstruction**, but composition is not the first milestone. Phase 1 proves reliable operation of fixed analyses through the existing runner paths. In Phase 2, maintained Snakemake `.smk` files are the primary compositional interface; notebooks and R/Python scripts remain implementation details invoked by those mini-protocols rather than a new graph for the operator to invent. New wrappers, controllers, validators, environments, or execution paths must demonstrate that they fill a real gap and reduce net operational complexity.
 
 Execution state is layered:
 
@@ -116,16 +116,19 @@ A later rule does not prove what caused an earlier incident. Automated session l
 
 The replacement should converge toward:
 
-- one recognizable Fungen Operator entry point;
+- one recognizable, skill-first Fungen Operator entry point;
 - one concise shared operating contract;
+- **Phase 1:** reliable operation of fixed analyses through existing runner/workflow paths;
+- a benchmark trust gate before composition is enabled;
+- **Phase 2:** composition of existing `.smk` mini-protocols through declared inputs/outputs, initially with scientist approval of the composed graph;
 - task/domain references or capabilities loaded only when relevant;
 - preservation of useful scientific helpers and conventions;
 - explicit ownership of runtime and scheduler facts;
-- representative synthetic/public-data acceptance cases;
+- controlled-data-safe synthetic acceptance cases plus bounded native integration tests;
 - repeated evaluation of endpoint completion **and** contract adherence;
 - staged retirement of overlapping legacy discovery routes only after capability coverage is accounted for.
 
-Packaging as a single skill versus a plugin remains an implementation decision. Packaging should follow the operating model rather than drive it.
+Start skill-first. Add a plugin, custom agent, or heavier harness only if a concrete capability gap demonstrates that the skill layer is insufficient.
 
 ## Provenance
 
