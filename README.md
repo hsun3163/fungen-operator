@@ -2,7 +2,7 @@
 
 **Fungen Operator is an experimental reliability layer for coding agents operating established functional-genomics workflows.**
 
-It is not a new workflow engine and not an autonomous scientist. The first product stage operates fixed analyses through the project's existing runner/workflow paths, recovers from operational failures, and reaches the authorized endpoint without silently changing the scientific analysis. Composition is a second-stage capability: after the fixed-operation trust gate, the operator may assemble maintained `.smk` mini-protocols into a full analysis with the scientist approving the composition before execution.
+It is not a new workflow engine and not an autonomous scientist. The project already has scientific mini-protocol infrastructure in maintained Snakemake `.smk` files. The operator's job is to select and compose those existing mini-protocols into the requested analysis, run them through the native execution path, recover from operational failures, and reach the authorized endpoint without silently changing the science or building a parallel orchestration layer.
 
 > **Maximum initiative inside the delegated scientific and operational contract; minimum invention outside it.**
 
@@ -43,7 +43,7 @@ select -> compose -> execute -> recover -> verify -> report/stop
 
 The scientific task and established project own the method and workflow semantics. The operator owns the reasoning needed to carry out that authorized operation.
 
-The long-term model is **composition, not reconstruction**, but composition is not the first milestone. Phase 1 proves reliable operation of fixed analyses through the existing runner paths. In Phase 2, maintained Snakemake `.smk` files are the primary compositional interface; notebooks and R/Python scripts remain implementation details invoked by those mini-protocols rather than a new graph for the operator to invent. New wrappers, controllers, validators, environments, or execution paths must demonstrate that they fill a real gap and reduce net operational complexity.
+The model is **composition, not reconstruction**. Maintained Snakemake `.smk` files are the existing mini-protocol interface; notebooks and R/Python scripts remain implementation details invoked by those mini-protocols rather than pieces for the operator to rewire. The operator should use the existing composition mechanisms and add no new wrapper, controller, validator, environment, or execution path unless a demonstrated gap cannot be handled by the maintained infrastructure.
 
 Execution state is layered:
 
@@ -118,9 +118,8 @@ The replacement should converge toward:
 
 - one recognizable, skill-first Fungen Operator entry point;
 - one concise shared operating contract;
-- **Phase 1:** reliable operation of fixed analyses through existing runner/workflow paths;
-- a benchmark trust gate before composition is enabled;
-- **Phase 2:** composition of existing `.smk` mini-protocols through declared inputs/outputs, initially with scientist approval of the composed graph;
+- direct use of the existing `.smk` mini-protocol infrastructure for both fixed and composed analyses;
+- composition by selecting and connecting maintained mini-protocols through their existing inputs/outputs and configuration conventions, not by building a new composition framework;
 - task/domain references or capabilities loaded only when relevant;
 - preservation of useful scientific helpers and conventions;
 - explicit ownership of runtime and scheduler facts;
