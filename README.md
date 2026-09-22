@@ -1,67 +1,132 @@
 # fungen-operator
 
-Development home for a replacement functional-genomics operator skill or plugin. The existing COSI/xQTL skills and their history are retained as inputs to its design.
+**Fungen Operator is an experimental reliability layer for coding agents operating established functional-genomics workflows.**
 
-Start with the [Fungen Operator development brief](docs/fungen_operator_development_brief.md) for the replacement objective, capability coverage, proposed behavior, open decisions, acceptance cases, and migration sequence. The replacement has not been implemented by this documentation work.
+It is not a new workflow engine and not an autonomous scientist. The intended operator composes existing scientific mini-protocols, runs them through the project's native execution path, recovers from operational failures, and reaches the authorized endpoint without silently changing the scientific analysis.
 
-This repository incorporates the original `hsun3163/runner-skills` Git history and refreshes its skill files from the local installation on 2026-09-20. The original repository remains available.
+> **Maximum initiative inside the delegated scientific and operational contract; minimum invention outside it.**
 
-## Existing skill baseline
+That is the guiding principle for the replacement.
 
-All locally installed `cosi-*` and `xqtl-*` skills are included, along with the common runner and workflow-support skills. Each folder contains its original instructions and available templates, references, scripts, and agent metadata.
+## Current status
 
-- [debug-pipeline](skills/debug-pipeline/SKILL.md)
-- [snakemake-sos-parser](skills/snakemake-sos-parser/SKILL.md)
-- [cosi-locus-case-study](skills/cosi-locus-case-study/SKILL.md)
-- [cosi-locus-zoom](skills/cosi-locus-zoom/SKILL.md)
-- [cosi-notebook](skills/cosi-notebook/SKILL.md)
-- [cosi-run](skills/cosi-run/SKILL.md)
-- [cosi-runner](skills/cosi-runner/SKILL.md)
-- [cosi-sketch-ld](skills/cosi-sketch-ld/SKILL.md)
-- [cosi-weight-scan](skills/cosi-weight-scan/SKILL.md)
-- [cosi-workflow-edit](skills/cosi-workflow-edit/SKILL.md)
-- [human-runner](skills/human-runner/SKILL.md)
-- [intact-gene-query](skills/intact-gene-query/SKILL.md)
-- [lsf-queue-move](skills/lsf-queue-move/SKILL.md)
-- [record-handoff](skills/record-handoff/SKILL.md)
-- [sos-status-sampler](skills/sos-status-sampler/SKILL.md)
-- [sumstat-munger](skills/sumstat-munger/SKILL.md)
-- [todoist-task-completion](skills/todoist-task-completion/SKILL.md)
-- [xqtl-runner](skills/xqtl-runner/SKILL.md)
-- [xqtl-snakemake-analysis](skills/xqtl-snakemake-analysis/SKILL.md)
+As of 2026-09-22, this repository is a **development and evidence repository**.
 
-## Earlier attempts and reviews
+The accumulated material is substantial, but the replacement operator has not yet been implemented or validated. The repository currently contains:
 
-These files preserve earlier approaches and critiques, including attempts the owner describes as unsuccessful at taming agent behavior. Inclusion does not establish that every archived skill failed, and the reviews are historical assessments rather than newly reproduced evaluations.
+- 19 imported skill entrypoints with domain procedures, helpers, templates, and site/runtime knowledge;
+- historical attempts and retired approaches under `archive/`;
+- an attributed incident/evidence packet;
+- multiple analyses of recurring agent failures and user corrections;
+- a detailed replacement-development brief;
+- the new canonical operating model and research/evaluation basis.
 
-- [reproducible-project-work](archive/reproducible-project-work/SKILL.md): earlier general reproducibility rules, references, and artifact templates.
-- [human-runner backup](archive/human-runner/SKILL.md.orig) and [legacy references](archive/human-runner/archive/legacy-references/): retained earlier text and supporting material.
-- [xqtl-route3-analysis](archive/xqtl-route3-analysis-20260821/SKILL.md): retired Route3 approach, including both original and retired-active references and scripts.
-- [snakemake-lsf-triage](archive/snakemake-lsf-triage/SKILL.md): earlier memory-maintained debugging guidance.
-- [reproducibility reviews](archive/reproducibility-reviews/): retained audit prompt and critical reviews, including a proposed replacement embedded in `latest-response.md`.
+The current skill collection contains overlapping and sometimes conflicting procedures. Do not interpret the whole `skills/` directory as one combined instruction set.
 
-## Development notes and evidence
+## Start here
 
-Read the [development brief](docs/fungen_operator_development_brief.md) first. It organizes the following sources into guidance for a future replacement; these notes are not an additional active instruction set.
+1. **[Operating model](docs/operator_model.md)** — the canonical current conceptual model: what the operator is, its positive action contract, ownership boundaries, state model, parsimony principle, and evaluation model.
+2. **[Skill baseline and migration map](skills/README.md)** — what capabilities exist in the current collection and how they should be treated during consolidation.
+3. **[Development brief](docs/fungen_operator_development_brief.md)** — detailed requirements, migration questions, acceptance cases, and implementation sequence.
+4. **[Research basis](docs/research_basis.md)** — how the project's observed problems map to published work on compositional workflows, stateful tool use, rule-constrained agents, trajectory evaluation, scientific agents, and agent complexity.
 
-| Source | Role |
-|---|---|
-| [Historical evidence extraction](docs/historical_evidence_extraction_20260920.md) | Attributed incidents, user feedback, skill changes, and evidence gaps. |
-| [Failure-mode analysis](docs/failure_mode_insights_20260920.md) | Interpretations and competing hypotheses from that history. |
-| [Session insights analysis](docs/session_insights_analysis_20260922.md) | The 60-day report, verified report corrections, and proposed operator priorities. |
+Only then descend into the evidence corpus when a design decision needs traceability.
 
-The brief separates observed evidence from proposed requirements and unresolved design choices. Packaging as a skill or plugin remains open.
+## Operating model in one page
 
-## Use and interpretation
+The operator has six legitimate moves:
 
-The instructions below describe the existing skill baseline. Future migration is planned in the development brief; no legacy skill has been retired or replaced by these notes.
+```text
+select -> compose -> execute -> recover -> verify -> report/stop
+```
 
-Copy selected folders from `skills/` into your agent's skill directory, retaining their supporting files. Apply `human-runner` before a domain runner. Archived files are retained for study and comparison; do not install the whole archive as a combined instruction set.
+The scientific task and established project own the method and workflow semantics. The operator owns the reasoning needed to carry out that authorized operation.
 
-The collection preserves different generations of operating policy. Their instructions can conflict: for example, `xqtl-runner` requires an exact-graph dry-run, while `cosi-runner` forbids adding a dry-run stage. Select the skill appropriate to the task and follow the applicable instruction hierarchy rather than combining all rules indiscriminately.
+The intended model is **composition, not reconstruction**. Snakemake/SoS workflows, notebooks, scripts, and maintained helpers are building blocks. New wrappers, controllers, validators, environments, or execution paths must demonstrate that they fill a real gap and reduce net operational complexity.
 
-These are site-specific Minerva skills. Paths, environments, queue settings, project references, and historical examples are preserved. Adapt copied notebook templates to the intended run before execution; never execute the bundled templates directly. Analysis datasets and external workflow implementations are not bundled.
+Execution state is layered:
+
+```text
+source -> configuration -> materialized task/command -> scheduler state -> scientific product
+```
+
+A change to one layer does not automatically change later layers. This is central to recovery.
+
+Completion is defined by the requested scientific endpoint and actual terminal products or explicitly valid no-result states—not merely by submission, a controller exit, a marker file, or an empty queue.
+
+## Why this exists
+
+The historical record repeatedly shows a characteristic failure pattern: an agent asked to operate an existing workflow starts solving a different problem.
+
+Examples include:
+
+- building alternative wrappers/controllers instead of using the shared workflow;
+- adding assurance machinery that becomes another operational dependency;
+- rebuilding a supplied runtime;
+- changing scientific semantics to resolve an execution mismatch;
+- stopping at an intermediate checkpoint instead of the requested endpoint;
+- expanding the scope of the task;
+- fixing source while leaving already-materialized execution state stale;
+- applying a sensible resource convention at the wrong level;
+- spending attention on redundant inspection rather than the requested decision;
+- damaging consequential configuration while editing the operational record.
+
+The repository's design question is therefore not simply how to make an agent "more autonomous" or "more constrained." The target is **persistence within delegated authority**.
+
+## Repository map
+
+```text
+README.md                         this entry point
+docs/
+  operator_model.md              canonical conceptual model
+  research_basis.md              external research/evaluation grounding
+  fungen_operator_development_brief.md
+                                 detailed replacement engineering brief
+  historical_evidence_extraction_20260920.md
+                                 primary retained TASK/EVENT/FEEDBACK evidence
+  failure_mode_insights_20260920.md
+                                 interpretation of historical failure patterns
+  session_insights_analysis_20260922.md
+                                 separate session-insights run and corrections
+  insights_review_20260922.md     additional insights-derived development review
+  source-manifest.tsv             provenance for imported files
+skills/
+  README.md                       capability and migration map
+  */SKILL.md                      imported operating/domain skill baseline
+archive/                          prior approaches, reviews, and retired policy
+```
+
+Nothing in the renovation requires deleting the historical material. The goal is to keep evidence rich while making the runtime/product concept small.
+
+## Evidence discipline
+
+The documents play different roles:
+
+- **historical evidence** records attributed incidents and uncertainty;
+- **failure analyses** infer recurring patterns and competing mechanisms;
+- **development documents** convert those observations into candidate requirements;
+- **current skills** are capability/policy sources, not proof that their rules were active during historical incidents;
+- **published research** supplies vocabulary and evaluation precedent, not product requirements by itself.
+
+A later rule does not prove what caused an earlier incident. Automated session labels are useful for finding cases, not for estimating failure rates without checking the underlying evidence.
+
+## Development direction
+
+The replacement should converge toward:
+
+- one recognizable Fungen Operator entry point;
+- one concise shared operating contract;
+- task/domain references or capabilities loaded only when relevant;
+- preservation of useful scientific helpers and conventions;
+- explicit ownership of runtime and scheduler facts;
+- representative synthetic/public-data acceptance cases;
+- repeated evaluation of endpoint completion **and** contract adherence;
+- staged retirement of overlapping legacy discovery routes only after capability coverage is accounted for.
+
+Packaging as a single skill versus a plugin remains an implementation decision. Packaging should follow the operating model rather than drive it.
 
 ## Provenance
 
-[Source manifest](docs/source-manifest.tsv) records each imported file's original location relative to the source user's home directory and SHA-256 digest. Imported files are preserved byte-for-byte. Generated caches are excluded. Source paths describe provenance and are not portable runtime dependencies supplied by this repository.
+This repository incorporates the original `hsun3163/runner-skills` history and a refreshed local skill snapshot. The [source manifest](docs/source-manifest.tsv) records imported source locations and hashes. Imported snapshots are historical provenance; subsequent edited files require their own revision identity.
+
+Analysis datasets and the external workflow implementations themselves are not bundled here.
