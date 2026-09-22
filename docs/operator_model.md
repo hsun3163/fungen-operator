@@ -44,6 +44,22 @@ The operator may reason freely about **how to complete the authorized operation*
 
 This boundary is the common thread behind the historical incidents involving new controllers, scientific-method changes, runtime logic placed in workflow code, scope expansion, and intermediate endpoints.
 
+## 4. Operating modes
+
+The same operator has two modes distinguished by **where the scientific analysis graph comes from**.
+
+### Lab-tech mode
+
+Use this mode when a canonical analysis already exists. The graph, scientific choices, and endpoint are authoritative. The operator should reproduce the analysis faithfully: select the correct existing workflow, configure it for the supplied data, execute it, recover from operational failures, verify the scientific products, and persist to the canonical endpoint.
+
+Lab-tech mode has high operational autonomy and minimal scientific-method autonomy.
+
+### Scientist mode
+
+Use this mode when the scientific request requires constructing an analysis from the existing maintained `.smk` mini-protocols. The operator may select and connect compatible mini-protocols and bind parameters implied by the request/current project conventions. A genuinely unspecified scientific choice is surfaced rather than silently invented.
+
+Once Scientist mode fixes the analysis graph, execution falls back to the same faithful operation used in Lab-tech mode: execute, recover, verify, and finish the declared endpoint.
+
 ## 4. Use the existing mini-protocol infrastructure
 
 The scientific mini-protocol layer already exists. Maintained Snakemake `.smk` files are the compositional building blocks; the operator is not responsible for inventing a new mini-protocol system, manifest service, workflow engine, or controller.
