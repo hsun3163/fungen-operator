@@ -2,6 +2,8 @@
 
 Date: 2026-09-22. Status: analysis and proposed priorities; no operating policy changes.
 
+Development context: the intended outcome is a new Fungen Operator skill or plugin that replaces the old collection. This analysis supplies evidence and candidate requirements for the [development brief](fungen_operator_development_brief.md); it is not a standalone plan to keep adding rules to the old skills. The brief now provides the development sequence and acceptance cases.
+
 The next iteration of `fungen-operator` should reduce the user corrections needed to complete authorized scientific work through the established workflow. The strongest supported priorities are clearer skill selection, faithful execution, recovery that accounts for submitted task state, and evidence-based completion reporting.
 
 This analysis complements the [historical evidence packet](historical_evidence_extraction_20260920.md) and [failure-mode analysis](failure_mode_insights_20260920.md). It adds findings from a separate session-insights run and identifies errors in that report. Historical incidents are not current workflow-status claims, and proposed changes below have not been applied to the skills.

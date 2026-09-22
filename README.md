@@ -1,10 +1,12 @@
 # fungen-operator
 
-Functional-genomics operator skills and the retained history of attempts to make agent work reproducible, scoped, and verifiable.
+Development home for a replacement functional-genomics operator skill or plugin. The existing COSI/xQTL skills and their history are retained as inputs to its design.
+
+Start with the [Fungen Operator development brief](docs/fungen_operator_development_brief.md) for the replacement objective, capability coverage, proposed behavior, open decisions, acceptance cases, and migration sequence. The replacement has not been implemented by this documentation work.
 
 This repository incorporates the original `hsun3163/runner-skills` Git history and refreshes its skill files from the local installation on 2026-09-20. The original repository remains available.
 
-## Current skill collection
+## Existing skill baseline
 
 All locally installed `cosi-*` and `xqtl-*` skills are included, along with the common runner and workflow-support skills. Each folder contains its original instructions and available templates, references, scripts, and agent metadata.
 
@@ -38,11 +40,21 @@ These files preserve earlier approaches and critiques, including attempts the ow
 - [snakemake-lsf-triage](archive/snakemake-lsf-triage/SKILL.md): earlier memory-maintained debugging guidance.
 - [reproducibility reviews](archive/reproducibility-reviews/): retained audit prompt and critical reviews, including a proposed replacement embedded in `latest-response.md`.
 
-## Session insights analysis
+## Development notes and evidence
 
-The [2026-09-22 session insights analysis](docs/session_insights_analysis_20260922.md) interprets the 60-day, 100-thread-limit report for this project. It records verified report errors, overlapping COSI procedures, and proposed incident-based evaluations. Its recommendations are analysis, not changes to the active operating policy.
+Read the [development brief](docs/fungen_operator_development_brief.md) first. It organizes the following sources into guidance for a future replacement; these notes are not an additional active instruction set.
+
+| Source | Role |
+|---|---|
+| [Historical evidence extraction](docs/historical_evidence_extraction_20260920.md) | Attributed incidents, user feedback, skill changes, and evidence gaps. |
+| [Failure-mode analysis](docs/failure_mode_insights_20260920.md) | Interpretations and competing hypotheses from that history. |
+| [Session insights analysis](docs/session_insights_analysis_20260922.md) | The 60-day report, verified report corrections, and proposed operator priorities. |
+
+The brief separates observed evidence from proposed requirements and unresolved design choices. Packaging as a skill or plugin remains open.
 
 ## Use and interpretation
+
+The instructions below describe the existing skill baseline. Future migration is planned in the development brief; no legacy skill has been retired or replaced by these notes.
 
 Copy selected folders from `skills/` into your agent's skill directory, retaining their supporting files. Apply `human-runner` before a domain runner. Archived files are retained for study and comparison; do not install the whole archive as a combined instruction set.
 
