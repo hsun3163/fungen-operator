@@ -679,7 +679,7 @@ For every simulation:
 4. verify the fixture from a clean reset;
 5. record the diagnostic fields in Section 12.9.
 
-The MWS pack is the **Phase-1 trust gate input**, not the final benchmark. Composition work may begin only after the fixed-operation implementation has passed the pack repeatedly and the reference/base/legacy comparisons show that the tasks and graders behave sensibly. Do not choose a permanent numerical release threshold before those baselines establish empirical difficulty and variance.
+The MWS pack is an early validation set for operator behavior, not a gate on whether composition infrastructure exists or may be used. Existing `.smk` mini-protocol composition is part of the environment under test. Use the MWS results to decide how much autonomous composition/recovery behavior to trust, and do not choose a permanent numerical release threshold before reference/base/legacy baselines establish empirical difficulty and variance.
 
 ## 18. First benchmark release
 
