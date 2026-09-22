@@ -38,6 +38,10 @@ These files preserve earlier approaches and critiques, including attempts the ow
 - [snakemake-lsf-triage](archive/snakemake-lsf-triage/SKILL.md): earlier memory-maintained debugging guidance.
 - [reproducibility reviews](archive/reproducibility-reviews/): retained audit prompt and critical reviews, including a proposed replacement embedded in `latest-response.md`.
 
+## Session insights analysis
+
+The [2026-09-22 session insights analysis](docs/session_insights_analysis_20260922.md) interprets the 60-day, 100-thread-limit report for this project. It records verified report errors, overlapping COSI procedures, and proposed incident-based evaluations. Its recommendations are analysis, not changes to the active operating policy.
+
 ## Use and interpretation
 
 Copy selected folders from `skills/` into your agent's skill directory, retaining their supporting files. Apply `human-runner` before a domain runner. Archived files are retained for study and comparison; do not install the whole archive as a combined instruction set.
