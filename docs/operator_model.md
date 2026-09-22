@@ -133,7 +133,7 @@ The minimum questions are:
 
 A dangerous contract violation should remain visible rather than being averaged away inside a single composite score.
 
-See [research_basis.md](research_basis.md) for the published work that motivates this evaluation vocabulary and [fungen_operator_development_brief.md](fungen_operator_development_brief.md) for the detailed migration and acceptance cases.
+See [benchmark.md](benchmark.md) for the canonical benchmark specification, [research_basis.md](research_basis.md) for the published work that motivates the evaluation vocabulary, and [fungen_operator_development_brief.md](fungen_operator_development_brief.md) for the detailed migration and case derivation.
 
 ## 10. Current implementation status
 
@@ -149,6 +149,7 @@ As of 2026-09-22:
 The repository should therefore be read in this order:
 
 1. this operating model;
-2. [skills/README.md](../skills/README.md) for the capability map;
-3. [fungen_operator_development_brief.md](fungen_operator_development_brief.md) for detailed engineering decisions;
-4. historical evidence only when a design choice needs to be traced back to an incident.
+2. [benchmark.md](benchmark.md) for how reliability is evaluated;
+3. [skills/README.md](../skills/README.md) for the capability map;
+4. [fungen_operator_development_brief.md](fungen_operator_development_brief.md) for detailed engineering decisions;
+5. historical evidence only when a design choice needs to be traced back to an incident.
