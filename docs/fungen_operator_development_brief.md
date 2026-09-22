@@ -101,6 +101,8 @@ No decision in this table is resolved by the current documentation task.
 
 ## 7. Acceptance cases for the future implementation
 
+> **Benchmark role:** these cases record the historical derivation of the evaluation needs. The canonical benchmark structure, metrics, fixture model, minimum working simulations, and release gates are defined in [benchmark.md](benchmark.md).
+
 These are proposed evaluations, not tests already run. Use retained or small synthetic inputs and the same request/evidence when comparing designs. The current task creates no fixtures, test harness, jobs, or implementation.
 
 | Case | Request and setup | Expected observable behavior | Source / requirement |
