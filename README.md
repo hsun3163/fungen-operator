@@ -25,10 +25,11 @@ The current skill collection contains overlapping and sometimes conflicting proc
 
 ## Start here
 
-1. **[Operating model](docs/operator_model.md)** — the canonical current conceptual model: what the operator is, its positive action contract, ownership boundaries, state model, parsimony principle, and evaluation model.
-2. **[Skill baseline and migration map](skills/README.md)** — what capabilities exist in the current collection and how they should be treated during consolidation.
-3. **[Development brief](docs/fungen_operator_development_brief.md)** — detailed requirements, migration questions, acceptance cases, and implementation sequence.
-4. **[Research basis](docs/research_basis.md)** — how the project's observed problems map to published work on compositional workflows, stateful tool use, rule-constrained agents, trajectory evaluation, scientific agents, and agent complexity.
+1. **[Operating model](docs/operator_model.md)** — the canonical current conceptual model: what the operator is, its positive action contract, ownership boundaries, state model, and parsimony principle.
+2. **[Benchmark](docs/benchmark.md)** — the canonical evaluation contract: synthetic minimum simulations, benchmark cases, ground truth, metrics, repeated reliability, and release gates.
+3. **[Skill baseline and migration map](skills/README.md)** — what capabilities exist in the current collection and how they should be treated during consolidation.
+4. **[Development brief](docs/fungen_operator_development_brief.md)** — detailed requirements, migration questions, case derivation, and implementation sequence.
+5. **[Research basis](docs/research_basis.md)** — how the project's observed problems map to published work on compositional workflows, stateful tool use, rule-constrained agents, trajectory evaluation, scientific agents, and agent complexity.
 
 Only then descend into the evidence corpus when a design decision needs traceability.
 
@@ -79,6 +80,7 @@ The repository's design question is therefore not simply how to make an agent "m
 README.md                         this entry point
 docs/
   operator_model.md              canonical conceptual model
+  benchmark.md                   canonical benchmark specification
   research_basis.md              external research/evaluation grounding
   fungen_operator_development_brief.md
                                  detailed replacement engineering brief
