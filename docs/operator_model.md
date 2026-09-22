@@ -20,7 +20,7 @@ That principle resolves the tension visible throughout the repository history: t
 The operator has six legitimate moves.
 
 1. **Select** — identify the applicable project, checkout, runtime, task family, scientific scope, and requested endpoint.
-2. **Compose** — after the composition trust gate, connect existing mini-protocols through their declared inputs and outputs. For the new composition layer, maintained Snakemake `.smk` files are the primary interface; their notebooks and R/Python scripts remain implementation details, not invitations to create a second orchestration layer.
+2. **Compose** — connect the project's existing mini-protocols through their maintained Snakemake `.smk` interfaces and existing input/output/configuration conventions. Their notebooks and R/Python scripts remain implementation details, not invitations to create a second orchestration layer.
 3. **Execute** — use the project's native command path, scheduler profile, and runtime ownership.
 4. **Recover** — identify the smallest confirmed operational defect, preserve valid work, repair within scope, and resume the original endpoint.
 5. **Verify** — inspect the actual execution state and declared scientific products, not only outer markers, submission receipts, or plausible-looking logs.
@@ -44,44 +44,23 @@ The operator may reason freely about **how to complete the authorized operation*
 
 This boundary is the common thread behind the historical incidents involving new controllers, scientific-method changes, runtime logic placed in workflow code, scope expansion, and intermediate endpoints.
 
-## 4. Staged product model: operate first, compose second
+## 4. Use the existing mini-protocol infrastructure
 
-The product should earn composition rather than start by redesigning how workflows are assembled.
+The scientific mini-protocol layer already exists. Maintained Snakemake `.smk` files are the compositional building blocks; the operator is not responsible for inventing a new mini-protocol system, manifest service, workflow engine, or controller.
 
-### Phase 1 — operate fixed analyses
+The operator should:
 
-The first implementation target is one recognizable operator entry point that selects and uses the established runner/workflow path for an already-defined analysis. Existing human/xQTL/COSI runners are implementation and domain sources; they should not be concatenated into one giant prompt or rewritten merely for uniformity.
+- identify the existing `.smk` units that implement the requested scientific stages;
+- read their current inputs, outputs, configuration fields, endpoints, and compatibility assumptions from the maintained workflow itself;
+- connect compatible mini-protocols using the project's existing Snakemake/configuration mechanisms;
+- surface a genuinely unspecified scientific choice rather than inventing a bridge;
+- once the composition is defined, execute it through the native runtime/scheduler path and persist through recovery until the authorized endpoint is reached.
 
-Phase 1 must demonstrate that the operator can:
+Notebooks and R/Python scripts invoked by a mini-protocol remain implementation details. The operator should not bypass the `.smk` boundary to opportunistically rewire lower-level code.
 
-- select the correct project/runtime/endpoint;
-- execute through the native workflow path;
-- recover from ordinary operational failures without changing protected scientific semantics;
-- stay coherent with materialized execution state;
-- reach and verify the authorized endpoint with minimal extra machinery.
+A new wrapper, controller, validator, environment, helper, or metadata layer is justified only when a concrete requested analysis cannot be expressed through the maintained infrastructure and the missing capability is demonstrated. Even then, the change must preserve scientific semantics and reduce net operational complexity.
 
-### Trust gate
-
-Composition remains disabled until the fixed-operation implementation passes the minimum working simulations and repeated regression checks defined in [benchmark.md](benchmark.md). The exact numerical release threshold should be set only after reference, base-agent, and legacy baselines establish task difficulty and variance.
-
-### Phase 2 — compose maintained `.smk` mini-protocols
-
-For the new composition layer, a mini-protocol is primarily a maintained Snakemake `.smk` unit with declared inputs, outputs, endpoint, compatibility assumptions, and parameters classified as scientific or operational. Notebooks and R/Python scripts invoked by the `.smk` file remain implementation details rather than separate building blocks for the operator to rewire opportunistically.
-
-Initially, the operator should present the proposed mini-protocol graph and the scientific parameter bindings for scientist approval before executing it. Composition must not hide new computation or glue outside the declared mini-protocol contracts.
-
-Once the composition is accepted, the operator returns to the ordinary contract: execute, recover, verify, and finish the declared endpoint. It should not preserve provisional composition machinery when the native graph already expresses the analysis.
-
-A new wrapper, controller, validator, environment, or helper is justified only when all of the following are true:
-
-- the requested operation/composition cannot be expressed through an existing maintained path;
-- the missing capability is demonstrated rather than assumed;
-- the new artifact has a clear owner and does not duplicate workflow state or recovery logic;
-- it does not redefine scientific semantics;
-- it reduces, rather than increases, the total operational surface that must be understood and maintained.
-
-This is the repository's practical interpretation of parsimony.
-
+Benchmarking tests whether the operator uses this existing infrastructure correctly; it is not a prerequisite for the infrastructure itself to exist.
 ## 5. State is layered and material
 
 A scientific run is not represented by one mutable code checkout. At minimum, distinguish:
@@ -165,8 +144,8 @@ As of 2026-09-22:
 - 19 imported skill entrypoints remain available as capability and design sources;
 - overlapping operating procedures still exist in the legacy collection;
 - a replacement operator has **not** yet been implemented or validated;
-- the next implementation target is a single skill-first operator entry point that reliably operates fixed analyses through the existing runner/workflow paths;
-- composition of maintained `.smk` mini-protocols is a later phase, gated by the benchmark and initially subject to scientist approval of the composed graph;
+- the next implementation target is a single skill-first operator entry point that uses the existing runner/workflow and `.smk` mini-protocol infrastructure for both fixed and composed analyses;
+- the benchmark should test composition, persistence, recovery, and contract adherence without creating a replacement composition framework;
 - legacy procedures should be retired only after their capabilities have a deliberate migration disposition and representative acceptance cases pass.
 
 The repository should therefore be read in this order:
