@@ -654,6 +654,30 @@ Before a benchmark version is used for model/operator comparison:
 
 The benchmark version, task set, graders, and reference solutions are frozen before comparative evaluation.
 
+### Signal-bearing scientific core
+
+The MWE should prove more than workflow completion. Its base scientific fixture should contain a small, deterministic, **planted recoverable signal**.
+
+Use the existing sketch-genotype mechanism to generate or provide the genotype matrix. Choose known causal variant(s), then simulate phenotype or molecular-trait values from those genotypes plus noise with a declared target variance explained. Store the seed and causal ground truth.
+
+A minimal starting model is:
+
+~~~text
+y = G_causal * beta + epsilon
+~~~
+
+with the genetic component scaled to a target variance explained and the residual noise scaled accordingly. The target should be calibrated so the canonical pipeline recovers the intended signal reproducibly without making the task completely trivial.
+
+Where supported by the actual canonical mini-protocols, machine-checkable scientific success can include:
+
+- association detects the planted locus with the expected effect direction;
+- fine-mapping includes the planted causal variant in the returned credible set;
+- a multi-signal extension separates two planted low-LD signals;
+- a shared-signal/colocalization extension distinguishes shared causal signal from a distinct-signal control;
+- a null control does not manufacture a signal.
+
+The benchmark should reuse this same scientific core across operational failure scenarios whenever possible. Failure-mode coverage should usually come from altered workflow/configuration/materialized/scheduler/product state, not from inventing a new biological dataset for every case.
+
 ## 17. Minimum working simulations
 
 Before building the full v0.1 suite, implement a **minimum working simulation pack** that proves the harness, graders, and Phase-1 operator can be exercised end to end with no controlled-access biological data.
