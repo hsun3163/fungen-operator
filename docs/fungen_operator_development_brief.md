@@ -1,5 +1,7 @@
 # Fungen Operator replacement: development brief
 
+> **Document role:** detailed engineering and migration brief. For the canonical current framing, guiding principle, ownership boundaries, and state model, start with [operator_model.md](operator_model.md). This document retains the detailed requirements, migration coverage, open decisions, and acceptance cases.
+
 Updated: 2026-09-22. Status: development guidance only. No replacement skill or plugin has been implemented, installed, or validated by this work.
 
 ## 1. Objective and development boundary

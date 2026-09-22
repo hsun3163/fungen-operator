@@ -1,4 +1,6 @@
-# fungen-operator replacement: development brief
+# Insights-derived replacement review
+
+> **Document role:** retained insights-analysis snapshot and detailed design input, not the canonical current operator model. Start with [operator_model.md](operator_model.md) for the current framing and use this document when tracing the specific insights-derived requirements and evidence register.
 
 Updated: 2026-09-22. Status: development guidance; replacement not implemented.
 
