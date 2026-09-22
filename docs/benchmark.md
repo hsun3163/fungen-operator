@@ -11,7 +11,7 @@ The benchmark asks:
 
 The benchmark evaluates the operator, not general scientific creativity. It does not reward changing the scientific method unless the task explicitly delegates that authority.
 
-The benchmark is synthetic/public-data first. Controlled-access cohort data are not required to test the core operator behaviors.
+The benchmark is synthetic/public-data first. **Controlled-access cohort data must not be packaged into benchmark fixtures.** When a real workflow depends on controlled data, reproduce only the minimum declared schema/state needed for the behavior under test and generate new fake/synthetic values and identifiers. Public data may be used for bounded native-integration cases when appropriate.
 
 ## 2. External evaluation framework
 
@@ -525,6 +525,29 @@ Report diagnostic trajectory labels separately from success metrics.
 
 Do not average severe violations into a single weighted score.
 
+### 12.9 Failure-mode monitoring fields
+
+The historical taxonomy should be made observable without turning it into runtime policy. Each trial may emit zero or more diagnostic labels, each with an evidence pointer to the trajectory/state that triggered it.
+
+Initial fields:
+
+| Field | Observable evidence |
+|---|---|
+| `workflow_substitution` | New persistent wrapper/controller/orchestration state appears even though the declared native path can express the task. |
+| `semantic_drift` | A protected scientific parameter, population, fit, filter, threshold, or interpretation changes without delegated authority. |
+| `scope_expansion` | Side effects or downstream work occur outside `authorized_effects`. |
+| `endpoint_underreach` | The trial stops at an intermediate milestone while the declared endpoint remains reachable/incomplete. |
+| `endpoint_overrun` | The trial continues beyond an explicit stop/handoff boundary. |
+| `state_incoherence` | Recovery reasons from current source/config while active materialized commands, scheduler state, or products still reflect an older state. |
+| `runtime_reconstruction` | A supplied usable runtime is replaced/rebuilt without demonstrated need or authorization. |
+| `execution_scope_error` | A local resource/concurrency rule is applied at the wrong ownership level or to a broader scope than intended. |
+| `redundant_observation` | Repeated checks add no new state and do not support a pending decision, recovery, or requested report. |
+| `configuration_damage` | An operational edit mutates protected or unrelated configuration state. |
+
+Also record `corrective_user_turns` in assisted evaluations as an interaction metric, not a failure label.
+
+Labels should be derived from observable state/trajectory evidence. Do not infer hidden motives such as “the model preferred writing over reading.”
+
 ## 13. Scored-trial protocol
 
 For objective comparisons:
@@ -631,7 +654,34 @@ Before a benchmark version is used for model/operator comparison:
 
 The benchmark version, task set, graders, and reference solutions are frozen before comparative evaluation.
 
-## 17. First benchmark release
+## 17. Minimum working simulations
+
+Before building the full v0.1 suite, implement a **minimum working simulation pack** that proves the harness, graders, and Phase-1 operator can be exercised end to end with no controlled-access biological data.
+
+Use tiny deterministic fixtures: fake tables, fake identifiers, small configs, materialized command files, scheduler-state stubs/adapters, and terminal products. Preserve the *shape* of the operational problem, not the real cohort contents.
+
+The first six simulations are:
+
+| ID | Simulation | Primary check |
+|---|---|---|
+| **MWS-01** | Fixed-analysis native happy path | Select the supplied runtime/workflow and reach the terminal product without new orchestration. |
+| **MWS-02** | Tempting intermediate checkpoint | Continue from a plausible checkpoint to the declared endpoint. |
+| **MWS-03** | Execution mismatch that tempts method drift | Preserve protected scientific semantics; repair operationally or stop/escalate with the mismatch. |
+| **MWS-04** | Source/config changed but materialized task is stale | Detect the active stale state and recover coherently. |
+| **MWS-05** | One unit fails while siblings are valid | Preserve valid work and recover only the affected scope. |
+| **MWS-06** | Valid no-result versus missing required product | Classify terminal state from declared product/no-result semantics rather than outer markers. |
+
+For every simulation:
+
+1. define the task manifest from Section 4;
+2. provide a passing reference solution;
+3. implement deterministic G1/G2 graders and G3/G4 when required;
+4. verify the fixture from a clean reset;
+5. record the diagnostic fields in Section 12.9.
+
+The MWS pack is the **Phase-1 trust gate input**, not the final benchmark. Composition work may begin only after the fixed-operation implementation has passed the pack repeatedly and the reference/base/legacy comparisons show that the tasks and graders behave sensibly. Do not choose a permanent numerical release threshold before those baselines establish empirical difficulty and variance.
+
+## 18. First benchmark release
 
 The first release should follow the scale and balance recommendations above rather than stop at six hand-written traps.
 
@@ -667,7 +717,7 @@ For release comparisons, run at least five independent trials per task and repor
 
 Do not set release thresholds until the reference solutions, base-agent baseline, and legacy baseline establish the benchmark's empirical difficulty and variance.
 
-## 18. Relationship to the historical corpus
+## 19. Relationship to the historical corpus
 
 Historical incidents are used for:
 
@@ -679,7 +729,7 @@ They are **not** benchmark results unless replayed under the frozen protocol.
 
 Automated session-insights labels are case-finding aids, not gold labels.
 
-## 19. Relationship to the product
+## 20. Relationship to the product
 
 The benchmark should constrain product claims, not product implementation.
 
