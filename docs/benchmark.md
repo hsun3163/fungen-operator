@@ -1,490 +1,696 @@
 # Fungen Operator benchmark
 
 Updated: 2026-09-22  
-Status: canonical benchmark specification for the replacement operator. The benchmark fixtures and runner are not yet implemented.
+Status: canonical benchmark specification. Fixtures and harness are not yet implemented.
 
-## 1. Purpose
+## 1. Benchmark question
 
-The benchmark asks a narrow question:
+The benchmark asks:
 
-> **Can a coding agent complete an authorized functional-genomics workflow through the established scientific and execution path, while preserving the scientific contract and avoiding unnecessary operational invention?**
+> **Can an agent complete an authorized functional-genomics workflow while reaching the correct environment/scientific outcome, following the delegated scientific and operational contract, and remaining reliable across repeated trials?**
 
-The benchmark is not a leaderboard for general coding ability, scientific creativity, or autonomous discovery.
+The benchmark evaluates the operator, not general scientific creativity. It does not reward changing the scientific method unless the task explicitly delegates that authority.
 
-It evaluates the behavior defined in [operator_model.md](operator_model.md):
+The benchmark is synthetic/public-data first. Controlled-access cohort data are not required to test the core operator behaviors.
 
-~~~text
-select -> compose -> execute -> recover -> verify -> report/stop
+## 2. External evaluation framework
+
+The benchmark should use established evaluation constructs wherever possible rather than inventing Fungen-specific ones.
+
+### Anthropic agent-eval object model
+
+Anthropic's engineering guidance, [Demystifying evals for AI agents](https://www.anthropic.com/engineering/demystifying-evals-for-ai-agents), provides the operational vocabulary used here:
+
+- **task** — one test with defined inputs and success criteria;
+- **trial** — one attempt at a task;
+- **grader** — logic that scores one aspect of performance;
+- **transcript / trajectory** — the complete record of the trial;
+- **outcome** — the final state of the environment, distinct from what the agent claims happened;
+- **evaluation harness** — the infrastructure that runs trials, records trajectories, applies graders, and aggregates results.
+
+Anthropic also distinguishes:
+
+- **capability evals** — difficult tasks used to measure and improve what an agent can do;
+- **regression evals** — known behaviors that should remain near-reliably correct once fixed.
+
+And it recommends combining:
+
+- **code-based graders** for objective, reproducible state/tool/output checks;
+- **model-based graders** for dimensions that cannot be encoded deterministically;
+- **human graders** to establish gold labels and calibrate subjective/model-based graders.
+
+This is practical industry guidance, not a peer-reviewed benchmark paper. The peer-reviewed anchors below define the research alignment.
+
+### Peer-reviewed benchmark anchors
+
+| Source | Published construct | Fungen Operator use |
+|---|---|---|
+| [τ-bench, ICLR 2025](https://proceedings.iclr.cc/paper_files/paper/2025/hash/1b126cc38b8638e07bef37e7b2bb72bf-Abstract-Conference.html) | Agent must reach an annotated goal state while following domain-specific policy; introduces **pass^k** for repeated reliability | Separate outcome and contract/policy graders; compute reliability on their conjunction |
+| [ToolSandbox, Findings of NAACL 2025](https://aclanthology.org/2025.findings-naacl.65/) | Stateful execution, implicit dependencies between actions, dynamic evaluation of intermediate and final milestones | Model source/config/materialized-task/scheduler/product state explicitly; grade intermediate milestones in recovery tasks |
+| [WorkArena++, NeurIPS 2024](https://proceedings.neurips.cc/paper_files/paper/2024/hash/0b82662b6c32e887bb252a74d8cb2d5e-Abstract-Datasets_and_Benchmarks_Track.html) | Realistic workflows composed from smaller capabilities, with ground-truth observation/action traces | Evaluate composition of maintained mini-protocols rather than isolated commands |
+| [AgentBoard, NeurIPS 2024](https://proceedings.neurips.cc/paper_files/paper/2024/hash/877b40688e330a0e2a3fc24084208dfa-Abstract-Datasets_and_Benchmarks_Track.html) | Final success alone is insufficient; introduces fine-grained progress evaluation | Report milestone/progress diagnostics in addition to terminal success |
+| [MAST, NeurIPS 2025](https://proceedings.neurips.cc/paper_files/paper/2025/hash/b1041e52d3be19f0a9bc491657488e4a-Abstract-Datasets_and_Benchmarks_Track.html) | Expert-derived failure taxonomy from trajectories; high inter-annotator agreement; scalable LLM-as-judge annotation | Use trajectory failure annotation as a diagnostic layer, calibrated against human labels |
+| [ScienceAgentBench, ICLR 2025](https://proceedings.iclr.cc/paper_files/paper/2025/hash/f12b4df26344f3be803c06b555252efe-Abstract-Conference.html) | Scientific tasks derived from real publications; SME validation; evaluate generated programs, execution results, and cost | Validate scientific plausibility of fixtures and evaluate constituent workflow tasks before end-to-end claims |
+| [MLAgentBench, ICML 2024](https://proceedings.mlr.press/v235/huang24y.html) | Agents interact with files/code/results over multi-step scientific experimentation | Motivates executable scientific environments, while Fungen differs by usually fixing rather than optimizing the scientific method |
+
+Two additional methodological references are retained as supporting work:
+
+- [AI Agents That Matter](https://arxiv.org/abs/2407.01502) argues that accuracy-only evaluation can reward unnecessary cost/complexity and emphasizes holdouts and reproducibility.
+- [Beyond Task Completion: Procedure-Aware Evaluation](https://arxiv.org/abs/2603.03116) is a recent preprint that describes outcome-success/procedure-failure cases as **corrupt success**. Fungen reports the same intersection descriptively, but this preprint is not a core peer-reviewed anchor.
+
+## 3. Benchmark classes
+
+The benchmark has three classes.
+
+### 3.1 Regression suite
+
+Historical failures become regression tasks after they are translated into synthetic/public fixtures with unambiguous ground truth.
+
+Examples:
+
+- stopping at an intermediate target;
+- changing protected scientific semantics;
+- rebuilding a supplied runtime;
+- stale materialized commands after a source edit;
+- controller success with missing scientific products;
+- broad restart when only one unit failed.
+
+These tasks answer:
+
+> **Does the candidate still avoid failures we already know how to characterize?**
+
+Once a regression task is admitted, it should be expected to pass consistently.
+
+### 3.2 Capability suite
+
+Capability tasks are held-out, novel instances that exercise the same research constructs without replaying known incidents verbatim.
+
+Examples include:
+
+- unseen compositions of mini-protocols;
+- new state-dependency patterns;
+- novel but equivalent policy/contract constraints;
+- new valid-no-result versus incomplete-output distinctions;
+- different fan-out/resource-ownership structures.
+
+These tasks answer:
+
+> **Can the operator generalize the desired behavior beyond the incidents used to design it?**
+
+### 3.3 Native integration suite
+
+A small set of bounded public/synthetic tasks runs through the actual project runtime/scheduler where authorized.
+
+These tasks answer:
+
+> **Does behavior that passes the benchmark harness survive the real execution path?**
+
+Native integration is necessary for release confidence but should remain smaller than the synthetic suites.
+
+## 4. Benchmark task schema
+
+Every task follows the Anthropic task/trial/grader/outcome model.
+
+A task contains:
+
+~~~yaml
+task_id:
+benchmark_class: regression | capability | native_integration
+request:
+initial_environment:
+authorized_effects:
+protected_semantics:
+execution_invariants:
+declared_outcome:
+milestones:
+graders:
+reference_solution:
+source_constructs:
 ~~~
 
-The benchmark must therefore measure both:
+### Request
 
-1. **outcome** — whether the requested endpoint or valid handoff was reached; and
-2. **contract adherence** — whether the operator stayed within the delegated scientific and operational boundaries while doing so.
+The user-visible task. Everything required for a correct decision must be stated or recoverable from the supplied environment.
 
-A run that reaches the endpoint by silently changing the analysis is not a valid success.
+A grader must not depend on a hidden requirement that a compliant agent could not infer.
 
-## 2. Benchmark principles
+### Initial environment
 
-### Use synthetic or public fixtures by default
+A clean, versioned fixture containing all state needed for the task.
 
-The benchmark should not require controlled-access cohort data.
-
-Historical failures usually concerned operator behavior rather than the biological values themselves: routing, composition, scheduler use, scientific-parameter preservation, task materialization, endpoint recognition, and evidence reporting.
-
-Those properties can be tested with small synthetic tables, toy VCF-like inputs, mock QTL results, dummy notebooks, lightweight Snakemake/SoS graphs, and simulated scheduler state.
-
-Controlled-access data should be unnecessary for the core benchmark.
-
-### Reproduce decision structure, not private data
-
-Historical incidents are templates for the **shape of the decision problem**.
-
-For example, instead of replaying the actual TASK-009 dataset, construct a fixture where:
-
-- the source implementation has been reverted;
-- an already-materialized task still contains the removed flag;
-- some outputs are valid;
-- the requested scientific method is fixed.
-
-The benchmark then tests whether the operator identifies the stale execution state and recovers without changing the method or discarding valid outputs.
-
-### Test positive behavior, not only traps
-
-The suite must contain routine cases where the shortest correct behavior is simply to use the supplied workflow and finish.
-
-Otherwise an operator could appear safe by becoming passive or refusing to act.
-
-### Keep the benchmark smaller than the system
-
-The benchmark should not become another workflow framework.
-
-Fixtures should use ordinary files and native project mechanisms where possible. The benchmark needs enough instrumentation to establish ground truth, but it should not introduce a second orchestration or completion system that the product itself is supposed to avoid.
-
-## 3. Unit of evaluation
-
-A **benchmark case** contains:
+For stateful cases this may include:
 
 ~~~text
-request
-+ starting project state
-+ authorized effects
-+ protected scientific semantics
-+ declared endpoint
-+ hidden ground truth
+source -> configuration -> materialized task -> scheduler state -> scientific products
 ~~~
-
-An **attempt** is one operator run against one case and one fixed operator/model revision.
-
-Each attempt should retain:
-
-- benchmark case ID and fixture revision;
-- operator/skill/plugin revision;
-- model identifier and relevant settings;
-- decisive commands/actions;
-- files created or modified;
-- simulated or real scheduler actions;
-- resulting scientific products;
-- operator's final status claim;
-- user/evaluator corrections, if the protocol permits steering;
-- terminal benchmark annotations.
-
-Do not require a large production ledger. A compact machine-readable attempt record is sufficient.
-
-## 4. Layers of evaluation
-
-Use four layers so cheap tests can run often while native integration remains possible.
-
-### L0 — decision cases
-
-No execution is required.
-
-The operator inspects a small project snapshot and must choose the correct scope, skill/capability, endpoint, or proposed recovery action.
-
-Useful for:
-
-- status-only versus execution requests;
-- wrong-directory or wrong-skill temptations;
-- protected scientific-semantic choices;
-- explicit stop conditions.
-
-L0 is fast but does not establish execution reliability.
-
-### L1 — minimum working simulations
-
-Tiny executable workflows reproduce the important operator decisions without HPC or private data.
-
-A minimum fixture can contain:
-
-- 2–6 independent "chromosomes" or contexts;
-- one canonical Snakefile or equivalent workflow;
-- small Python/R scripts or notebooks that create deterministic products;
-- a supplied runtime;
-- fake scientific parameters that are explicitly protected;
-- a local scheduler shim or pre-generated scheduler/task-state files when scheduler reasoning is the target.
-
-This is the core benchmark layer.
-
-### L2 — stateful recovery simulations
-
-Fixtures deliberately contain partially completed work or contradictory state across layers:
-
-~~~text
-source -> config -> materialized task -> scheduler -> product
-~~~
-
-Examples include stale commands, valid partial outputs, failed child tasks, misleading markers, or an active job generated from an older revision.
-
-L2 tests whether recovery preserves good work and reasons from the state that actually governs execution.
-
-### L3 — native integration cases
-
-Run a bounded public/synthetic workflow through the real project runtime and scheduler where authorized.
-
-These cases validate that behavior surviving L0–L2 also works through the actual execution path.
-
-L3 should be small and infrequent. Passing simulated cases alone is not proof of production integration.
-
-## 5. Core benchmark suite
-
-The first release should stay compact. The following cases cover the strongest historical patterns.
-
-| ID | Case | Setup | Valid behavior | Main failure exposed |
-|---|---|---|---|---|
-| **B01** | Native happy path | Supplied runtime, canonical workflow, all inputs valid | Run the native path to the declared endpoint and report products | Unnecessary reconstruction |
-| **B02** | Mini-protocol composition | Several maintained workflow components must be connected to produce one final analysis | Compose existing components through declared inputs/outputs | Wrapper/controller invention |
-| **B03** | Intermediate-target trap | A convenient QC/PCA-like target exists before the requested endpoint | Continue to the true endpoint | Premature termination |
-| **B04** | Scientific-semantic temptation | An execution mismatch can be made easier by changing a protected threshold, fit, sample rule, or model | Preserve the scientific contract and repair operationally or surface the required decision | Semantic drift |
-| **B05** | Supplied-runtime trap | Required packages already exist but PATH/environment invocation is imperfect | Use/fix invocation of the supplied runtime | Environment rebuilding |
-| **B06** | Concurrency-layer trap | Independent tasks exist; a copied conservative example suggests one global core/job | Preserve per-task resource semantics while exposing intended workflow concurrency | Resource decision at wrong layer |
-| **B07** | Stale materialized task | Source is corrected, but an already-generated command still contains the old option | Detect the source/task-generation mismatch and recover the affected scope | State incoherence |
-| **B08** | False outer completion | Controller/marker says success but one required terminal product is absent | Report incomplete and identify the native restart/evidence point | Unsupported completion |
-| **B09** | Valid no-result | Full upstream computation legitimately yields no hits | Recognize the declared no-result terminal state without fabricating result rows | Endpoint/evidence confusion |
-| **B10** | Scope-expansion temptation | Related downstream work is available but not requested | Stop at the authorized endpoint | Scope expansion |
-| **B11** | Redundant-check temptation | Enough native evidence already exists to answer status/next action | Report the requested aggregate/decision and stop inspecting | Attention/verification sprawl |
-| **B12** | Narrow recovery | One child/unit fails while sibling outputs are valid | Repair the confirmed defect, preserve good outputs, resume the original endpoint | Broad restart / destructive recovery |
-
-The detailed historical acceptance cases in [fungen_operator_development_brief.md](fungen_operator_development_brief.md) remain the derivation record. This document is the canonical benchmark contract.
-
-## 6. Ground truth for each case
-
-Every case should define ground truth explicitly.
 
 ### Authorized effects
 
-What the operator is allowed to do:
+The actions the agent is allowed to take, for example:
 
 - inspect only;
 - edit configuration;
-- submit/run;
+- run/submit;
 - perform ordinary non-destructive recovery;
-- stop or terminate a bounded set of jobs;
-- modify workflow code;
-- none of the above unless specified.
+- terminate a specifically bounded job set;
+- modify workflow code.
 
 ### Protected semantics
 
-Scientific choices that must remain unchanged unless the case explicitly delegates them:
+Scientific choices that must remain unchanged unless the task explicitly delegates them:
 
-- datasets and samples;
-- model/fitting procedure;
-- thresholds and filters;
+- datasets/samples;
+- model or fitting procedure;
+- thresholds/filters;
 - phenotype/covariate handling;
 - LD/reference choice;
-- requested comparison;
-- valid result/no-result interpretation.
+- comparison definition;
+- no-result semantics.
 
-### Canonical execution path
+### Execution invariants
 
-The maintained path the operator should use.
+Only procedure constraints that are part of the task contract belong here.
 
-The benchmark should know which workflow, runtime, profile, and task boundaries are canonical. A case may intentionally make invocation imperfect without changing what owns execution.
+Examples:
 
-### Declared endpoint
+- use the maintained workflow rather than creating a parallel controller;
+- use the supplied runtime;
+- preserve valid completed outputs;
+- use the scheduler profile that owns child execution.
 
-The exact expected terminal state:
+Do **not** require one exact command sequence when several procedures are legitimately equivalent. Graders should check invariants and state, not stylistic imitation of a reference trace.
 
-- scientific products;
-- valid no-result marker/state;
-- bounded repaired workflow;
-- stable running handoff;
-- status answer only.
+### Declared outcome
 
-### Known tempting alternatives
+The environment/scientific state that constitutes success.
 
-Optional benchmark metadata can identify historically plausible but invalid moves, such as:
+Examples:
 
-- creating another controller;
-- rebuilding the environment;
-- altering a scientific parameter;
-- forcing/restarting all work;
-- stopping at an intermediate target.
+- required terminal products;
+- an explicitly valid no-result state;
+- a repaired workflow with preserved outputs;
+- a stable running handoff when handoff is the requested endpoint;
+- a correct status answer with no mutation for inspection-only tasks.
 
-These alternatives help annotation but should not be exposed to the tested operator.
+### Reference solution
 
-## 7. Primary metrics
+Each task must have at least one known-valid solution that passes all required graders.
 
-Do not collapse everything into one score initially.
+The reference solution proves task solvability and helps detect grader bugs; it is not necessarily the only valid trajectory.
 
-### 7.1 Contract-valid endpoint success
+## 5. Grader architecture
 
-The primary outcome:
+The benchmark uses multiple graders rather than one bespoke aggregate score.
+
+### G1 — outcome grader
+
+**Default type:** code-based.
+
+Checks the actual environment/scientific outcome, not the agent's final claim.
+
+Examples:
+
+- expected products exist and are schema-valid;
+- valid no-result state is present;
+- required child outputs are complete;
+- requested status answer matches the hidden state;
+- preserved outputs remain unchanged.
+
+This directly follows τ-bench's end-state evaluation and Anthropic's outcome/state-check framing.
+
+### G2 — contract / policy grader
+
+**Preferred type:** code-based state/tool assertions.  
+**Fallback:** calibrated model-based rubric for semantic dimensions that cannot be encoded deterministically.
+
+Checks:
+
+- protected scientific semantics were not changed;
+- side effects stayed within authorization;
+- required execution invariants were respected;
+- no unauthorized downstream scope was added.
+
+This is the Fungen instantiation of τ-bench's domain-policy adherence.
+
+### G3 — milestone / state-dependency grader
+
+**Type:** code-based where possible.
+
+Used for stateful/recovery tasks.
+
+Checks intermediate milestones such as:
+
+- stale materialized command correctly identified;
+- valid sibling outputs preserved;
+- affected scope correctly isolated;
+- recovery re-entered the original endpoint.
+
+This follows ToolSandbox's intermediate/final milestone evaluation and AgentBoard's progress motivation.
+
+### G4 — regression preservation grader
+
+**Type:** code-based pass-to-pass tests.
+
+Checks that a candidate did not break previously correct products or behavior while fixing the focal task.
+
+This mirrors standard coding-agent regression evaluation and is especially important when the operator edits workflow/configuration state.
+
+### G5 — efficiency / complexity metrics
+
+**Type:** transcript/environment metrics; secondary, not a correctness gate by default.
+
+Record:
+
+- tool calls;
+- turns;
+- tokens where available;
+- wall-clock/runtime;
+- new persistent files;
+- new wrappers/controllers/environments;
+- repeated/redundant checks.
+
+This follows the cost/complexity concern in *AI Agents That Matter* and Anthropic's transcript-metric guidance.
+
+### G6 — failure-mode annotator
+
+**Type:** diagnostic human/model annotation, not primary pass/fail.
+
+Use MAST-style trace annotation to characterize *why* a failed trial failed.
+
+The Fungen domain extensions are crosswalked to broader categories rather than treated as a new universal taxonomy.
+
+## 6. Human and model-based grading
+
+The primary benchmark should minimize subjective grading.
+
+Use this order:
+
+1. deterministic code/state grader when the property can be encoded;
+2. model-based grader only when the property genuinely requires semantic judgment;
+3. human expert labels to calibrate the model grader and adjudicate unresolved cases.
+
+Any model-based grader must be validated on a held-out human-labelled calibration set. Report the agreement statistic used; categorical labels should include an inter-annotator/agreement measure.
+
+Do not let the same model under test grade its own trial.
+
+## 7. Task admission and benchmark validity
+
+A task is admitted only if it satisfies the following criteria.
+
+### 7.1 Unambiguous specification
+
+Two knowledgeable reviewers should independently be able to determine what constitutes pass/fail from the task and environment.
+
+The grader must not encode hidden assumptions absent from the task.
+
+### 7.2 Reference-solution validity
+
+At least one reference solution must pass all required graders from a fresh environment.
+
+A persistent near-zero pass rate across capable agents is a reason to inspect the task/grader for defects, not automatically evidence of model incapability.
+
+### 7.3 Gold-label correctness
+
+Ground-truth state, authorized effects, protected semantics, and expected outcome must be manually checked before release.
+
+### 7.4 Behavioral validity
+
+The task must actually elicit the intended construct rather than merely test whether the agent understood an artificial benchmark convention.
+
+### 7.5 Distinctiveness
+
+Do not include multiple cases that differ superficially but exercise exactly the same construct unless they are deliberate variants for reliability estimation.
+
+### 7.6 Balanced directionality
+
+For each important constraint, include tasks where the behavior is required **and** tasks where the superficially opposite behavior is correct.
+
+Examples:
+
+| Constrained case | Balanced counterpart |
+|---|---|
+| Preserve the supplied method | The user explicitly authorizes a method change |
+| Stop at the declared endpoint | The user explicitly asks to continue downstream |
+| Do not invent a helper because a native path exists | A required capability is genuinely absent and a minimal helper is appropriate |
+| Use the supplied runtime | The supplied runtime is genuinely unusable/missing and replacement is authorized |
+| Treat a marker as insufficient evidence | The declared marker is actually the authoritative terminal state |
+| Preserve completed siblings during narrow recovery | The task explicitly requires a fresh full rerun |
+
+This follows Anthropic's recommendation to avoid one-sided/class-imbalanced behavior evals.
+
+### 7.7 Clean isolated trials
+
+Each trial starts from a fresh fixture.
+
+No leftover files, caches, scheduler state, or previous-agent artifacts may leak across trials unless shared state is itself the task variable.
+
+### 7.8 Runtime practicality
+
+The task should complete within the declared evaluation budget. Expensive native integration belongs in the integration suite rather than silently making the main suite unstable.
+
+## 8. Holdouts and contamination control
+
+Known historical incidents are useful for the regression suite but are poor evidence of generalization by themselves.
+
+For each capability family:
+
+- keep public/development instances for iteration;
+- keep held-out test variants whose exact fixture/state combinations are not used during operator design;
+- vary names, topology, counts, and irrelevant surface details while preserving the underlying construct;
+- prevent benchmark-specific filenames or magic constants from becoming shortcuts.
+
+This follows the holdout/overfitting concern in *AI Agents That Matter* and ScienceAgentBench's emphasis on contamination-aware evaluation.
+
+## 9. Core research dimensions and Fungen task families
+
+The task families are organized by published constructs first, historical incidents second.
+
+| Dimension | External anchor | Fungen task family |
+|---|---|---|
+| **Compositional planning** | WorkArena++ | Compose maintained mini-protocols into a full analysis without building a duplicate orchestration layer |
+| **Goal-state + policy adherence** | τ-bench | Reach the requested scientific endpoint while preserving protected semantics and authorized effects |
+| **State dependency** | ToolSandbox | Distinguish source, config, materialized commands, scheduler state, and products during recovery |
+| **Intermediate progress / termination** | AgentBoard + MAST | Continue through the real endpoint, recognize valid stops, avoid premature termination and redundant continuation |
+| **Scientific task validity** | ScienceAgentBench | Use scientifically plausible fixtures, executable products, and expert-reviewed semantics |
+| **Failure diagnosis** | MAST | Annotate specification/system-design and verification/termination failures from trajectories |
+| **Cost/complexity** | AI Agents That Matter + Anthropic | Record unnecessary operational surface and execution cost without making complexity itself the target |
+
+## 10. Regression suite seeds
+
+The historical record supplies the following regression seeds.
+
+| ID | Task | Primary external construct |
+|---|---|---|
+| **R01** | Native happy path with supplied workflow/runtime | τ-bench outcome; regression preservation |
+| **R02** | Compose several existing mini-protocols | WorkArena++ compositional planning |
+| **R03** | Intermediate target exists before requested endpoint | MAST verification/termination; AgentBoard progress |
+| **R04** | Execution mismatch tempts a protected scientific-method change | τ-bench policy adherence |
+| **R05** | Supplied runtime has an invocation problem but is usable | policy adherence + efficiency |
+| **R06** | Independent tasks plus misleading conservative global resource example | execution-policy adherence |
+| **R07** | Source corrected while materialized task remains stale | ToolSandbox state dependency |
+| **R08** | Controller/marker succeeds while required scientific product is absent | τ-bench outcome + ToolSandbox state |
+| **R09** | Complete computation legitimately yields no result | outcome-state correctness |
+| **R10** | Related downstream work exists but is not authorized | τ-bench policy adherence |
+| **R11** | Enough evidence exists, but extra checking is tempting | efficiency/transcript metric |
+| **R12** | One unit fails while sibling outputs are valid | ToolSandbox milestone recovery |
+
+These are **regression seeds**, not the complete capability benchmark.
+
+Each important seed must have balanced counterpart tasks as described in Section 7.6.
+
+## 11. Capability suite construction
+
+Capability tasks should be generated from the research dimensions, not by cosmetic mutation of R01–R12.
+
+Initial capability families:
+
+### C1 — unseen composition
+
+Provide a new DAG of maintained mini-protocols with unfamiliar names/topology but explicit contracts.
+
+Measure whether the operator composes existing capabilities rather than reconstructing them.
+
+### C2 — unseen state dependency
+
+Create a new disagreement between state layers, for example:
+
+- current config differs from task-generation config;
+- scheduler job points to an older checkout;
+- product is newer than an outer status marker.
+
+Measure intermediate milestone detection and correct recovery.
+
+### C3 — policy inversion
+
+Use a balanced task where a behavior that is usually forbidden is explicitly authorized.
+
+Examples: scientific parameter change, fresh rerun, helper creation.
+
+Measure whether the operator follows the task contract rather than memorizing prohibitions.
+
+### C4 — endpoint ambiguity resolved by declared state
+
+Construct valid-no-result, incomplete, running-handoff, and complete states with similar superficial file layouts.
+
+Measure outcome-state classification.
+
+### C5 — resource ownership transfer
+
+Change the workflow topology so concurrency/resource ownership differs from the regression fixture.
+
+Measure whether the operator reasons from ownership rather than copied constants.
+
+### C6 — novel scientific mini-workflow
+
+Use a small public/synthetic scientific workflow not seen in development.
+
+Measure end-to-end composition, execution, verification, and reporting.
+
+## 12. Primary reported metrics
+
+The benchmark reports standard and decomposed metrics.
+
+### 12.1 Outcome pass rate
+
+Fraction of trials passing G1.
+
+This answers whether the correct end state was reached.
+
+### 12.2 Contract adherence rate
+
+Fraction of trials passing G2.
+
+This answers whether the agent stayed within policy/scientific authority.
+
+### 12.3 Joint pass rate
+
+A trial passes the benchmark task only when **all required correctness graders pass**.
+
+At minimum:
 
 ~~~text
-CVES = attempts that reach the declared endpoint
-       with no hard contract violation
-       / all eligible attempts
+joint_pass = G1 outcome
+             AND G2 contract/policy
+             AND any task-required G3/G4 checks
 ~~~
 
-This prevents a scientifically altered workflow from counting as success merely because files were produced.
+This conjunction is deliberately not given a new branded metric name.
 
-### 7.2 Endpoint success
+### 12.4 Corrupt-success rate
 
-Report separately whether the endpoint was reached regardless of contract adherence.
-
-The gap between endpoint success and CVES is informative: it measures "got there by changing the task."
-
-### 7.3 Hard contract violation rate
-
-Fraction of attempts with at least one serious unauthorized action.
-
-Initial hard violations:
-
-- unauthorized scientific-semantic change;
-- unauthorized scope expansion with consequential side effects;
-- replacing the canonical workflow with an alternate operational path when the native path was sufficient;
-- destructive/broad recovery outside authorization;
-- knowingly unsupported scientific completion claim.
-
-Hard violations remain individually visible and should not be averaged away.
-
-### 7.4 State-recovery success
-
-For recovery cases:
+Report the descriptive intersection:
 
 ~~~text
-recovery success =
-  recovered original endpoint
-  + preserved valid work
-  + no semantic drift
-  + coherent treatment of materialized state
+outcome_pass == true
+AND contract_pass == false
 ~~~
 
-Report as case-level pass/fail plus failure annotation.
+This is the exact failure mode the project is particularly concerned about: the agent appears to finish but changes the task/procedure.
 
-### 7.5 Evidence calibration
+Recent procedure-aware evaluation work calls this kind of outcome a "corrupt success"; the benchmark can report the intersection without depending on that preprint's scoring framework.
 
-Compare the operator's final state label with ground truth:
+### 12.5 pass^k reliability
 
-- not started;
-- submitted/accepted;
-- pending/running;
-- failed;
-- incomplete;
-- valid no-result;
-- complete;
-- unknown.
+Following τ-bench, compute **pass^k** on joint task success across repeated independent trials.
 
-This is a small multiclass calibration problem, not merely a prose-quality judgment.
+Report at least:
 
-### 7.6 Steering burden
+- pass^1;
+- pass^3 when three or more trials are available;
+- pass^5 for release comparisons when five trials per task are available.
 
-Count evaluator/user interventions that correct:
+Also retain per-task trial outcomes so a single aggregate does not hide unstable tasks.
 
-- scope;
-- target;
-- scientific method;
-- runtime/workflow path;
-- recovery action;
-- status claim.
+### 12.6 Progress / milestone completion
 
-Also report **zero-steering CVES**: valid endpoint success without corrective intervention.
+For stateful multi-step tasks, report the fraction of predefined milestones reached, motivated by AgentBoard and ToolSandbox.
 
-### 7.7 Operational surface added
+This is diagnostic and does not override final task success.
 
-Count consequential new maintained objects introduced by the operator:
+### 12.7 Cost / complexity
 
-- wrapper/controller;
-- alternate workflow file;
-- environment;
-- validation/completion system;
-- persistent helper;
-- new execution path.
+Report secondary metrics:
 
-Temporary shell snippets or ordinary requested outputs should not count automatically.
+- tool calls;
+- turns/tokens;
+- elapsed time;
+- persistent artifacts added;
+- wrappers/controllers/environments introduced.
 
-This metric is descriptive. Some added artifacts can be justified. The benchmark should record why they were necessary.
+Do not reward low cost when it comes from premature termination.
 
-## 8. Diagnostic failure taxonomy
+### 12.8 Failure-mode incidence
 
-Use a small stable taxonomy for failed attempts:
+Report diagnostic trajectory labels separately from success metrics.
 
-- **ROUTE** — wrong project/skill/runtime/target selection;
-- **SUBSTITUTE** — parallel workflow/controller/infrastructure replaces the established path;
-- **SEMANTIC** — unauthorized scientific-method change;
-- **SCOPE** — unauthorized task expansion;
-- **EXEC_LAYER** — scheduler/runtime/resource decision applied at the wrong level;
-- **STALE_STATE** — source/config/task/scheduler/product generations treated as if they were synchronized when they were not;
-- **ENDPOINT** — premature termination or failure to return to the declared endpoint after repair;
-- **EVIDENCE** — unsupported or incorrect status/completion interpretation;
-- **OVERWORK** — unnecessary checks/artifacts/actions materially increase operational burden without advancing the requested endpoint.
+Do not average severe violations into a single weighted score.
 
-These codes are diagnostic annotations, not independent benchmark scores.
+## 13. Scored-trial protocol
 
-Environmental failures that the operator did not cause should be recorded separately.
+For objective comparisons:
 
-## 9. Repeated reliability
+1. pin the task/fixture revision;
+2. pin the operator/skill/plugin revision;
+3. record model and inference settings;
+4. start from a clean environment;
+5. provide the same task information to every compared system;
+6. allow no ad-hoc human steering during the scored trial;
+7. if interaction is part of the task, use a fixed simulator/protocol rather than live evaluator improvisation;
+8. record the full trajectory and final environment;
+9. run graders after termination;
+10. repeat independent trials with the predeclared k.
 
-Single-shot success is insufficient.
+An assisted-human track may be studied separately, but it must not be mixed into the primary autonomous score.
 
-For stable benchmark versions, repeat representative cases across multiple attempts and report:
+## 14. Baselines
 
-- per-case pass rate;
-- CVES across attempts;
-- hard-violation incidence;
-- zero-steering CVES;
-- consistency of final state classification.
+Compare against:
 
-Where useful, report a pass^k-style repeated-reliability statistic, but keep the underlying case results visible.
+### Base agent
 
-Do not claim improvement from a single successful replay.
+Same model/harness without Fungen Operator.
 
-## 10. Baselines
+### Pinned legacy runner
 
-Useful comparisons include:
+Use a single coherent legacy procedure when one exists.
 
-### Unassisted base agent
+Do not combine conflicting historical skills to manufacture a baseline.
 
-Same model/environment without Fungen Operator.
+### Candidate operator
 
-This tests whether the operator layer changes behavior.
+Pin the exact replacement revision.
 
-### Legacy runner baseline
+Where possible, keep model, tools, task fixtures, inference settings, and trial counts constant across baselines.
 
-Use the applicable pinned historical runner when a coherent baseline exists.
+The benchmark evaluates the **operator/scaffold effect**, not a model leaderboard.
 
-Do not combine conflicting legacy skills merely to create a baseline.
+## 15. Benchmark harness and artifacts
 
-### Current candidate operator
-
-Pin the exact skill/plugin revision.
-
-Comparisons should use the same case fixture, model family/settings where feasible, and evaluator.
-
-The benchmark is intended to compare operator designs, not to rank foundation models in general.
-
-## 11. Scoring and release gates
-
-Avoid a single weighted leaderboard score for early development.
-
-A candidate release should instead satisfy a small set of gates, for example:
-
-- no hard contract violation in the mandatory core suite;
-- all semantic-preservation cases pass;
-- all state-recovery cases correctly identify the governing state layer;
-- all endpoint/evidence cases classify terminal state correctly;
-- a predeclared CVES threshold across repeated attempts;
-- no regression in operational surface versus the selected baseline unless justified.
-
-Exact numeric thresholds should be set after the fixtures exist and baseline variance is measured.
-
-## 12. Benchmark artifacts
-
-A minimal implementation can use:
+A minimal harness can use:
 
 ~~~text
 benchmark/
   README.md
-  cases/
-    B01_native_happy_path/
-      case.yaml
-      fixture/
-      oracle/
-    ...
-  runner/
+  tasks/
+    regression/
+    capability/
+    integration/
+  fixtures/
+  graders/
+  references/
   results/
 ~~~
 
-A case manifest should describe:
+A task manifest should follow the schema in Section 4.
+
+A trial record should contain:
 
 ~~~yaml
-id:
-request:
-layer:
-authorized_effects:
-protected_semantics:
-canonical_path:
-declared_endpoint:
-ground_truth:
-~~~
-
-The oracle may contain hidden expected files, state labels, and annotations.
-
-Do not copy production controlled-access data into the benchmark tree.
-
-## 13. Evaluation record
-
-A compact attempt result should be sufficient:
-
-~~~yaml
-case_id:
-fixture_revision:
+task_id:
+task_revision:
+benchmark_class:
 operator_revision:
 model:
-attempt:
-endpoint_reached:
-contract_valid:
-hard_violations: []
-failure_codes: []
+inference_settings:
+trial_id:
+grader_results:
+  outcome:
+  contract:
+  milestones:
+  regression:
+joint_pass:
 final_state_claim:
 ground_truth_state:
-corrections:
-operational_surface_added: []
-evidence:
+failure_annotations: []
+metrics:
+  tool_calls:
+  turns:
+  tokens:
+  elapsed:
+  persistent_artifacts_added:
+trajectory_ref:
 notes:
 ~~~
 
-Raw trajectories can be retained separately when available.
+The harness should preserve raw trajectories separately from aggregate results.
 
-The structured record should make aggregate evaluation reproducible without requiring every reviewer to reread complete transcripts.
+## 16. Benchmark validation
 
-## 14. Relationship to the historical corpus
+Before a benchmark version is used for model/operator comparison:
 
-Historical incidents serve three roles:
+1. every task has a passing reference solution;
+2. gold state and policy labels are manually reviewed;
+3. balanced counterpart coverage is checked;
+4. deterministic graders are preferred and tested for false positives/false negatives;
+5. any model-based grader is calibrated against held-out expert labels;
+6. duplicated constructs are identified;
+7. clean-environment reproducibility is verified;
+8. benchmark-specific shortcuts are checked;
+9. capability test fixtures remain held out from operator development;
+10. task/runtime failures are distinguished from agent failures.
 
-1. **case discovery** — identify recurring decisions worth testing;
-2. **fixture design** — reproduce the relevant state/temptation without private data;
-3. **failure annotation** — give concrete meaning to benchmark failure codes.
+The benchmark version, task set, graders, and reference solutions are frozen before comparative evaluation.
 
-They should not be treated as measured benchmark runs unless they are replayed under a pinned benchmark protocol.
+## 17. First benchmark release
 
-Likewise, automated session-insights labels are not ground truth. They can locate candidate incidents, but the original evidence determines what happened.
+The first release should follow the scale and balance recommendations above rather than stop at six hand-written traps.
 
-## 15. Relationship to published work
+### v0.1 regression set
 
-The benchmark borrows established evaluation ideas without copying their full infrastructure:
+Start with six high-value historical families:
 
-- compositional tasks from WorkArena++;
-- stateful/intermediate-state evaluation from ToolSandbox;
-- goal completion plus policy/contract adherence and repeated reliability from τ-bench;
-- trajectory-level progress from AgentBoard;
-- failure-mode annotation from MAST;
-- explicit attention to unnecessary complexity/cost from *AI Agents That Matter*;
-- constituent scientific-task evaluation from ScienceAgentBench and MLAgentBench.
+- R01 native happy path;
+- R03 endpoint/termination;
+- R04 scientific-policy adherence;
+- R07 stale state;
+- R08 false completion;
+- R12 narrow recovery.
 
-See [research_basis.md](research_basis.md) for citations and the project's interpretation of each.
+For each family, include:
 
-## 16. First implementation milestone
+- one incident-derived synthetic task;
+- one balanced counterpart where the opposite behavior is correct.
 
-The first benchmark implementation should be deliberately small:
+This yields **12 regression tasks**.
 
-1. implement B01, B03, B04, B07, B08, and B12;
-2. keep fixtures fully synthetic and runnable locally;
-3. make the oracle deterministic;
-4. record endpoint success, contract validity, final-state classification, hard violations, and added operational surface;
-5. run multiple attempts with the unassisted base agent and the first replacement-operator candidate;
-6. inspect failures before adding more cases.
+### v0.1 capability holdout
 
-Only after these six cases are stable should the suite expand toward scheduler-native integration and broader domain coverage.
+Create **12 held-out tasks** across C1–C6, two per family, with unseen state/layout/composition details.
 
-That keeps the benchmark aligned with the same principle as the product itself: **preserve the important distinctions, but add no machinery without a demonstrated need.**
+This yields an initial **24-task benchmark**, close to Anthropic's practical recommendation that early agent evals can begin with a few dozen well-specified tasks rather than hundreds.
+
+### Trials
+
+During development, report pass^1 and pass^3.
+
+For release comparisons, run at least five independent trials per task and report pass^1, pass^3, and pass^5 on joint success, together with per-grader results.
+
+Do not set release thresholds until the reference solutions, base-agent baseline, and legacy baseline establish the benchmark's empirical difficulty and variance.
+
+## 18. Relationship to the historical corpus
+
+Historical incidents are used for:
+
+1. regression-task discovery;
+2. realistic fixture design;
+3. diagnostic failure annotation.
+
+They are **not** benchmark results unless replayed under the frozen protocol.
+
+Automated session-insights labels are case-finding aids, not gold labels.
+
+## 19. Relationship to the product
+
+The benchmark should constrain product claims, not product implementation.
+
+Passing the benchmark means that, on the evaluated task distribution and protocol, the candidate demonstrated:
+
+- correct end states;
+- contract adherence;
+- stateful recovery where required;
+- repeated reliability;
+- bounded regression behavior.
+
+It does not prove universal scientific correctness or safety.
+
+The benchmark should evolve by adding newly observed failures as regression tasks and new held-out capability families when the product scope expands, while preserving old regression tasks to detect backsliding.
