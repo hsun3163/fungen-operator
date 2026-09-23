@@ -46,7 +46,7 @@ The scientific task and established project own the method and workflow semantic
 
 The canonical implementation is immutable to the operator. The operator may instantiate it through already-exposed interfaces and parameters. Read-only observation may remain flexible, but every state-changing action must be materialized as a retained notebook cell selected from a fixed template catalog; the agent fills bounded slots rather than authoring a free-form execution path.
 
-The model is **composition, not reconstruction**. Maintained Snakemake `.smk` files are the existing mini-protocol interface; notebooks and R/Python scripts remain implementation details invoked by those mini-protocols rather than pieces for the operator to rewire. The operator should use the existing composition mechanisms and add no new wrapper, controller, validator, environment, or execution path unless a demonstrated gap cannot be handled by the maintained infrastructure.
+The model is **composition, not reconstruction**. Maintained Snakemake `.smk` files are the existing mini-protocol interface; notebooks and R/Python scripts remain implementation details invoked by those mini-protocols rather than pieces for the operator to rewire. The operator uses the existing composition mechanisms. A missing capability or canonical defect is handed to the developer role rather than bridged by an operator-created wrapper, controller, validator, environment, helper, or alternate execution path.
 
 Execution state is layered:
 
