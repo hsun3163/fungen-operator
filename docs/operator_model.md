@@ -64,7 +64,7 @@ Use this mode when the scientific request requires constructing an analysis from
 
 Once Scientist mode fixes the analysis graph, execution falls back to the same faithful operation used in Lab-tech mode: execute, recover, verify, and finish the declared endpoint.
 
-## 4. Use the existing mini-protocol infrastructure
+## 5. Use the existing mini-protocol infrastructure
 
 The scientific mini-protocol layer already exists. Maintained Snakemake `.smk` files are the compositional building blocks; the operator is not responsible for inventing a new mini-protocol system, manifest service, workflow engine, or controller.
 
@@ -82,7 +82,7 @@ If a concrete requested analysis cannot be expressed through the maintained infr
 
 Benchmarking tests whether the operator uses this existing infrastructure correctly; it is not a prerequisite for the infrastructure itself to exist.
 
-## 5. State-changing actions are fixed notebook moves
+## 6. State-changing actions are fixed notebook moves
 
 Read-only observation may remain flexible. Every action that changes execution state must be materialized and executed as a retained operator-notebook cell selected from a fixed template catalog.
 
@@ -92,7 +92,7 @@ The initial catalog should be derived empirically from successful MESA and CARDI
 
 See [operator_action_surface_20260923.md](operator_action_surface_20260923.md) for the current design note.
 
-## 6. State is layered and material
+## 7. State is layered and material
 
 A scientific run is not represented by one mutable code checkout. At minimum, distinguish:
 
@@ -106,7 +106,7 @@ This matters especially during recovery. A reverted source file can coexist with
 
 The operator therefore reasons from the **state that actually governs the active work**, not merely the newest editable file.
 
-## 7. Completion is a scientific state
+## 8. Completion is a scientific state
 
 Submission, a green controller, a marker file, or an empty queue is not by itself scientific completion.
 
@@ -120,7 +120,7 @@ For each supported task family, completion should be defined from:
 
 The same principle applies to handoff. A stable running job can be a correct endpoint when the user asked for a handoff; it is not the same state as verified scientific completion.
 
-## 8. Parsimony is a product property
+## 9. Parsimony is a product property
 
 Parsimony does **not** mean "fewest lines of instruction." It means minimizing unnecessary operational state while retaining the information needed to act correctly and recover.
 
@@ -134,7 +134,7 @@ The replacement should therefore have:
 
 Long historical analyses can remain in this repository without becoming prompts that every run must load.
 
-## 9. How failures are interpreted
+## 10. How failures are interpreted
 
 The repository evidence is best understood as failures of constrained operation, not simply coding mistakes.
 
@@ -149,7 +149,7 @@ The recurring families are:
 
 These categories are diagnostic. They should not be turned into another large runtime policy layer.
 
-## 10. Evaluation model
+## 11. Evaluation model
 
 Evaluation should test both outcome and behavior.
 
@@ -167,7 +167,7 @@ A dangerous contract violation should remain visible rather than being averaged 
 
 See [benchmark.md](benchmark.md) for the canonical benchmark specification, [research_basis.md](research_basis.md) for the published work that motivates the evaluation vocabulary, and [fungen_operator_development_brief.md](fungen_operator_development_brief.md) for the detailed migration and case derivation.
 
-## 11. Current implementation status
+## 12. Current implementation status
 
 As of 2026-09-22:
 
