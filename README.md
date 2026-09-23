@@ -26,10 +26,11 @@ The current skill collection contains overlapping and sometimes conflicting proc
 ## Start here
 
 1. **[Operating model](docs/operator_model.md)** — the canonical current conceptual model: what the operator is, its positive action contract, ownership boundaries, state model, and parsimony principle.
-2. **[Benchmark](docs/benchmark.md)** — the canonical evaluation contract, explicitly aligned to Anthropic's task/trial/grader/outcome framework and peer-reviewed agent benchmarks (τ-bench, ToolSandbox, WorkArena++, AgentBoard, MAST, ScienceAgentBench).
-3. **[Skill baseline and migration map](skills/README.md)** — what capabilities exist in the current collection and how they should be treated during consolidation.
-4. **[Development brief](docs/fungen_operator_development_brief.md)** — detailed requirements, migration questions, case derivation, and implementation sequence.
-5. **[Research basis](docs/research_basis.md)** — how the project's observed problems map to published work on compositional workflows, stateful tool use, rule-constrained agents, trajectory evaluation, scientific agents, and agent complexity.
+2. **[Operator action surface](docs/operator_action_surface_20260923.md)** — the concrete proposal that all state-changing behavior occurs through fixed operator-notebook cell templates with bounded slots.
+3. **[Benchmark](docs/benchmark.md)** — the canonical evaluation contract, explicitly aligned to Anthropic's task/trial/grader/outcome framework and peer-reviewed agent benchmarks (τ-bench, ToolSandbox, WorkArena++, AgentBoard, MAST, ScienceAgentBench).
+4. **[Skill baseline and migration map](skills/README.md)** — what capabilities exist in the current collection and how they should be treated during consolidation.
+5. **[Development brief](docs/fungen_operator_development_brief.md)** — detailed requirements, migration questions, case derivation, and implementation sequence.
+6. **[Research basis](docs/research_basis.md)** — how the project's observed problems map to published work on compositional workflows, stateful tool use, rule-constrained agents, trajectory evaluation, scientific agents, and agent complexity.
 
 Only then descend into the evidence corpus when a design decision needs traceability.
 
@@ -42,6 +43,8 @@ select -> compose -> execute -> recover -> verify -> report/stop
 ```
 
 The scientific task and established project own the method and workflow semantics. The operator owns the reasoning needed to carry out that authorized operation.
+
+The canonical implementation is immutable to the operator. The operator may instantiate it through already-exposed interfaces and parameters. Read-only observation may remain flexible, but every state-changing action must be materialized as a retained notebook cell selected from a fixed template catalog; the agent fills bounded slots rather than authoring a free-form execution path.
 
 The model is **composition, not reconstruction**. Maintained Snakemake `.smk` files are the existing mini-protocol interface; notebooks and R/Python scripts remain implementation details invoked by those mini-protocols rather than pieces for the operator to rewire. The operator should use the existing composition mechanisms and add no new wrapper, controller, validator, environment, or execution path unless a demonstrated gap cannot be handled by the maintained infrastructure.
 
@@ -80,6 +83,8 @@ The repository's design question is therefore not simply how to make an agent "m
 README.md                         this entry point
 docs/
   operator_model.md              canonical conceptual model
+  operator_action_surface_20260923.md
+                                 fixed notebook action-surface design
   benchmark.md                   canonical benchmark specification
   research_basis.md              external research/evaluation grounding
   fungen_operator_development_brief.md
@@ -118,6 +123,7 @@ The replacement should converge toward:
 
 - one recognizable, skill-first Fungen Operator entry point;
 - one concise shared operating contract;
+- a finite catalog of fixed state-changing notebook-cell templates derived first from successful MESA/CARDIA operation;
 - direct use of the existing `.smk` mini-protocol infrastructure for both fixed and composed analyses;
 - composition by selecting and connecting maintained mini-protocols through their existing inputs/outputs and configuration conventions, not by building a new composition framework;
 - task/domain references or capabilities loaded only when relevant;
