@@ -1,7 +1,8 @@
 # Fungen Operator benchmark
 
-Updated: 2026-09-22  
-Status: canonical benchmark specification. Fixtures and harness are not yet implemented.
+Updated: 2026-09-23
+
+Status: canonical benchmark specification. The genotype/covariate/phenotype MWE fixture is generated and verified; see the [MWE progress report](mwe_progress_20260923.md). Operator/harness implementation and scientific integration are tracked separately.
 
 ## 1. Benchmark question
 
@@ -12,6 +13,16 @@ The benchmark asks:
 The benchmark evaluates the operator, not general scientific creativity. It does not reward changing the scientific method unless the task explicitly delegates that authority.
 
 The benchmark is synthetic/public-data first. **Controlled-access cohort data must not be packaged into benchmark fixtures.** When a real workflow depends on controlled data, reproduce only the minimum declared schema/state needed for the behavior under test and generate new fake/synthetic values and identifiers. Public data may be used for bounded native-integration cases when appropriate.
+
+### Legacy MWE exclusion
+
+On 2026-09-23, the user identified the existing MWEs under `../xqtl/` as derived from real individuals and excluded them from the new benchmark. This includes the legacy `../xqtl/xqtl-renovated/mwe_data` tree, its `MWE/` subtree, and data or outputs derived from those examples. Discard these as benchmark candidates; this exclusion does not request filesystem deletion.
+
+The current `../xqtl/xqtl-protocol/code/snakemake/config.yaml` still points into that tree for example inputs and outputs. Read its configuration conventions, then supply a dedicated benchmark config whose inputs and output root are independent of the legacy MWEs. Renaming samples or simulating a phenotype on retained individual-level genotypes does not satisfy this exclusion.
+
+Behavioral cases use sketch-derived or dummy opaque objects with metadata identifying them as genotype data, synthetic identifiers, and realistic workflow states. The operator remains aware of the data type while its behavioral evaluation is content-agnostic. Accurate sketch-to-genotype reconstruction is not a prerequisite. The [closed reconstruction pilot](../archive/sketch_to_plink1_20260923/README.md) supports this decision; its fixed theta = 1 PLINK1 export serves as a behavioral fixture.
+
+Scientific integration cases use genuinely synthetic or public PLINK genotypes with documented provenance, newly simulated traits, a fixed seed, and planted ground truth. Use the [authoritative workflow source](operator_model.md#authoritative-workflow-source) for schema and execution behavior. A file's `MWE`, `toy`, or `fixture` label alone does not establish suitable provenance.
 
 ## 2. External evaluation framework
 
@@ -654,11 +665,11 @@ Before a benchmark version is used for model/operator comparison:
 
 The benchmark version, task set, graders, and reference solutions are frozen before comparative evaluation.
 
-### Signal-bearing scientific core
+### Separate scientific integration core
 
-The MWE should prove more than workflow completion. Its base scientific fixture should contain a small, deterministic, **planted recoverable signal**.
+Behavioral simulations evaluate decisions using typed opaque genotype objects and workflow state. Separate integration tests exercise actual scientific mini-protocols with a small, deterministic, **planted recoverable signal**.
 
-Use the existing sketch-genotype mechanism to generate or provide the genotype matrix. Choose known causal variant(s), then simulate phenotype or molecular-trait values from those genotypes plus noise with a declared target variance explained. Store the seed and causal ground truth.
+Use genuinely synthetic or public PLINK genotypes for these scientific integration tests. Choose known causal variant(s), then simulate phenotype or molecular-trait values from those genotypes plus noise with a declared target variance explained. Store the seed and causal ground truth. The forced-bin sketch fixture carries no claim of faithful LD reconstruction and is designated for behavioral cases.
 
 A minimal starting model is:
 
@@ -676,7 +687,7 @@ Where supported by the actual canonical mini-protocols, machine-checkable scient
 - a shared-signal/colocalization extension distinguishes shared causal signal from a distinct-signal control;
 - a null control does not manufacture a signal.
 
-The benchmark should reuse this same scientific core across operational failure scenarios whenever possible. Failure-mode coverage should usually come from altered workflow/configuration/materialized/scheduler/product state, not from inventing a new biological dataset for every case.
+Reuse the same typed objects across behavioral failure scenarios and the same scientific core across integration scenarios whenever possible. Failure-mode coverage should usually come from altered workflow/configuration/materialized/scheduler/product state.
 
 ## 17. Minimum working simulations
 

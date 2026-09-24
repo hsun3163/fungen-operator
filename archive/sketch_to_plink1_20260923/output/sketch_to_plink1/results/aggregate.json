@@ -1,0 +1,23 @@
+{
+  "development": {
+    "n_regions": 8,
+    "theta": 1.4305555555555556,
+    "weighted_rmse": 0.11476398000522746,
+    "unweighted_rmse_mean": 0.08014639977012702
+  },
+  "validation_at_theta_star": {
+    "n_regions": 12,
+    "theta": 1.4305555555555556,
+    "weighted_rmse": 0.1332283984905434,
+    "unweighted_rmse_mean": 0.08238604448683436,
+    "signed_r_corr_mean": 0.9729208627993969,
+    "r2_rmse_mean": 0.0801665400486121,
+    "max_af_error": 2.5000000000052758e-05,
+    "chromosome_weighted_rmse": {
+      "1": 0.12291834102094704,
+      "19": 0.12076270248785241,
+      "21": 0.16654094005187553,
+      "6": 0.1164937383405063
+    }
+  }
+}

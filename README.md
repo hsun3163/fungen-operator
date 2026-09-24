@@ -12,6 +12,8 @@ That is the guiding principle for the replacement.
 
 As of 2026-09-23, this repository includes a **thin executable lab-tech prototype** alongside its development evidence.
 
+**2026-09-23 MWE update:** the fixed-bin PLINK1 genotype fixture, 12 covariates and 40 phenotypes are generated and verified. See the [progress report](docs/mwe_progress_20260923.md) for results, source, reproducibility commands and the closed reconstruction pilot.
+
 The [prototype](docs/operator_prototype.md) exposes configuration, readiness, and submission through typed MCP tools and fixed notebook cells. It includes scientific approval, retained superseded history, replay, and a synthetic lifecycle. Live HPC validation and the full action catalog remain separate work. The repository also contains:
 
 - 19 imported skill entrypoints with domain procedures, helpers, templates, and site/runtime knowledge;

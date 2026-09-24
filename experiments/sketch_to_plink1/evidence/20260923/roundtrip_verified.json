@@ -1,0 +1,303 @@
+{
+  "status": "pass",
+  "plink": "1.9",
+  "samples": 10000,
+  "variants": 20000,
+  "selected_variants_exactly_checked": 32,
+  "genotypes_per_selected_variant": 10000,
+  "allele_counted": "BIM A1 is ALT",
+  "native_bed_byte_roundtrip": "identical",
+  "selected_call_checks": [
+    {
+      "variant_id": "chr1:16666:G:A",
+      "rows_checked": 10000,
+      "exact_call_match": true,
+      "raw_counted_allele": "A",
+      "BIM_A1": "A",
+      "BIM_A2": "G",
+      "ALT_genotype_recovered": true
+    },
+    {
+      "variant_id": "chr1:896680:G:A",
+      "rows_checked": 10000,
+      "exact_call_match": true,
+      "raw_counted_allele": "G",
+      "BIM_A1": "A",
+      "BIM_A2": "G",
+      "ALT_genotype_recovered": true
+    },
+    {
+      "variant_id": "chr1:76867504:T:C",
+      "rows_checked": 10000,
+      "exact_call_match": true,
+      "raw_counted_allele": "C",
+      "BIM_A1": "C",
+      "BIM_A2": "T",
+      "ALT_genotype_recovered": true
+    },
+    {
+      "variant_id": "chr1:77016700:A:G",
+      "rows_checked": 10000,
+      "exact_call_match": true,
+      "raw_counted_allele": "G",
+      "BIM_A1": "G",
+      "BIM_A2": "A",
+      "ALT_genotype_recovered": true
+    },
+    {
+      "variant_id": "chr1:177858955:A:G",
+      "rows_checked": 10000,
+      "exact_call_match": true,
+      "raw_counted_allele": "G",
+      "BIM_A1": "G",
+      "BIM_A2": "A",
+      "ALT_genotype_recovered": true
+    },
+    {
+      "variant_id": "chr6:30799794:A:G",
+      "rows_checked": 10000,
+      "exact_call_match": true,
+      "raw_counted_allele": "G",
+      "BIM_A1": "G",
+      "BIM_A2": "A",
+      "ALT_genotype_recovered": true
+    },
+    {
+      "variant_id": "chr6:30849724:G:A",
+      "rows_checked": 10000,
+      "exact_call_match": true,
+      "raw_counted_allele": "G",
+      "BIM_A1": "A",
+      "BIM_A2": "G",
+      "ALT_genotype_recovered": true
+    },
+    {
+      "variant_id": "chr6:50382674:G:C",
+      "rows_checked": 10000,
+      "exact_call_match": true,
+      "raw_counted_allele": "C",
+      "BIM_A1": "C",
+      "BIM_A2": "G",
+      "ALT_genotype_recovered": true
+    },
+    {
+      "variant_id": "chr6:110807886:T:C",
+      "rows_checked": 10000,
+      "exact_call_match": true,
+      "raw_counted_allele": "C",
+      "BIM_A1": "C",
+      "BIM_A2": "T",
+      "ALT_genotype_recovered": true
+    },
+    {
+      "variant_id": "chr6:110921508:G:A",
+      "rows_checked": 10000,
+      "exact_call_match": true,
+      "raw_counted_allele": "A",
+      "BIM_A1": "A",
+      "BIM_A2": "G",
+      "ALT_genotype_recovered": true
+    },
+    {
+      "variant_id": "chr19:312358:C:*",
+      "rows_checked": 10000,
+      "exact_call_match": true,
+      "raw_counted_allele": "*",
+      "BIM_A1": "*",
+      "BIM_A2": "C",
+      "ALT_genotype_recovered": true
+    },
+    {
+      "variant_id": "chr19:17970886:ATT:AT",
+      "rows_checked": 10000,
+      "exact_call_match": true,
+      "raw_counted_allele": "AT",
+      "BIM_A1": "AT",
+      "BIM_A2": "ATT",
+      "ALT_genotype_recovered": true
+    },
+    {
+      "variant_id": "chr19:18082539:A:G",
+      "rows_checked": 10000,
+      "exact_call_match": true,
+      "raw_counted_allele": "G",
+      "BIM_A1": "G",
+      "BIM_A2": "A",
+      "ALT_genotype_recovered": true
+    },
+    {
+      "variant_id": "chr19:40431021:A:C",
+      "rows_checked": 10000,
+      "exact_call_match": true,
+      "raw_counted_allele": "C",
+      "BIM_A1": "C",
+      "BIM_A2": "A",
+      "ALT_genotype_recovered": true
+    },
+    {
+      "variant_id": "chr21:5242053:CTCTCTCTCTCTCTT:*",
+      "rows_checked": 10000,
+      "exact_call_match": true,
+      "raw_counted_allele": "*",
+      "BIM_A1": "*",
+      "BIM_A2": "CTCTCTCTCTCTCTT",
+      "ALT_genotype_recovered": true
+    },
+    {
+      "variant_id": "chr21:7944639:TTCCA:*",
+      "rows_checked": 10000,
+      "exact_call_match": true,
+      "raw_counted_allele": "*",
+      "BIM_A1": "*",
+      "BIM_A2": "TTCCA",
+      "ALT_genotype_recovered": true
+    },
+    {
+      "variant_id": "chr21:23514181:A:C",
+      "rows_checked": 10000,
+      "exact_call_match": true,
+      "raw_counted_allele": "A",
+      "BIM_A1": "C",
+      "BIM_A2": "A",
+      "ALT_genotype_recovered": true
+    },
+    {
+      "variant_id": "chr21:23600966:C:T",
+      "rows_checked": 10000,
+      "exact_call_match": true,
+      "raw_counted_allele": "T",
+      "BIM_A1": "T",
+      "BIM_A2": "C",
+      "ALT_genotype_recovered": true
+    },
+    {
+      "variant_id": "chr21:35744592:C:T",
+      "rows_checked": 10000,
+      "exact_call_match": true,
+      "raw_counted_allele": "T",
+      "BIM_A1": "T",
+      "BIM_A2": "C",
+      "ALT_genotype_recovered": true
+    },
+    {
+      "variant_id": "chr22:29692050:T:G",
+      "rows_checked": 10000,
+      "exact_call_match": true,
+      "raw_counted_allele": "G",
+      "BIM_A1": "G",
+      "BIM_A2": "T",
+      "ALT_genotype_recovered": true
+    },
+    {
+      "variant_id": "chr22:29837266:C:T",
+      "rows_checked": 10000,
+      "exact_call_match": true,
+      "raw_counted_allele": "T",
+      "BIM_A1": "T",
+      "BIM_A2": "C",
+      "ALT_genotype_recovered": true
+    },
+    {
+      "variant_id": "chr22:34438252:G:A",
+      "rows_checked": 10000,
+      "exact_call_match": true,
+      "raw_counted_allele": "A",
+      "BIM_A1": "A",
+      "BIM_A2": "G",
+      "ALT_genotype_recovered": true
+    },
+    {
+      "variant_id": "chr22:41395606:T:G",
+      "rows_checked": 10000,
+      "exact_call_match": true,
+      "raw_counted_allele": "G",
+      "BIM_A1": "G",
+      "BIM_A2": "T",
+      "ALT_genotype_recovered": true
+    },
+    {
+      "variant_id": "chr22:41570145:G:A",
+      "rows_checked": 10000,
+      "exact_call_match": true,
+      "raw_counted_allele": "A",
+      "BIM_A1": "A",
+      "BIM_A2": "G",
+      "ALT_genotype_recovered": true
+    },
+    {
+      "variant_id": "chr22:43193854:T:A",
+      "rows_checked": 10000,
+      "exact_call_match": true,
+      "raw_counted_allele": "A",
+      "BIM_A1": "A",
+      "BIM_A2": "T",
+      "ALT_genotype_recovered": true
+    },
+    {
+      "variant_id": "chr22:47204924:GGTTAGATGTGGGGTGAGCTAGAGAGAGCAGGGGATCTCTCAGGGTTAGATGTGGGGTGACGGAGAGAGCAGGGGATCTC:*",
+      "rows_checked": 10000,
+      "exact_call_match": true,
+      "raw_counted_allele": "*",
+      "BIM_A1": "*",
+      "BIM_A2": "GGTTAGATGTGGGGTGAGCTAGAGAGAGCAGGGGATCTCTCAGGGTTAGATGTGGGGTGACGGAGAGAGCAGGGGATCTC",
+      "ALT_genotype_recovered": true
+    },
+    {
+      "variant_id": "chr22:47298795:C:T",
+      "rows_checked": 10000,
+      "exact_call_match": true,
+      "raw_counted_allele": "T",
+      "BIM_A1": "T",
+      "BIM_A2": "C",
+      "ALT_genotype_recovered": true
+    },
+    {
+      "variant_id": "chr22:48560588:ATTATAT:AATAT",
+      "rows_checked": 10000,
+      "exact_call_match": true,
+      "raw_counted_allele": "AATAT",
+      "BIM_A1": "AATAT",
+      "BIM_A2": "ATTATAT",
+      "ALT_genotype_recovered": true
+    },
+    {
+      "variant_id": "chr22:49402263:A:G",
+      "rows_checked": 10000,
+      "exact_call_match": true,
+      "raw_counted_allele": "A",
+      "BIM_A1": "G",
+      "BIM_A2": "A",
+      "ALT_genotype_recovered": true
+    },
+    {
+      "variant_id": "chr22:49470905:CAA:*",
+      "rows_checked": 10000,
+      "exact_call_match": true,
+      "raw_counted_allele": "*",
+      "BIM_A1": "*",
+      "BIM_A2": "CAA",
+      "ALT_genotype_recovered": true
+    },
+    {
+      "variant_id": "chr22:50665323:GT:G",
+      "rows_checked": 10000,
+      "exact_call_match": true,
+      "raw_counted_allele": "G",
+      "BIM_A1": "G",
+      "BIM_A2": "GT",
+      "ALT_genotype_recovered": true
+    },
+    {
+      "variant_id": "chr22:50799821:A:C",
+      "rows_checked": 10000,
+      "exact_call_match": true,
+      "raw_counted_allele": "C",
+      "BIM_A1": "C",
+      "BIM_A2": "A",
+      "ALT_genotype_recovered": true
+    }
+  ],
+  "source_bed_sha256": "cd48b88a48021b52e3ff4353557a3bcb1eb448c5eb1e3263bb230696b47cd235",
+  "rewritten_bed_sha256": "cd48b88a48021b52e3ff4353557a3bcb1eb448c5eb1e3263bb230696b47cd235",
+  "log": "output/sketch_to_plink1/behavioral_fixture/plink_native.log"
+}

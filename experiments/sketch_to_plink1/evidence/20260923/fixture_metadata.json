@@ -1,0 +1,42 @@
+{
+  "object_type": "genotype",
+  "format": "PLINK1",
+  "prefix": "genotype",
+  "purpose": "behavioral_benchmark",
+  "content_semantics": "opaque",
+  "sample_kind": "synthetic_pseudo_individuals",
+  "sample_count": 10000,
+  "variant_count": 20000,
+  "chromosomes": [
+    1,
+    6,
+    19,
+    21,
+    22
+  ],
+  "counted_allele": "ALT (BIM A1)",
+  "generation": {
+    "method": "minor_allele_rank_quantile",
+    "theta": 1.0,
+    "theta_selection": "fixed_choice",
+    "seed": 20260923,
+    "source": "existing sketch ranks and permitted allele frequencies",
+    "region_manifest": "../prepared/regions.tsv",
+    "source_sketch_root": "/sc/arion/projects/load/users/sunh14/myloid_paper/Myloid-paper/3_Production/cosi_archive/COSI/hg38/ADSP_reference_panel/ADSP_sketch_reference/EUR/rss_ld_sketch"
+  },
+  "scientific_fidelity": "not_claimed",
+  "scientific_integration_fixture": false,
+  "format_verification": "roundtrip_verified.json",
+  "file_hashes": "export.json",
+  "negative_result_archive": "../../../archive/sketch_to_plink1_20260923/README.md",
+  "reproduction_commands": "../../../experiments/sketch_to_plink1/RUN.md",
+  "lsf_job_id": 270113524,
+  "covariate_file": "traits/covariates.cov.gz",
+  "phenotype_file": "traits/phenotypes.bed.gz",
+  "traits_description": "40 quantitative synthetic traits; 12 correlated covariates; 10000 FAM-aligned pseudo-individuals",
+  "traits_verification": "traits/qc_summary.json",
+  "traits_ground_truth": "traits/causal_truth.tsv",
+  "traits_status": "completed_and_verified",
+  "traits_lsf_job_id": 270117742,
+  "traits_seed": 20260924
+}

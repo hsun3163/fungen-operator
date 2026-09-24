@@ -1,0 +1,11 @@
+{
+  "theta": 1.4305555555555556,
+  "B": 10000,
+  "regions": 20,
+  "variants": 20000,
+  "bed_bytes": 50000003,
+  "expected_bed_bytes": 50000003,
+  "bed_sha256": "36e3808271d5c2279de9f2964f563f225f0fe07cffacef26ce63dc1ef382c81e",
+  "bim_sha256": "0cd1dcc3c8fa1faef55b77cd3075347ae8f076f4eea214351cc2cec3e7b6c23d",
+  "fam_sha256": "b2a6ff7eaae94645f25aed186090d67b5954e67184f95973a0755ddf27a3ad69"
+}

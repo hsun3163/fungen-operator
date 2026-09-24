@@ -1,0 +1,158 @@
+{
+  "experiment": "two_stratum_v1",
+  "status": "complete",
+  "conclusion": "unsupported",
+  "theta_low": 2.0,
+  "theta_high": 1.4305555555555556,
+  "maf_cutoff": 0.05,
+  "development_weighted_rmse": 0.1145959231455672,
+  "reserved_validation_weighted_rmse": 0.12235294125421663,
+  "hwe_baseline_reserved_validation_weighted_rmse": 0.12411146438841689,
+  "selected_vs_baseline_delta": -0.00175852313420026,
+  "reserved_chromosome_rmse": {
+    "2": 0.1337915290900616,
+    "20": 0.10972835190076799
+  },
+  "pooled_pair_metrics": {
+    "signed_r_correlation": 0.9770843385187237,
+    "signed_rmse": 0.08282511719491291,
+    "signed_bias": -0.015227362477127197,
+    "r2_rmse": 0.08363280443865279,
+    "strong_abs_r_bias": -0.12837934292838846,
+    "max_alt_af_error": 2.5000000000052758e-05,
+    "hwe_variant_fraction_within_10pct": 0.5403348554033486,
+    "conversion_rate": 1.0,
+    "n_pairs": 188832
+  },
+  "gates": {
+    "development_weighted_rmse_le_0.10": false,
+    "heldout_weighted_rmse_le_0.10": false,
+    "transfer_delta_le_0.03": true,
+    "transfer_ratio_le_1.25": true,
+    "each_chromosome_weighted_rmse_le_0.15": true,
+    "covered_ld_maf_strata_rmse_le_0.15": false,
+    "adequately_covered_strata_count": 12,
+    "pooled_signed_r_correlation_ge_0.90": true,
+    "pooled_r2_rmse_le_0.10": true,
+    "strong_pair_abs_bias_le_0.10": false,
+    "max_frequency_error_bound": true,
+    "hwe_95pct_for_maf_ge_0.05": false,
+    "all_columns_nonconstant": true
+  },
+  "covered_ld_maf_strata": [
+    {
+      "ld_bin": "[.1,.5)",
+      "maf_pair_type": "0-2",
+      "n_pairs": 5559,
+      "n_regions": 6,
+      "rmse": 0.13269418330033003,
+      "bias": -0.04968909794050684
+    },
+    {
+      "ld_bin": "[.1,.5)",
+      "maf_pair_type": "1-2",
+      "n_pairs": 11348,
+      "n_regions": 6,
+      "rmse": 0.11667843537485902,
+      "bias": -0.012947761015468197
+    },
+    {
+      "ld_bin": "[.1,.5)",
+      "maf_pair_type": "2-2",
+      "n_pairs": 16503,
+      "n_regions": 6,
+      "rmse": 0.09750313408554905,
+      "bias": -0.006707254780194812
+    },
+    {
+      "ld_bin": "[.5,1]",
+      "maf_pair_type": "0-0",
+      "n_pairs": 3482,
+      "n_regions": 6,
+      "rmse": 0.2701281439875036,
+      "bias": -0.20830181683380616
+    },
+    {
+      "ld_bin": "[.5,1]",
+      "maf_pair_type": "1-1",
+      "n_pairs": 3606,
+      "n_regions": 6,
+      "rmse": 0.16178623165027212,
+      "bias": -0.12335151980471522
+    },
+    {
+      "ld_bin": "[.5,1]",
+      "maf_pair_type": "2-2",
+      "n_pairs": 18160,
+      "n_regions": 6,
+      "rmse": 0.12190057183339187,
+      "bias": -0.07325543993191523
+    },
+    {
+      "ld_bin": "[0,.1)",
+      "maf_pair_type": "0-0",
+      "n_pairs": 24455,
+      "n_regions": 6,
+      "rmse": 0.016657890120898494,
+      "bias": 0.002341664981140089
+    },
+    {
+      "ld_bin": "[0,.1)",
+      "maf_pair_type": "0-1",
+      "n_pairs": 24639,
+      "n_regions": 6,
+      "rmse": 0.017872547020985258,
+      "bias": 0.006807448896347183
+    },
+    {
+      "ld_bin": "[0,.1)",
+      "maf_pair_type": "0-2",
+      "n_pairs": 45023,
+      "n_regions": 6,
+      "rmse": 0.033568977246802065,
+      "bias": 0.0037428133232864976
+    },
+    {
+      "ld_bin": "[0,.1)",
+      "maf_pair_type": "1-1",
+      "n_pairs": 7445,
+      "n_regions": 6,
+      "rmse": 0.021762259689895397,
+      "bias": 0.011824178983068472
+    },
+    {
+      "ld_bin": "[0,.1)",
+      "maf_pair_type": "1-2",
+      "n_pairs": 20506,
+      "n_regions": 6,
+      "rmse": 0.038328779620808315,
+      "bias": 0.012000968473902182
+    },
+    {
+      "ld_bin": "[0,.1)",
+      "maf_pair_type": "2-2",
+      "n_pairs": 5716,
+      "n_regions": 6,
+      "rmse": 0.03426711510246945,
+      "bias": 0.0037029395410164206
+    }
+  ],
+  "region_bootstrap": {
+    "seed": 20260923,
+    "resampling_unit": "region",
+    "replicates": 20000,
+    "development_ci95": [
+      0.10973011201262266,
+      0.11955908965907697
+    ],
+    "reserved_validation_ci95": [
+      0.10490916168697167,
+      0.14333493610516562
+    ],
+    "difference_ci95": [
+      -0.010617847152246635,
+      0.029411454383566547
+    ]
+  },
+  "scope": "eight chr22 development regions and six chr2/chr20 reserved validation regions; no genome-wide validation"
+}
