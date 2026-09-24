@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fungen-operator"
+version = "0.1.0"
+description = "Fixed notebook actions for existing canonical workflows"
+requires-python = ">=3.11"
+dependencies = ["mcp>=2.2,<3", "pydantic>=2,<3", "nbformat>=5.9,<6", "nbclient>=0.10,<1", "ipykernel>=6", "PyYAML>=6"]
+
+[project.optional-dependencies]
+test = ["pytest>=7"]
+
+[project.scripts]
+fungen-operator = "fungen_operator.__main__:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

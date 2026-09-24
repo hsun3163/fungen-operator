@@ -3,6 +3,12 @@
 Updated: 2026-09-23  
 Status: canonical conceptual model for the replacement; implementation is not yet complete.
 
+The [thin lab-tech prototype](operator_prototype.md) now implements the fixed-cell path through
+three workflow actions: `prepare_config`, `check_readiness`, and `initiate_run`. It follows the
+[action-surface design](operator_action_surface_20260923.md), with scientific configuration
+changes approved through the harness and harmonization outside its action catalog. Both modes
+consume developer-owned canonical source; composition remains a later implementation phase.
+
 ## 1. What Fungen Operator is
 
 Fungen Operator is a reliability layer for coding agents that operate **existing functional-genomics workflows**.
@@ -169,13 +175,13 @@ See [benchmark.md](benchmark.md) for the canonical benchmark specification, [res
 
 ## 12. Current implementation status
 
-As of 2026-09-22:
+As of 2026-09-23:
 
 - the historical evidence and failure analyses are retained;
 - 19 imported skill entrypoints remain available as capability and design sources;
 - overlapping operating procedures still exist in the legacy collection;
-- a replacement operator has **not** yet been implemented or validated;
-- the next implementation target is to extract successful MESA/CARDIA state-changing notebook cells into the smallest useful fixed template catalog, then expose that catalog through a single operator entry point;
+- a thin lab-tech harness implements typed tools, fixed-cell rendering, notebook history, and execution with a synthetic acceptance lifecycle;
+- the next catalog work is extracting further parameter and recovery templates from retained runs; composition and live HPC acceptance remain later work;
 - the benchmark should test composition, persistence, recovery, and contract adherence without creating a replacement composition framework;
 - legacy procedures should be retired only after their capabilities have a deliberate migration disposition and representative acceptance cases pass.
 
