@@ -1,11 +1,13 @@
 import asyncio
 import copy
 import json
+import sys
 from pathlib import Path
 
 import nbformat
 import pytest
 from mcp import Client
+from mcp.client.stdio import StdioServerParameters
 from mcp.types import ElicitResult
 from pydantic import ValidationError
 
@@ -16,7 +18,7 @@ from fungen_operator.execution import Executor
 from fungen_operator.fixture import create_fixture
 from fungen_operator.harness import Harness
 from fungen_operator.notebook import Notebook, active, verify
-from fungen_operator.server import create_server
+from fungen_operator.server import create_server, serve_stdio
 
 
 @pytest.fixture
@@ -300,3 +302,62 @@ def test_end_to_end_mcp_notebook_execution_and_replay(setup):
     assert replay[-1]["status"] == "nothing_to_do"
     assert {p: p.stat().st_mtime_ns for p in files} == stamps
     verify(book.read())
+
+
+def test_stdio_reports_blocked_local_sockets(monkeypatch):
+    def denied():
+        raise PermissionError("Operation not permitted")
+    monkeypatch.setattr("fungen_operator.server.socket.socketpair", denied)
+    with pytest.raises(SystemExit, match="approved host execution path"):
+        serve_stdio(None)
+
+
+@pytest.mark.parametrize("mode", ["auto", "legacy"])
+def test_stdio_tools_and_scientific_approval(setup, tmp_path, mode):
+    """Real subprocess/JSON-RPC connection; live backend stages without submitting."""
+    deployment, args = setup
+    deployment = deployment.model_copy(update={"backend": "lsf"})
+    deployment_path = tmp_path / "deployment.json"
+    deployment_path.write_text(deployment.model_dump_json())
+    server = StdioServerParameters(
+        command=sys.executable,
+        args=["-m", "fungen_operator", "serve", "--deployment", str(deployment_path)],
+        cwd=str(Path(__file__).resolve().parents[1]),
+    )
+    answers = iter([False, True])
+    asked = []
+
+    async def simulated_human(ctx, params):
+        asked.append(params.message)
+        assert "pca.n_pcs" in params.message
+        assert not Path(args["notebook"]).exists()
+        assert not Path(args["configfile"]).exists()
+        return ElicitResult(action="accept", content={"approve": next(answers)})
+
+    async def exercise():
+        async with Client(server, mode=mode, read_timeout_seconds=15,
+                          elicitation_callback=simulated_human) as client:
+            listed = await client.list_tools()
+            assert {t.name for t in listed.tools} == {
+                "prepare_config", "check_readiness", "initiate_run", "inspect_run"}
+            request = {"request": {**args, "parameters": {"pca.n_pcs": 1}}}
+            declined = await client.call_tool("prepare_config", request)
+            assert not declined.is_error, declined
+            assert declined.structured_content["status"] == "approval_declined"
+            accepted = await client.call_tool("prepare_config", request)
+            assert not accepted.is_error, accepted
+            assert accepted.structured_content["status"] == "host_approval_required"
+            assert "execute" in accepted.structured_content["host_command"]
+            inspected = await client.call_tool("inspect_run", {"request": {"notebook": args["notebook"]}})
+            assert not inspected.is_error, inspected
+            assert inspected.structured_content["cells"][0]["status"] == "host_approval_required"
+            invalid = await client.call_tool("initiate_run", {
+                "request": {**run_args(deployment, args), "targets": ["--forceall"]}})
+            assert invalid.is_error
+
+    asyncio.run(exercise())
+    assert len(asked) == 2
+    nb = Notebook(args["notebook"]).read()
+    assert active(nb)[0].metadata.fungen.approval.channel == "mcp_human_elicitation"
+    assert not Path(args["configfile"]).exists()
+    assert not Path(deployment.conda_env, "scheduler.json").exists()

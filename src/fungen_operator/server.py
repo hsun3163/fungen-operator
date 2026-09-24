@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import socket
 from typing import Annotated, Any
 
 from mcp.server import MCPServer
@@ -25,6 +26,24 @@ class OperatorServer(MCPServer):
         if set(arguments) != {"request"}:
             raise ToolError("Action tools accept only the structured request argument")
         return await super().call_tool(name, arguments, context)
+
+
+def serve_stdio(harness: Harness):
+    # asyncio wakes its event loop from stdin worker threads through a local
+    # socket pair. Minerva's restricted sandbox allows creating that pair but
+    # rejects writes, which otherwise leaves MCP initialization waiting forever.
+    try:
+        reader, writer = socket.socketpair()
+        with reader, writer:
+            writer.send(b"\0")
+    except OSError as exc:
+        raise SystemExit(
+            "MCP stdio startup blocked: this environment cannot write to local "
+            "sockets required by the async runtime. Start the server through "
+            "the approved host execution path outside the sandbox. "
+            f"Underlying error: {exc}"
+        ) from exc
+    create_server(harness).run()
 
 
 def create_server(harness: Harness):

@@ -42,8 +42,8 @@ def main():
     executor = Executor(deployment, host_approved=args.command in {"execute", "replay", "inspect"})
     harness = Harness(deployment, executor, str(Path(args.deployment).resolve()))
     if args.command == "serve":
-        from .server import create_server
-        create_server(harness).run()
+        from .server import serve_stdio
+        serve_stdio(harness)
     elif args.command == "execute":
         print(json.dumps(harness.execute_pending(args.notebook, args.cell), indent=2))
     elif args.command == "replay":

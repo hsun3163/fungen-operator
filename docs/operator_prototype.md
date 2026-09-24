@@ -5,9 +5,9 @@ validated slots, fixed notebook cells, execution, and retained evidence. Canonic
 implementation remains outside the operator's write surface. Harmonization starts upstream.
 
 First-bar status: the in-process MCP lifecycle and notebook replay passed, and the executed
-example is retained. The separate stdio client startup check timed out during initialization;
-external client connection is not yet verified. Further transport investigation and hardening
-were deferred at the user's request. Live HPC execution remains untested.
+example is retained. External stdio clients now pass tool discovery, calls, scientific approval,
+and notebook staging in both automatic and legacy protocol modes on the host. Live HPC execution
+remains untested.
 
 ## Implementation boundaries
 
@@ -81,6 +81,20 @@ python -m venv /tmp/fungen-prototype-venv
 Connect a local stdio MCP server using the environment's absolute Python path, arguments
 `-m fungen_operator serve --deployment /absolute/path/deployment.json`, and this repository as
 its working directory. Load `skills/fungen-operator/SKILL.md` as the operator entrypoint.
+
+Launch the server outside Minerva's restricted command sandbox through the approved host path.
+The earlier initialization timeout was reproduced with an otherwise empty MCP server:
+the sandbox permits creating local socket pairs but rejects writes with `EPERM`. Python's
+async runtime needs those writes to wake its event loop when stdin worker threads finish.
+The identical server initialized successfully on the host. The `serve` entrypoint now checks
+this capability and exits with an actionable error instead of waiting indefinitely.
+
+The MCP client launches and manages this process; its command is:
+
+```bash
+/tmp/fungen-prototype-venv/bin/python -m fungen_operator serve --deployment /absolute/path/deployment.json
+```
+
 The SDK version range is MCP 2.2–2.x; the server uses resolver-based elicitation to support
 negotiated modern and legacy clients. A client without human elicitation can still use the
 operational path, but scientific changes fail closed.
@@ -160,6 +174,15 @@ and external scientific-drift protection, all 26 lightweight cases passed; the p
 passing integration case was not repeated. The retained notebook has four active cells and six
 superseded attempts, all executed, with final `nothing_to_do` evidence and the interrupted
 submission's receipt preserved. Its active cells also passed the CLI re-render verification.
+
+The subsequent MCP connection fix passed three focused checks (`pytest -q tests/test_harness.py
+-k stdio`) on the host: clear rejection of blocked local sockets and real subprocess clients
+in both protocol modes. The clients discover all four tools, reject an injected target flag,
+decline then accept a simulated scientific approval, stage a notebook cell, and inspect it.
+The tests use the live backend's staging path with synthetic files; they submit no jobs.
+The actual restricted `serve` invocation also returned the expected startup diagnostic.
+An external client using `deployments/xqtl.example.json` also discovered all four tools and
+successfully called `inspect_run` without creating a notebook or submitting work.
 
 Mechanically enforced inside the harness: known actions, typed/validated slots, scientific
 approval exchange, fixed rendering, write-path boundaries, source/config identity checks,

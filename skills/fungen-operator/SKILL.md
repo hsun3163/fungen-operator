@@ -9,6 +9,9 @@ Use the connected `prepare_config`, `check_readiness`, `initiate_run`, and `insp
 Read source, configuration, notebook history, logs, and output paths to select the next action.
 The developer owns workflow implementation. Harmonized input paths are the starting boundary.
 
+Start the stdio server through the approved host path outside Minerva's command sandbox.
+Its async transport requires local socket writes; restricted startup reports this explicitly.
+
 1. Bind one notebook, configuration, and working directory to the requested output graph.
    Inspect the deployment's canonical defaults; supply exposed parameters as typed values.
 2. Call `prepare_config`. Defaults are recommended. Scientific differences go to the human
