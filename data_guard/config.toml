@@ -1,0 +1,15 @@
+# Librarian Codex config: copy to $LIBRARIAN_HOME/codex/config.toml.
+# Local model only. The endpoint is not set here: the `codex --oss` launcher
+# takes it from OLLAMA_HOST or finds the Ollama LSF job and tunnels to it.
+oss_provider = "ollama"
+model = "qwen3.8-flash-next:125b-a6b-q4_K_M"
+# Full reasoning for the work; `librarian` resumes at "none" only to write a
+# final message when Ollama returned the reply as reasoning.
+model_reasoning_effort = "xhigh"
+
+# Commands may read everything but write only the run directory (and /tmp).
+sandbox_mode = "workspace-write"
+approval_policy = "never"
+
+[sandbox_workspace_write]
+network_access = true

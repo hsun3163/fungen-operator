@@ -1,0 +1,104 @@
+#!/bin/sh
+# librarian [--me] "<task>"
+#
+# default: final librarian message -> stdout
+# --me:    final librarian message -> latest.md; caller receives only "Done"
+#
+# The model endpoint comes from the `codex --oss` launcher: set OLLAMA_HOST to
+# pin it, otherwise the launcher finds the Ollama LSF job and tunnels to it.
+
+L=${LIBRARIAN_HOME:-$HOME/sunh14_project/librarian_agent}
+timeout_s=${LIBRARIAN_TIMEOUT:-1800}
+
+tag=agent
+aud="the coding agent"
+
+if [ "$1" = --me ]; then
+    tag=me
+    aud="the user"
+    shift
+fi
+
+if [ -z "$*" ]; then
+    echo 'usage: librarian [--me] "<task>"'
+    exit 2
+fi
+
+id=$(date +%Y%m%d-%H%M%S)-$tag-$$
+run=$L/runs/$id
+
+mkdir -p "$run" || { echo "Librarian failed: cannot create $run"; exit 1; }
+printf '%s\n' "$*" > "$run/task"
+
+# Jupyter writes to its config and runtime dirs, which the sandbox makes read-only.
+export JUPYTER_CONFIG_DIR="$run/.jupyter"
+export JUPYTER_RUNTIME_DIR="$run/.jupyter/runtime"
+export IPYTHONDIR="$run/.jupyter/ipython"
+
+# stdin from /dev/null: codex exec appends piped stdin to the prompt and would
+# otherwise wait on a caller's open pipe.
+timeout -k 30 "$timeout_s" \
+    env CODEX_HOME="$L/codex" \
+    codex exec --oss \
+        --skip-git-repo-check \
+        -s workspace-write \
+        -C "$run" \
+        -o "$run/answer.md" \
+        "Your answer goes to $aud. Your run directory is $run. Task: $*" \
+        < /dev/null > "$run/log" 2>&1
+
+rc=$?
+
+# With reasoning on, Ollama can return Qwen's reply after a tool call as
+# reasoning, so no final message is recorded. Resume the same session with
+# reasoning off only to write the final message.
+sid=$(sed -n 's/^session id: //p' "$run/log" | head -n 1)
+if [ $rc -eq 0 ] && [ ! -s "$run/answer.md" ] && [ -n "$sid" ]; then
+    timeout -k 30 "$timeout_s" \
+        env CODEX_HOME="$L/codex" \
+        codex exec --oss -c 'model_reasoning_effort="none"' \
+            resume --skip-git-repo-check \
+            -o "$run/answer.md" \
+            "$sid" \
+            "Write your final answer to the task now, from the work above. Your answer goes to $aud. Output only the answer." \
+            < /dev/null >> "$run/log" 2>&1
+    rc=$?
+fi
+
+if [ $rc -eq 124 ] || [ $rc -eq 137 ]; then
+    echo "Librarian timed out after ${timeout_s}s. Log: $run/log"
+    exit 1
+fi
+
+if [ $rc -ne 0 ]; then
+    echo "Librarian failed: codex exec exited rc=$rc (check the Qwen endpoint). Log: $run/log"
+    exit 1
+fi
+
+if [ ! -s "$run/answer.md" ]; then
+    echo "Librarian failed: no final answer was written. Log: $run/log"
+    exit 1
+fi
+
+if [ "$tag" = me ]; then
+    {
+        printf '### %s\n' "$(date '+%F %T')"
+        printf '> %s\n\n' "$*"
+
+        if [ -e "$run/analysis.ipynb" ]; then
+            printf 'Notebook: `%s`\n\n' "$run/analysis.ipynb"
+            if [ -n "$LIBRARIAN_JUPYTER_BASE_URL" ]; then
+                root=${LIBRARIAN_JUPYTER_ROOT:-$HOME}
+                printf 'JupyterLab: %s/lab/tree/%s\n\n' \
+                    "${LIBRARIAN_JUPYTER_BASE_URL%/}" "${run#"${root%/}"/}/analysis.ipynb"
+            fi
+        fi
+
+        cat "$run/answer.md"
+    } > "$L/latest.md.tmp" &&
+        mv "$L/latest.md.tmp" "$L/latest.md"
+
+    echo "Done. The answer is in the user's latest.md."
+else
+    cat "$run/answer.md"
+fi
