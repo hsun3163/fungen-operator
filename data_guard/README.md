@@ -85,8 +85,7 @@ Environment (e.g. in `~/.bashrc`):
 | `CODEX_OLLAMA_MODEL` | `qwen3.8-flash-next:125b-a6b-q4_K_M` | model name |
 | `LIBRARIAN_TIMEOUT` | `1800` | seconds per Codex call |
 | `LIBRARIAN_REPO` | `$LIBRARIAN_HOME/repo` | private git clone; README.md = latest answer, answers/ = all |
-| `LIBRARIAN_JUPYTER_BASE_URL` | unset | JupyterLab base URL for notebook links, without token |
-| `LIBRARIAN_JUPYTER_ROOT` | `$HOME` | Jupyter server root the links are relative to |
+| `LIBRARIAN_JUPYTER_BASE_URL` | `$JUPYTER_SERVER_URL` | JupyterLab base URL for links (no token); the Minerva launcher exports `JUPYTER_SERVER_URL` |
 
 **Endpoint.** `librarian` calls `codex exec --oss` through the existing Minerva launcher (`~/local/bin/codex`,
 `~/local/scripts/minerva_ollama_common.sh`). With `OLLAMA_HOST` unset, the launcher finds the running
@@ -138,8 +137,9 @@ For substantive analyses the librarian writes `runs/<id>/analysis.ipynb` (from a
 executes it with `jupyter nbconvert --execute --allow-errors --inplace`, and keeps the outputs. The wrapper points
 Jupyter's config, runtime and IPython dirs into the run directory because the sandbox makes `~/.jupyter` read-only.
 `--me` answers show every path as `~/...` (the wrapper rewrites absolute paths through the most specific
-symlink in `$HOME`, because JupyterLab opens only paths under its root) and include the notebook path and, when `LIBRARIAN_JUPYTER_BASE_URL` is set,
-`<base_url>/lab/tree/<path relative to LIBRARIAN_JUPYTER_ROOT>`. Tokens are never included.
+symlink in `$HOME`, because JupyterLab opens only paths under its root) and turns each one outside code blocks into a
+link, `<base_url>/lab/tree/<path>`, with the base URL taken from `$JUPYTER_SERVER_URL` so it follows the server to
+new nodes. Tokens are never included.
 
 ## Tests
 

@@ -92,6 +92,29 @@ tilde_sed() {
     done | sort -rn | cut -f2
 }
 
+# Link each ~/ path to JupyterLab (outside code blocks). The base URL defaults
+# to the JUPYTER_SERVER_URL exported by the Minerva Jupyter launcher.
+link_paths() {
+    base=${LIBRARIAN_JUPYTER_BASE_URL:-$JUPYTER_SERVER_URL}
+    if [ -z "$base" ] || [ "${JUPYTER_SERVER_ROOT:-$HOME}" != "$HOME" ]; then
+        cat
+        return
+    fi
+    awk -v base="${base%/}/lab/tree/" '
+        /^[ \t]*```/ { fence = !fence; print; next }
+        fence { print; next }
+        {
+            out = ""
+            while (match($0, /`~\/[^`]+`|~\/[A-Za-z0-9_.\/+-]*[A-Za-z0-9_\/+-]/)) {
+                tok = substr($0, RSTART, RLENGTH); pre = substr($0, 1, RSTART - 1)
+                path = tok; gsub(/`/, "", path); gsub(/ /, "%20", path)
+                out = out pre (pre ~ /\[$/ ? tok : "[" tok "](" base substr(path, 3) ")")
+                $0 = substr($0, RSTART + RLENGTH)
+            }
+            print out $0
+        }'
+}
+
 if [ "$tag" = me ]; then
     tilde_sed > "$run/tilde.sed"
     {
@@ -100,15 +123,10 @@ if [ "$tag" = me ]; then
 
         if [ -e "$run/analysis.ipynb" ]; then
             printf 'Notebook: `%s`\n\n' "$run/analysis.ipynb"
-            if [ -n "$LIBRARIAN_JUPYTER_BASE_URL" ]; then
-                root=${LIBRARIAN_JUPYTER_ROOT:-$HOME}
-                printf 'JupyterLab: %s/lab/tree/%s\n\n' \
-                    "${LIBRARIAN_JUPYTER_BASE_URL%/}" "${run#"${root%/}"/}/analysis.ipynb"
-            fi
         fi
 
         cat "$run/answer.md"
-    } | sed -f "$run/tilde.sed" > "$L/latest.md.tmp" &&
+    } | sed -f "$run/tilde.sed" | link_paths > "$L/latest.md.tmp" &&
         mv "$L/latest.md.tmp" "$L/latest.md"
 
     # Publish to the user's private answers repo, if cloned: README.md is the

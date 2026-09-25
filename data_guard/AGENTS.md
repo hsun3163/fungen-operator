@@ -85,5 +85,4 @@ trivial lookups.
   `jupyter nbconvert --to notebook --execute --allow-errors --inplace analysis.ipynb`.
   If the kernel cannot start, investigate the actual error; if localhost TCP is the problem try
   `--KernelManager.transport=ipc`.
-- In your answer give the notebook path and, when `LIBRARIAN_JUPYTER_BASE_URL` is set, the link
-  `$LIBRARIAN_JUPYTER_BASE_URL/lab/tree/<path relative to ${LIBRARIAN_JUPYTER_ROOT:-$HOME}>`. Never include tokens.
+- In your answer give the notebook path as `~/...`; the wrapper turns `~/` paths into JupyterLab links.
