@@ -80,7 +80,20 @@ if [ ! -s "$run/answer.md" ]; then
     exit 1
 fi
 
+# JupyterLab opens only paths under its root (~), so user-facing paths are
+# rewritten to ~/..., through the most specific visible symlink in $HOME.
+tilde_sed() {
+    printf '%s\n' "s|$HOME/|~/|g"
+    for l in "$HOME"/*; do
+        [ -L "$l" ] && [ -d "$l" ] || continue
+        t=$(readlink -f "$l")
+        case $t in "$HOME"/*) continue ;; esac
+        printf '%s\t%s\n' "${#t}" "s|$t/|~/${l##*/}/|g;s|$t\$|~/${l##*/}|;s|$t\([^-_.a-zA-Z0-9/]\)|~/${l##*/}\1|g"
+    done | sort -rn | cut -f2
+}
+
 if [ "$tag" = me ]; then
+    tilde_sed > "$run/tilde.sed"
     {
         printf '### %s\n' "$(date '+%F %T')"
         printf '> %s\n\n' "$*"
@@ -95,7 +108,7 @@ if [ "$tag" = me ]; then
         fi
 
         cat "$run/answer.md"
-    } > "$L/latest.md.tmp" &&
+    } | sed -f "$run/tilde.sed" > "$L/latest.md.tmp" &&
         mv "$L/latest.md.tmp" "$L/latest.md"
 
     # Publish to the user's private answers repo, if cloned: README.md is the

@@ -137,7 +137,8 @@ call. There is no other audit system.
 For substantive analyses the librarian writes `runs/<id>/analysis.ipynb` (from a Jupytext or `nbformat` source),
 executes it with `jupyter nbconvert --execute --allow-errors --inplace`, and keeps the outputs. The wrapper points
 Jupyter's config, runtime and IPython dirs into the run directory because the sandbox makes `~/.jupyter` read-only.
-`--me` answers include the notebook path and, when `LIBRARIAN_JUPYTER_BASE_URL` is set,
+`--me` answers show every path as `~/...` (the wrapper rewrites absolute paths through the most specific
+symlink in `$HOME`, because JupyterLab opens only paths under its root) and include the notebook path and, when `LIBRARIAN_JUPYTER_BASE_URL` is set,
 `<base_url>/lab/tree/<path relative to LIBRARIAN_JUPYTER_ROOT>`. Tokens are never included.
 
 ## Tests

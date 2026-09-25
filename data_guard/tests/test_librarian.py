@@ -12,11 +12,11 @@ while [ $# -gt 0 ]; do
     shift
 done
 [ -n "$STUB_FAIL" ] && exit 3
-printf 'FAKE ANSWER\\n' > "$out"
+printf '%s\\n' "${STUB_ANSWER:-FAKE ANSWER}" > "$out"
 """
 
 
-def run(tmp_path, *args, fail=False):
+def run(tmp_path, *args, fail=False, **extra):
     bindir = tmp_path / "bin"
     bindir.mkdir(exist_ok=True)
     stub = bindir / "codex"
@@ -26,6 +26,7 @@ def run(tmp_path, *args, fail=False):
     env.pop("STUB_FAIL", None)
     if fail:
         env["STUB_FAIL"] = "1"
+    env.update(extra)
     return subprocess.run([str(LIBRARIAN), *args], env=env, capture_output=True, text=True)
 
 
@@ -82,3 +83,16 @@ def test_me_mode_publishes_answer_to_repo(tmp_path):
     latest = (tmp_path / "home" / "latest.md").read_text()
     (rd,) = runs(tmp_path)
     assert show("README.md") == latest and show(f"answers/{rd.name}.md") == latest
+
+
+def test_me_mode_writes_paths_under_home(tmp_path):
+    home = tmp_path / "userhome"
+    real = tmp_path / "scratch" / "project"
+    real.mkdir(parents=True)
+    home.mkdir()
+    (home / "proj").symlink_to(real)
+    answer = f"Notebook: {real}/run/analysis.ipynb and {home}/notes.md"
+    p = run(tmp_path, "--me", "task", HOME=str(home), STUB_ANSWER=answer)
+    assert p.returncode == 0
+    text = (tmp_path / "home" / "latest.md").read_text()
+    assert "Notebook: ~/proj/run/analysis.ipynb and ~/notes.md" in text

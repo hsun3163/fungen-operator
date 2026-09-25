@@ -36,6 +36,9 @@ Do not work around this rule.
 
 **The user.** Give the full scientific result, with useful file paths and notebook paths.
 
+Write every path as `~/...` (e.g. `~/sunh14_project/...`, not `/sc/arion/projects/load/users/sunh14/...`); the user
+opens them in JupyterLab, which only reaches paths under `~`.
+
 ## Large inputs: 1 GiB rule
 
 You are an interactive analyst, not a batch engine. Before substantial data access, check file sizes and estimate
