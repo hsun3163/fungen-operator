@@ -33,7 +33,8 @@ Use `librarian "<task>"` when debugging genuinely needs result values you should
 result looks wrong).
 
 Use `librarian --me "<task>"` when the user asks to check a result, inspect findings, see which genes/variants
-passed, interpret the final analysis or compare scientific findings. Tell the user the answer is in `latest.md`.
+passed, interpret the final analysis or compare scientific findings. Tell the user the answer is in `latest.md`; the
+wrapper also mirrors it to `librarian/latest.md` in their private knowledge-base repo.
 
 If the librarian replies "This is a scientific-result question. Re-ask it with `librarian --me`", re-ask with
 `--me`; don't rephrase to get the result yourself.

@@ -63,3 +63,20 @@ def test_failure_is_one_line_with_log_path(tmp_path):
     assert p.stdout.splitlines() == [p.stdout.strip()]
     assert str(rd / "log") in p.stdout
     assert "NOISY" not in p.stdout + p.stderr
+
+
+def test_me_mode_syncs_latest_to_knowledge_base(tmp_path):
+    bare = tmp_path / "kb.git"
+    git = lambda *a, cwd=None: subprocess.run(["git", *a], cwd=cwd, check=True, capture_output=True)
+    git("init", "-q", "--bare", "-b", "main", str(bare))
+    kb = tmp_path / "home" / "knowledge_base"
+    git("clone", "-q", str(bare), str(kb))
+    git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "init", cwd=kb)
+    git("push", "-q", "origin", "HEAD:main", cwd=kb)
+    git("config", "user.name", "t", cwd=kb)
+    git("config", "user.email", "t@t", cwd=kb)
+    p = run(tmp_path, "--me", "task")
+    assert p.returncode == 0 and len(p.stdout.splitlines()) == 1 and "failed" not in p.stdout
+    pushed = subprocess.run(["git", "--git-dir", str(bare), "show", "main:librarian/latest.md"],
+                            capture_output=True, text=True, check=True).stdout
+    assert pushed == (tmp_path / "home" / "latest.md").read_text()

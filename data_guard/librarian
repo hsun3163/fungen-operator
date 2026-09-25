@@ -98,7 +98,24 @@ if [ "$tag" = me ]; then
     } > "$L/latest.md.tmp" &&
         mv "$L/latest.md.tmp" "$L/latest.md"
 
-    echo "Done. The answer is in the user's latest.md."
+    # Mirror latest.md to the user's knowledge-base clone, if present.
+    # Git output goes to the run log; a sync failure never fails the call.
+    kb=${LIBRARIAN_KB:-$L/knowledge_base}
+    sync=
+    if [ -d "$kb/.git" ]; then
+        {
+            export GIT_TERMINAL_PROMPT=0
+            timeout 120 git -C "$kb" pull -q --rebase &&
+                mkdir -p "$kb/librarian" &&
+                cp "$L/latest.md" "$kb/librarian/latest.md" &&
+                git -C "$kb" add librarian/latest.md &&
+                { git -C "$kb" diff --cached --quiet ||
+                    git -C "$kb" commit -q -m "Update librarian/latest.md ($id)"; } &&
+                timeout 120 git -C "$kb" push -q
+        } >> "$run/log" 2>&1 || sync=" Knowledge-base sync failed; see $run/log"
+    fi
+
+    echo "Done. The answer is in the user's latest.md.$sync"
 else
     cat "$run/answer.md"
 fi
