@@ -104,7 +104,7 @@ librarian "Run /path/to/check_merge.py against the protected result and tell me 
 
 ## Large analyses
 
-The librarian estimates how much a request would actually read. Up to 1 GiB it runs locally (indexed or subset
+The librarian estimates how much a request would actually read and how much memory it needs. Up to 1 GiB of each it runs locally (indexed or subset
 reads into larger files count by what they read). Beyond that it returns a handoff: the files and read volume,
 exactly what to compute, the existing workflow target or a spec for the reduction code, the small output it needs,
 and the follow-up question. The frontier writes or reuses the target, submits it through LSF, monitors it and

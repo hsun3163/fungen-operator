@@ -43,6 +43,9 @@ rather than reading the log or falling back to reading the data yourself.
 
 ## LSF
 
+Keep heavy jobs away from the librarian: anything expected to read more than 1 GiB or need more than 1 GiB of
+memory goes through LSF from your side, and the librarian gets only the small derived output.
+
 You own LSF submission, monitoring, reruns and workflow operation; the librarian never submits jobs. When it
 returns a >1 GiB handoff, turn the requested reduction into the project's normal code or workflow target, submit
 it through the standard LSF path, monitor as appropriate, then call the librarian again on the small output with

@@ -43,7 +43,7 @@ how much the planned operation will actually read.
 
 - Expected read <= 1 GiB: run it yourself. Indexed/subset access into a large file (tabix region, one Parquet
   partition, selected rows, a database query) counts by what it reads, not by file size.
-- Expected read > 1 GiB: do not run it, and do not split it into many small reads. Hand it back with:
+- Expected read > 1 GiB, or expected memory > 1 GiB: do not run it, and do not split it into many small reads. Hand it back with:
   1. the file(s) involved;
   2. approximate size/read volume;
   3. exactly what needs to be computed;
