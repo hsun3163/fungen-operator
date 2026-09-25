@@ -23,7 +23,7 @@ def run(tmp_path, *args, fail=False, **extra):
     stub.write_text(STUB)
     stub.chmod(0o755)
     env = dict(os.environ, PATH=f"{bindir}:{os.environ['PATH']}", LIBRARIAN_HOME=str(tmp_path / "home"))
-    for k in ("STUB_FAIL", "JUPYTER_SERVER_URL", "JUPYTER_SERVER_ROOT", "LIBRARIAN_JUPYTER_BASE_URL"):
+    for k in ("STUB_FAIL", "JUPYTER_PORT", "JUPYTER_SERVER_ROOT", "LIBRARIAN_JUPYTER_BASE_URL"):
         env.pop(k, None)
     if fail:
         env["STUB_FAIL"] = "1"
@@ -101,8 +101,8 @@ def test_me_mode_writes_paths_under_home(tmp_path):
 
 def test_me_mode_links_paths_to_jupyterlab(tmp_path):
     answer = "Notebook: `~/proj/analysis.ipynb`\n```\ncat ~/proj/x.tsv\n```"
-    p = run(tmp_path, "--me", "task", STUB_ANSWER=answer, JUPYTER_SERVER_URL="http://node:8548/")
+    p = run(tmp_path, "--me", "task", STUB_ANSWER=answer, JUPYTER_PORT="8548")
     assert p.returncode == 0
     text = (tmp_path / "home" / "latest.md").read_text()
-    assert "[`~/proj/analysis.ipynb`](http://node:8548/lab/tree/proj/analysis.ipynb)" in text
+    assert "[`~/proj/analysis.ipynb`](http://127.0.0.1:8548/lab/tree/proj/analysis.ipynb)" in text
     assert "cat ~/proj/x.tsv" in text
