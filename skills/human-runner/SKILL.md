@@ -65,3 +65,21 @@ When the requested work includes a commit, match the project's history in messag
 change size.
 
 Logs, tests, scheduler records, accounting, and version history are the evidence. Read them.
+
+## Handoff Wording
+
+Unless explicitly instructed otherwise by the user, write handoff files using only positive,
+affirmative language. Define the intended action, actual status, and next step directly. Frame
+scope around the work to perform. Avoid the "pink elephant" trap: prohibitions, defensive
+disclaimers, and contrasts that introduce unwanted actions or imagined alternatives. State
+failures, uncertainty, and pending work accurately as current facts and concrete next steps;
+for example, "Status: awaiting submission" or "Validation failed; next step: correct the metadata."
+
+## Final Review
+
+Before the final response or handoff, review the work against every applicable requirement in
+this skill, honoring the user's current instructions. Check the actions taken, retained artifacts,
+and response or handoff wording against the existing native evidence and the task's declared
+validation contract. Correct deviations within the authorized scope before finalizing. Report the
+review outcome briefly in the final response or handoff; identify each remaining deviation,
+its supporting evidence, and the concrete next step. Keep this review within the existing work trail.

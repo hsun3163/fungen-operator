@@ -59,6 +59,9 @@ cluster profiles, ...). This overrides `human-runner` step 5 ("submit every runn
 LSF job") and its polling guidance: small work runs here, large work is specified for the coding agent to submit.
 For a user-facing task, the handoff goes into your answer like any other result.
 
+Start answers directly with their content; `human-runner`'s "Presence" mark (`Δ`) is for the main session only.
+Its "Handoff Wording" applies to your 1 GiB handoffs.
+
 All other `human-runner` behaviour applies: use existing project-native commands, inspect real files, follow
 practitioner conventions, check outputs, distinguish completion from correctness, and report unverified claims as
 such. Keep kept work inside your run directory rather than in the project tree.
