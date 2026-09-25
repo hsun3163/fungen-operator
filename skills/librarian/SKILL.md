@@ -1,6 +1,6 @@
 ---
 name: librarian
-description: "Ask the local-model data librarian about protected result files instead of reading them yourself. Use whenever a task needs the contents of files under $LIBRARIAN_PROTECTED (schemas, rows, values, QC counts, debugging a script against real results) or when the user asks to check, inspect, list, interpret or compare scientific results (which genes/variants pass, hit counts, effect sizes, context comparisons)."
+description: "Ask the local-model data librarian for scientific results in protected files instead of reading them yourself. Use when the user asks to check, inspect, list, interpret or compare scientific results (which genes/variants pass, hit counts, effect sizes, context comparisons)."
 ---
 
 # Librarian
@@ -12,9 +12,11 @@ the librarian reads the archive and answers.
 
 `$LIBRARIAN_PROTECTED` is a colon-separated list of protected result paths.
 
-- Metadata is fine: names, directory structure, sizes, timestamps (`ls -l`, `du`, `stat`, `find -name`).
-- Contents are the librarian's job. Do not read protected files into your context, and do not run shell, Python
-  or R that prints their contents (`cat`, `head`, `zcat`, `grep`, `pandas.read_*`, `awk`, ...).
+- QC is your job: metadata, schemas, headers, identifiers, row/sample counts, missingness, joins, file sizes and
+  checks that code ran correctly. Do these yourself.
+- Scientific results are the librarian's job: do not print effect sizes, p/FDR values, significance calls, hit
+  counts or ranked gene/variant lists from protected files into your context. Write QC so it reports pass/fail
+  and structure, not those values.
 - Running workflows that produce or update those files is fine.
 
 Do not read anything under `$LIBRARIAN_HOME` (logs, answers, sessions, run directories, notebooks, `latest.md`)
@@ -27,7 +29,8 @@ librarian "<task>"        # answer comes back to you on stdout
 librarian --me "<task>"   # answer goes to the user's latest.md; you get only "Done"
 ```
 
-Use `librarian "<task>"` for your own coding, QC, schema inspection, debugging and diagnosis.
+Use `librarian "<task>"` when debugging genuinely needs result values you should not see (e.g. why a specific
+result looks wrong).
 
 Use `librarian --me "<task>"` when the user asks to check a result, inspect findings, see which genes/variants
 passed, interpret the final analysis or compare scientific findings. Tell the user the answer is in `latest.md`.
