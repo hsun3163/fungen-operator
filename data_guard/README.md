@@ -66,10 +66,11 @@ ln -s "$repo/skills/human-runner" "$L/codex/skills/human-runner"
 ln -s "$repo/data_guard/librarian" ~/.local/bin/librarian
 ```
 
-Optional knowledge-base mirror: clone a **private** repo to `$L/knowledge_base` (or set `LIBRARIAN_KB`), e.g.
-`git clone https://github.com/<user>/knowledge_base.git "$L/knowledge_base"`. After every `--me` call the wrapper
-copies `latest.md` to `librarian/latest.md` there, commits and pushes. Git output goes to the run log; a failed sync
-adds "Knowledge-base sync failed; see <log>" to the Done line and never fails the call.
+Optional answers repo: clone a **private** GitHub repo to `$L/repo` (or set `LIBRARIAN_REPO`), e.g.
+`git clone https://github.com/<user>/librarian.git "$L/repo"`. After every `--me` call the wrapper writes the answer
+to its `README.md` (so the repo page shows the latest answer) and to `answers/<run id>.md`, commits and pushes. Git
+output goes to the run log; a failed sync adds "Repo sync failed; see <log>" to the Done line and never fails the
+call.
 
 `config.toml` is copied because Codex may write to it; `AGENTS.md` and `human-runner` are links so the librarian
 and the main session read the same repo versions.
@@ -83,7 +84,7 @@ Environment (e.g. in `~/.bashrc`):
 | `OLLAMA_HOST` | unset | pin the Qwen endpoint, e.g. `http://127.0.0.1:11435` |
 | `CODEX_OLLAMA_MODEL` | `qwen3.8-flash-next:125b-a6b-q4_K_M` | model name |
 | `LIBRARIAN_TIMEOUT` | `1800` | seconds per Codex call |
-| `LIBRARIAN_KB` | `$LIBRARIAN_HOME/knowledge_base` | git clone that mirrors `latest.md` to `librarian/latest.md` |
+| `LIBRARIAN_REPO` | `$LIBRARIAN_HOME/repo` | private git clone; README.md = latest answer, answers/ = all |
 | `LIBRARIAN_JUPYTER_BASE_URL` | unset | JupyterLab base URL for notebook links, without token |
 | `LIBRARIAN_JUPYTER_ROOT` | `$HOME` | Jupyter server root the links are relative to |
 
