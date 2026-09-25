@@ -1,0 +1,36 @@
+#!/bin/bash
+# Run a command with every protected path from the sanitize-layer policy hidden.
+#   sbx -c 'shell command string'
+#   sbx -- prog arg...
+set -euo pipefail
+
+HERE="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+POLICY="${SANITIZE_POLICY:-$HOME/.config/sanitize-layer/policy.json}"
+
+mapfile -t ROOTS < <(/usr/bin/python3 - "$POLICY" <<'EOF'
+import json, os, sys
+p = json.load(open(sys.argv[1]))
+seen = set()
+for r in p.get("protected", []):
+    r = os.path.expanduser(r)
+    for c in (r, os.path.realpath(r)):
+        if os.path.isdir(c) and c not in seen:
+            seen.add(c); print(c)
+EOF
+)
+
+args=(--dev-bind / /)
+for r in "${ROOTS[@]}"; do
+  args+=(--tmpfs "$r")
+done
+args+=(--chdir "$PWD" --setenv SANITIZE_SANDBOXED 1)
+
+# Non-interactive bash reads BASH_ENV; use it to keep conda's shell function available.
+export SANITIZE_PREV_BASH_ENV="${BASH_ENV:-}"
+export BASH_ENV="$HERE/bash_env.sh"
+
+case "${1:-}" in
+  -c) shift; exec bwrap "${args[@]}" -- /bin/bash -c "$1" ;;
+  --) shift; exec bwrap "${args[@]}" -- "$@" ;;
+  *) echo "usage: sbx -c 'cmd' | sbx -- prog args..." >&2; exit 64 ;;
+esac
