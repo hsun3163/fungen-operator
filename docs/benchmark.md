@@ -1,8 +1,8 @@
 # Fungen Operator benchmark
 
-Updated: 2026-09-23
+Updated: 2026-09-25
 
-Status: canonical benchmark specification. The genotype/covariate/phenotype MWE fixture is generated and verified; see the [MWE progress report](mwe_progress_20260923.md). Operator/harness implementation and scientific integration are tracked separately.
+Status: canonical benchmark specification. The genotype/covariate/phenotype fixture is generated and verified; see the [MWE progress report](mwe_progress_20260923.md). The [500-sample MWS-01 reference and OSS repeat](../benchmark/README.md) passed their native phenotype-partitioning endpoint and independent grading. The OSS trajectory review records an execution-policy exception; functional success and behavioral compliance are reported separately.
 
 ## 1. Benchmark question
 

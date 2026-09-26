@@ -235,4 +235,3 @@ Recurring successful shapes should become the first fixed templates. Historical 
 The next design task is not to add more prose rules. It is to enumerate the successful state-changing cells from MESA and CARDIA and reduce them to the smallest useful template catalog.
 
 The target product is a finite menu of notebook moves with bounded arguments, not an unrestricted shell with instructions telling the model how to behave.
-

@@ -1,6 +1,6 @@
 # Fungen Operator: operating model
 
-Updated: 2026-09-23  
+Updated: 2026-09-25
 Status: canonical conceptual model for the replacement; implementation is not yet complete.
 
 The [thin lab-tech prototype](operator_prototype.md) now implements the fixed-cell path through
@@ -34,6 +34,8 @@ The operator has six legitimate moves.
 
 Everything else must be justified as part of one of these moves. This is intentionally a **positive contract**: it defines the operator's action space rather than trying to enumerate every possible bad behavior.
 
+These six moves are conceptual action families, not the enforcement mechanism. Concrete state-changing behavior is constrained through fixed operator-notebook cell templates with bounded editable slots; see [operator_action_surface_20260923.md](operator_action_surface_20260923.md).
+
 ## 3. Ownership boundaries
 
 Reliability depends on keeping decisions at the level where they belong.
@@ -47,6 +49,8 @@ Reliability depends on keeping decisions at the level where they belong.
 | Produced artifacts | Evidence of what actually ran and what scientific products exist |
 
 The operator may reason freely about **how to complete the authorized operation**. It does not gain authority to change the scientific operation merely because another method is easier to execute.
+
+The operator is a consumer of the canonical workflow, not its developer. Canonical Snakefiles/`.smk` files, analysis notebooks, R/Python implementation scripts, and shared workflow libraries are immutable to the operator. The operator may instantiate them only through already-exposed interfaces and parameters. If the requested behavior cannot be expressed through those interfaces, the missing capability or canonical defect belongs to the developer role.
 
 This boundary is the common thread behind the historical incidents involving new controllers, scientific-method changes, runtime logic placed in workflow code, scope expansion, and intermediate endpoints.
 
@@ -66,7 +70,7 @@ Use this mode when the scientific request requires constructing an analysis from
 
 Once Scientist mode fixes the analysis graph, execution falls back to the same faithful operation used in Lab-tech mode: execute, recover, verify, and finish the declared endpoint.
 
-## 4. Use the existing mini-protocol infrastructure
+## 5. Use the existing mini-protocol infrastructure
 
 ### Authoritative workflow source
 
@@ -98,10 +102,21 @@ The operator should:
 
 Notebooks and R/Python scripts invoked by a mini-protocol remain implementation details. The operator should not bypass the `.smk` boundary to opportunistically rewire lower-level code.
 
-A new wrapper, controller, validator, environment, helper, or metadata layer is justified only when a concrete requested analysis cannot be expressed through the maintained infrastructure and the missing capability is demonstrated. Even then, the change must preserve scientific semantics and reduce net operational complexity.
+If a concrete requested analysis cannot be expressed through the maintained infrastructure and its already-exposed interfaces, the operator should diagnose the missing capability and hand it to the developer role. Creating a wrapper, controller, validator, environment, helper, metadata layer, or canonical implementation edit to bridge that gap is not an operator move.
 
 Benchmarking tests whether the operator uses this existing infrastructure correctly; it is not a prerequisite for the infrastructure itself to exist.
-## 5. State is layered and material
+
+## 6. State-changing actions are fixed notebook moves
+
+Read-only observation may remain flexible. Every action that changes execution state must be materialized and executed as a retained operator-notebook cell selected from a fixed template catalog.
+
+Each template has a fixed command skeleton, bounded editable slots, slot constraints, and a returned execution result/evidence. The operator fills the slots; it does not redesign the skeleton or use the notebook as unrestricted shell/Python access.
+
+The initial catalog should be derived empirically from successful MESA and CARDIA operator notebooks. Candidate first cell types are configuration preparation, input harmonization, workflow-native readiness checks, run initiation, cancellation, and resumption.
+
+See [operator_action_surface_20260923.md](operator_action_surface_20260923.md) for the current design note.
+
+## 7. State is layered and material
 
 A scientific run is not represented by one mutable code checkout. At minimum, distinguish:
 
@@ -115,7 +130,7 @@ This matters especially during recovery. A reverted source file can coexist with
 
 The operator therefore reasons from the **state that actually governs the active work**, not merely the newest editable file.
 
-## 6. Completion is a scientific state
+## 8. Completion is a scientific state
 
 Submission, a green controller, a marker file, or an empty queue is not by itself scientific completion.
 
@@ -129,7 +144,7 @@ For each supported task family, completion should be defined from:
 
 The same principle applies to handoff. A stable running job can be a correct endpoint when the user asked for a handoff; it is not the same state as verified scientific completion.
 
-## 7. Parsimony is a product property
+## 9. Parsimony is a product property
 
 Parsimony does **not** mean "fewest lines of instruction." It means minimizing unnecessary operational state while retaining the information needed to act correctly and recover.
 
@@ -143,7 +158,7 @@ The replacement should therefore have:
 
 Long historical analyses can remain in this repository without becoming prompts that every run must load.
 
-## 8. How failures are interpreted
+## 10. How failures are interpreted
 
 The repository evidence is best understood as failures of constrained operation, not simply coding mistakes.
 
@@ -158,7 +173,7 @@ The recurring families are:
 
 These categories are diagnostic. They should not be turned into another large runtime policy layer.
 
-## 9. Evaluation model
+## 11. Evaluation model
 
 Evaluation should test both outcome and behavior.
 
@@ -176,22 +191,24 @@ A dangerous contract violation should remain visible rather than being averaged 
 
 See [benchmark.md](benchmark.md) for the canonical benchmark specification, [research_basis.md](research_basis.md) for the published work that motivates the evaluation vocabulary, and [fungen_operator_development_brief.md](fungen_operator_development_brief.md) for the detailed migration and case derivation.
 
-## 10. Current implementation status
+## 12. Current implementation status
 
-As of 2026-09-23:
+As of 2026-09-25:
 
 - the historical evidence and failure analyses are retained;
 - 19 imported skill entrypoints remain available as capability and design sources;
 - overlapping operating procedures still exist in the legacy collection;
 - a thin lab-tech harness implements typed tools, fixed-cell rendering, notebook history, and execution with a synthetic acceptance lifecycle;
-- the next catalog work is extracting further parameter and recovery templates from retained runs; composition and live HPC acceptance remain later work;
+- native readiness reconciliation, gated submission, and the [500-sample MWS-01 endpoint](../benchmark/README.md) are verified; the OSS repeat passed the functional contract with an observed execution-policy exception;
+- the next catalog work is extracting further parameter and recovery templates from retained runs; composition and broader scientific endpoint coverage remain later work;
 - the benchmark should test composition, persistence, recovery, and contract adherence without creating a replacement composition framework;
 - legacy procedures should be retired only after their capabilities have a deliberate migration disposition and representative acceptance cases pass.
 
 The repository should therefore be read in this order:
 
 1. this operating model;
-2. [benchmark.md](benchmark.md) for how reliability is evaluated;
-3. [skills/README.md](../skills/README.md) for the capability map;
-4. [fungen_operator_development_brief.md](fungen_operator_development_brief.md) for detailed engineering decisions;
-5. historical evidence only when a design choice needs to be traced back to an incident.
+2. [operator_action_surface_20260923.md](operator_action_surface_20260923.md) for the concrete state-changing notebook action surface;
+3. [benchmark.md](benchmark.md) for how reliability is evaluated;
+4. [skills/README.md](../skills/README.md) for the capability map;
+5. [fungen_operator_development_brief.md](fungen_operator_development_brief.md) for detailed engineering decisions;
+6. historical evidence only when a design choice needs to be traced back to an incident.

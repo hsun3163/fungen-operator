@@ -9,7 +9,10 @@ example is retained. External stdio clients now pass tool discovery, calls, scie
 and notebook staging in both automatic and legacy protocol modes on the host. Live HPC execution
 has now passed the [LSF readiness smoke test](readiness_reconciliation_20260924.md), including
 the observed `RUN` to `DONE` reconciliation race, and gated production submission returned a
-native pending receipt. Scientific workflow completion is a separate milestone.
+native pending receipt. The subsequent [500-sample MWS-01 reference and OSS repeat](../benchmark/README.md)
+completed the phenotype-partitioning endpoint and independent grading. The OSS repeat completed
+naturally but its trajectory audit found validation performed outside the required LSF boundary.
+Broader scientific endpoints remain separate milestones.
 
 ## Implementation boundaries
 
