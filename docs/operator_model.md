@@ -1,7 +1,13 @@
 # Fungen Operator: operating model
 
-Updated: 2026-09-22  
+Updated: 2026-09-23  
 Status: canonical conceptual model for the replacement; implementation is not yet complete.
+
+The [thin lab-tech prototype](operator_prototype.md) now implements the fixed-cell path through
+three workflow actions: `prepare_config`, `check_readiness`, and `initiate_run`. It follows the
+[action-surface design](operator_action_surface_20260923.md), with scientific configuration
+changes approved through the harness and harmonization outside its action catalog. Both modes
+consume developer-owned canonical source; composition remains a later implementation phase.
 
 ## 1. What Fungen Operator is
 
@@ -61,6 +67,24 @@ Use this mode when the scientific request requires constructing an analysis from
 Once Scientist mode fixes the analysis graph, execution falls back to the same faithful operation used in Lab-tech mode: execute, recover, verify, and finish the declared endpoint.
 
 ## 4. Use the existing mini-protocol infrastructure
+
+### Authoritative workflow source
+
+The user-designated workflow contract for the current implementation is `../xqtl/xqtl-protocol`, relative to the Fungen Operator repository root. Inspect its current working tree and applicable `../xqtl/AGENTS.md` guidance directly.
+
+The contract spans:
+
+- `code/snakemake/Snakefile`: graph, configuration requirements, and named endpoints;
+- `code/snakemake/rules/`: maintained stage inputs, outputs, parameters, resources, and invocations;
+- `code/snakemake/config.yaml`: existing configuration fields and conventions;
+- `pipeline/` notebook links and `code/script/`: canonical scientific implementations;
+- `code/snakemake/profiles/lsf/` and dataset runtime settings: execution ownership.
+
+Derive both operating modes and the benchmark's native integration cases from these interfaces. Imported skills supply operating knowledge; current workflow source defines the executable contract. Record the source state used for a trial, including relevant local changes when the checkout differs from its committed revision.
+
+The example configuration currently contains paths into the legacy `../xqtl/xqtl-renovated/mwe_data` tree. Those paths are excluded from benchmark use under the [fixture boundary](benchmark.md#legacy-mwe-exclusion). Prepare a dedicated benchmark configuration with fresh inputs and its own output root through the same shared workflow.
+
+### Composition boundary
 
 The scientific mini-protocol layer already exists. Maintained Snakemake `.smk` files are the compositional building blocks; the operator is not responsible for inventing a new mini-protocol system, manifest service, workflow engine, or controller.
 
@@ -154,13 +178,13 @@ See [benchmark.md](benchmark.md) for the canonical benchmark specification, [res
 
 ## 10. Current implementation status
 
-As of 2026-09-22:
+As of 2026-09-23:
 
 - the historical evidence and failure analyses are retained;
 - 19 imported skill entrypoints remain available as capability and design sources;
 - overlapping operating procedures still exist in the legacy collection;
-- a replacement operator has **not** yet been implemented or validated;
-- the next implementation target is a single skill-first operator entry point that uses the existing runner/workflow and `.smk` mini-protocol infrastructure for both fixed and composed analyses;
+- a thin lab-tech harness implements typed tools, fixed-cell rendering, notebook history, and execution with a synthetic acceptance lifecycle;
+- the next catalog work is extracting further parameter and recovery templates from retained runs; composition and live HPC acceptance remain later work;
 - the benchmark should test composition, persistence, recovery, and contract adherence without creating a replacement composition framework;
 - legacy procedures should be retired only after their capabilities have a deliberate migration disposition and representative acceptance cases pass.
 

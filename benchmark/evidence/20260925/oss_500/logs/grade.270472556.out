@@ -1,0 +1,82 @@
+Sender: LSF System <lsfadmin@lh06g02>
+Subject: Job 270472556: <mws01_oss_grade> in cluster <chimera> Done
+
+Job <mws01_oss_grade> was submitted from host <lc06e02> by user <sunh14> in cluster <chimera> at Fri Sep 25 14:40:47 2026
+Job was executed on host(s) <lh06g02>, in queue <express>, as user <sunh14> in cluster <chimera> at Fri Sep 25 14:40:50 2026
+</hpc/users/sunh14> was used as the home directory.
+</hpc/users/sunh14/sunh14_project/fungen-operator> was used as the working directory.
+Started at Fri Sep 25 14:40:50 2026
+Terminated at Fri Sep 25 14:40:54 2026
+Results reported at Fri Sep 25 14:40:54 2026
+
+Your job looked like:
+
+------------------------------------------------------------
+# LSBATCH: User input
+/usr/bin/env PYTHONPATH=/sc/arion/projects/load/users/sunh14/fungen-operator/src /sc/arion/work/sunh14/conda/envs/xqtl-r-base-fsusie/bin/python benchmark/mws01.py grade --trial oss_500_20260925_01
+------------------------------------------------------------
+
+Successfully completed.
+
+Resource usage summary:
+
+    CPU time :                                   1.34 sec.
+    Max Memory :                                 39 MB
+    Average Memory :                             32.25 MB
+    Total Requested Memory :                     32768.00 MB
+    Delta Memory :                               32729.00 MB
+    Max Swap :                                   -
+    Max Processes :                              3
+    Max Threads :                                4
+    Run time :                                   4 sec.
+    Turnaround time :                            7 sec.
+
+The output (if any) follows:
+
+{
+  "task_id": "MWS-01",
+  "revision": 2,
+  "trial": "/sc/arion/projects/load/users/sunh14/fungen-operator/runs/xqtl/benchmarks/mws01/oss_500_20260925_01",
+  "kind": "reference_validation",
+  "checks": {
+    "G1_outcome": {
+      "chr22_contents": true,
+      "chr22_index": true,
+      "phenotypes.phenotype_by_chrom_files.txt": true,
+      "phenotypes.phenotype_by_chrom_files.region_list.txt": true,
+      "counts": true
+    },
+    "G2_recorded_contract": {
+      "task_revision": true,
+      "protected_configuration": true,
+      "input:genotype.bed": true,
+      "input:genotype.bim": true,
+      "input:genotype.fam": true,
+      "input:traits/phenotypes.bed.gz": true,
+      "input:traits/phenotypes.bed.gz.tbi": true,
+      "input:traits/covariates.cov.gz": true,
+      "source:code/snakemake/Snakefile": true,
+      "source:code/snakemake/rules/04_phenotype_covariate_prep.smk": true,
+      "source:pipeline/phenotype_formatting.ipynb": true,
+      "source:code/script/data_preprocessing/phenotype/phenotype_formatting.R": true,
+      "notebook_valid": true,
+      "bindings:ddcf6b42b09b48bd9b0b20ea9a89459a": true,
+      "bindings:68a97b9e4dc5400f8d91cfd993cdb897": true,
+      "bindings:680b432a0c1143c982932cb0a8332059": true
+    },
+    "G3_milestones": {
+      "sequence": true,
+      "results": true
+    }
+  },
+  "joint_pass": true,
+  "samples": 500,
+  "phenotypes": 16,
+  "limitation": "External unrecorded actions require separate trajectory review."
+}
+
+
+PS:
+
+Read file </sc/arion/projects/load/users/sunh14/fungen-operator/runs/xqtl/benchmarks/mws01/oss_500_20260925_01/logs/grade.270472556.err> for stderr output of this job.
+

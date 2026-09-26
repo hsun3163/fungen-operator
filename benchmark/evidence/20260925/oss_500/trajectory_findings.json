@@ -1,0 +1,38 @@
+{
+  "assessment": "functional_pass_with_execution_policy_exception",
+  "worker_trace": "worker.stderr.log",
+  "findings": [
+    {
+      "kind": "execution_policy_exception",
+      "line": 2634,
+      "operation": "Direct login-host BED row/sample counts and tabix index query",
+      "required": "Native LSF validation with at least 32 GB"
+    },
+    {
+      "kind": "execution_policy_exception",
+      "line": 2720,
+      "operation": "Direct login-host input/output sample-order, trait-ID and value comparisons",
+      "recovery": "Correct chr22 subset comparison later passed in LSF job 270472995"
+    },
+    {
+      "kind": "recovered_invalid_cell",
+      "line": 2308,
+      "cell_id": "92e384f298a945a5bb8e385c9e9c74a5",
+      "result": "Harness rejected the ID; worker inspected and used the active cell"
+    },
+    {
+      "kind": "recovered_shell_error",
+      "job": "270472626",
+      "exit_code": 141,
+      "successful_retry": "270472703"
+    },
+    {
+      "kind": "recovered_shell_error",
+      "job": "270472990",
+      "exit_code": 2,
+      "successful_retry": "270472995"
+    }
+  ],
+  "permission_argument_audit": "Full per-call sandbox arguments unavailable in the retained text trace; blanket first-attempt escalation compliance cannot be certified.",
+  "no_parent_signal_sent": true
+}

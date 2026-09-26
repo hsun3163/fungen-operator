@@ -1,0 +1,71 @@
+Sender: LSF System <lsfadmin@lh06c14>
+Subject: Job 270472995: <fungen_mws01_check3> in cluster <chimera> Done
+
+Job <fungen_mws01_check3> was submitted from host <lc06e02> by user <sunh14> in cluster <chimera> at Fri Sep 25 15:09:35 2026
+Job was executed on host(s) <lh06c14>, in queue <express>, as user <sunh14> in cluster <chimera> at Fri Sep 25 15:09:36 2026
+</hpc/users/sunh14> was used as the home directory.
+</sc/arion/projects/load/users/sunh14/fungen-operator/runs/xqtl/benchmarks/mws01/oss_500_20260925_01> was used as the working directory.
+Started at Fri Sep 25 15:09:36 2026
+Terminated at Fri Sep 25 15:09:36 2026
+Results reported at Fri Sep 25 15:09:36 2026
+
+Your job looked like:
+
+------------------------------------------------------------
+# LSBATCH: User input
+#BSUB -J fungen_mws01_check3
+#BSUB -P acc_LOAD
+#BSUB -q express
+#BSUB -W 00:10
+#BSUB -n 1
+#BSUB -R "span[hosts=1] rusage[mem=32GB]"
+#BSUB -M 32GB
+#BSUB -oo /sc/arion/projects/load/users/sunh14/fungen-operator/runs/xqtl/benchmarks/mws01/oss_500_20260925_01/logs/preserve_check.%J.out
+#BSUB -eo /sc/arion/projects/load/users/sunh14/fungen-operator/runs/xqtl/benchmarks/mws01/oss_500_20260925_01/logs/preserve_check.%J.err
+set -eu
+IN=/sc/arion/projects/load/users/sunh14/fungen-operator/output/sketch_to_plink1/behavioral_fixture_500/traits/phenotypes.bed.gz
+OUT=/sc/arion/projects/load/users/sunh14/fungen-operator/runs/xqtl/benchmarks/mws01/oss_500_20260925_01/work/data_preprocessing/SYN/phenotype_data/phenotypes.chr22.bed.gz
+echo "== produced file must equal the chr22 rows of the supplied input, byte for byte =="
+diff <(zcat "$IN" | awk -F'\t' 'NR==1 || $1=="chr22"') <(zcat "$OUT") && echo PASS_ROWS_VALUES_AND_ORDER_IDENTICAL
+echo "== sample header identical =="
+diff <(zcat "$IN" | grep '^#chr') <(zcat "$OUT" | grep '^#chr') && echo PASS_SAMPLE_COLUMN_ORDER_IDENTICAL
+echo "== counts =="
+echo "input chr22 data rows: $(zcat "$IN" | awk -F'\t' 'NR>1 && $1=="chr22"' | wc -l)"
+echo "produced data rows:    $(zcat "$OUT" | awk 'NR>1' | wc -l)"
+echo "produced samples:      $(zcat "$OUT" | awk -F'\t' 'NR==1{print NF-4; exit}')"
+echo check_exit=$?
+
+------------------------------------------------------------
+
+Successfully completed.
+
+Resource usage summary:
+
+    CPU time :                                   0.12 sec.
+    Max Memory :                                 -
+    Average Memory :                             -
+    Total Requested Memory :                     32768.00 MB
+    Delta Memory :                               -
+    Max Swap :                                   -
+    Max Processes :                              -
+    Max Threads :                                -
+    Run time :                                   0 sec.
+    Turnaround time :                            1 sec.
+
+The output (if any) follows:
+
+== produced file must equal the chr22 rows of the supplied input, byte for byte ==
+PASS_ROWS_VALUES_AND_ORDER_IDENTICAL
+== sample header identical ==
+PASS_SAMPLE_COLUMN_ORDER_IDENTICAL
+== counts ==
+input chr22 data rows: 16
+produced data rows:    16
+produced samples:      500
+check_exit=0
+
+
+PS:
+
+Read file </sc/arion/projects/load/users/sunh14/fungen-operator/runs/xqtl/benchmarks/mws01/oss_500_20260925_01/logs/preserve_check.270472995.err> for stderr output of this job.
+

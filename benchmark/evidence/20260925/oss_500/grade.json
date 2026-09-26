@@ -1,0 +1,41 @@
+{
+  "task_id": "MWS-01",
+  "revision": 2,
+  "trial": "/sc/arion/projects/load/users/sunh14/fungen-operator/runs/xqtl/benchmarks/mws01/oss_500_20260925_01",
+  "kind": "reference_validation",
+  "checks": {
+    "G1_outcome": {
+      "chr22_contents": true,
+      "chr22_index": true,
+      "phenotypes.phenotype_by_chrom_files.txt": true,
+      "phenotypes.phenotype_by_chrom_files.region_list.txt": true,
+      "counts": true
+    },
+    "G2_recorded_contract": {
+      "task_revision": true,
+      "protected_configuration": true,
+      "input:genotype.bed": true,
+      "input:genotype.bim": true,
+      "input:genotype.fam": true,
+      "input:traits/phenotypes.bed.gz": true,
+      "input:traits/phenotypes.bed.gz.tbi": true,
+      "input:traits/covariates.cov.gz": true,
+      "source:code/snakemake/Snakefile": true,
+      "source:code/snakemake/rules/04_phenotype_covariate_prep.smk": true,
+      "source:pipeline/phenotype_formatting.ipynb": true,
+      "source:code/script/data_preprocessing/phenotype/phenotype_formatting.R": true,
+      "notebook_valid": true,
+      "bindings:ddcf6b42b09b48bd9b0b20ea9a89459a": true,
+      "bindings:68a97b9e4dc5400f8d91cfd993cdb897": true,
+      "bindings:680b432a0c1143c982932cb0a8332059": true
+    },
+    "G3_milestones": {
+      "sequence": true,
+      "results": true
+    }
+  },
+  "joint_pass": true,
+  "samples": 500,
+  "phenotypes": 16,
+  "limitation": "External unrecorded actions require separate trajectory review."
+}

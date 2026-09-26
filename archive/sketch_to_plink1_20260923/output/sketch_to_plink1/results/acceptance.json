@@ -1,0 +1,192 @@
+{
+  "theta_star": 1.4305555555555556,
+  "development_weighted_rmse": 0.11476398000522746,
+  "heldout_weighted_rmse": 0.13322839849054338,
+  "heldout_development_difference": 0.018464418485315923,
+  "heldout_development_ratio": 1.160890363722789,
+  "heldout_chromosome_weighted_rmse": {
+    "1": 0.122918341020947,
+    "6": 0.11649373834050625,
+    "19": 0.12076270248785238,
+    "21": 0.16654094005187547
+  },
+  "heldout_baseline_theta1_weighted_rmse": 0.13495375995466766,
+  "heldout_baseline_delta_star_minus_baseline": -0.0017253614641242754,
+  "pooled_heldout_metrics": {
+    "signed_r_correlation": 0.9744832418487982,
+    "signed_rmse": 0.0826617482396354,
+    "signed_bias": -0.012977250210518224,
+    "r2_rmse": 0.08095640394889446,
+    "strong_abs_r_bias": -0.1424458434012301,
+    "max_alt_af_error": 2.5000000000052758e-05,
+    "hwe_95pct_variants": 0.4970320538187574,
+    "conversion_rate": 1.0,
+    "pair_count": 377153
+  },
+  "adequately_covered_heldout_strata": [
+    {
+      "split": "validation",
+      "target_abs_r_bin": "[.1,.5)",
+      "maf_pair_type": "0-1",
+      "n_pairs": 2175,
+      "rmse": 0.2433400790681363,
+      "bias": -0.2033591958122682,
+      "n_regions": 12
+    },
+    {
+      "split": "validation",
+      "target_abs_r_bin": "[.1,.5)",
+      "maf_pair_type": "0-2",
+      "n_pairs": 8347,
+      "rmse": 0.11807020233440495,
+      "bias": -0.06756059414071779,
+      "n_regions": 12
+    },
+    {
+      "split": "validation",
+      "target_abs_r_bin": "[.1,.5)",
+      "maf_pair_type": "1-2",
+      "n_pairs": 26028,
+      "rmse": 0.12491445058742706,
+      "bias": -0.04464006413125677,
+      "n_regions": 12
+    },
+    {
+      "split": "validation",
+      "target_abs_r_bin": "[.1,.5)",
+      "maf_pair_type": "2-2",
+      "n_pairs": 38450,
+      "rmse": 0.09640039859211107,
+      "bias": 0.007926522202883361,
+      "n_regions": 12
+    },
+    {
+      "split": "validation",
+      "target_abs_r_bin": "[.5,1]",
+      "maf_pair_type": "0-0",
+      "n_pairs": 4316,
+      "rmse": 0.29639991385976067,
+      "bias": -0.2401881645399884,
+      "n_regions": 12
+    },
+    {
+      "split": "validation",
+      "target_abs_r_bin": "[.5,1]",
+      "maf_pair_type": "1-1",
+      "n_pairs": 7558,
+      "rmse": 0.186944674432773,
+      "bias": -0.13847634306350673,
+      "n_regions": 12
+    },
+    {
+      "split": "validation",
+      "target_abs_r_bin": "[.5,1]",
+      "maf_pair_type": "1-2",
+      "n_pairs": 1790,
+      "rmse": 0.2565382899292212,
+      "bias": -0.22820222709581495,
+      "n_regions": 11
+    },
+    {
+      "split": "validation",
+      "target_abs_r_bin": "[.5,1]",
+      "maf_pair_type": "2-2",
+      "n_pairs": 28731,
+      "rmse": 0.12776330990992976,
+      "bias": -0.08404715097072786,
+      "n_regions": 12
+    },
+    {
+      "split": "validation",
+      "target_abs_r_bin": "[0,.1)",
+      "maf_pair_type": "0-0",
+      "n_pairs": 45584,
+      "rmse": 0.016648113823537623,
+      "bias": 0.0019695850945090423,
+      "n_regions": 12
+    },
+    {
+      "split": "validation",
+      "target_abs_r_bin": "[0,.1)",
+      "maf_pair_type": "0-1",
+      "n_pairs": 58557,
+      "rmse": 0.017683927545233766,
+      "bias": 0.005341926120786944,
+      "n_regions": 12
+    },
+    {
+      "split": "validation",
+      "target_abs_r_bin": "[0,.1)",
+      "maf_pair_type": "0-2",
+      "n_pairs": 78360,
+      "rmse": 0.0345399052161084,
+      "bias": 0.006973217375450358,
+      "n_regions": 12
+    },
+    {
+      "split": "validation",
+      "target_abs_r_bin": "[0,.1)",
+      "maf_pair_type": "1-1",
+      "n_pairs": 20698,
+      "rmse": 0.022789335991189607,
+      "bias": 0.013697001270171079,
+      "n_regions": 12
+    },
+    {
+      "split": "validation",
+      "target_abs_r_bin": "[0,.1)",
+      "maf_pair_type": "1-2",
+      "n_pairs": 43308,
+      "rmse": 0.04028894430050245,
+      "bias": 0.020566445027969338,
+      "n_regions": 12
+    },
+    {
+      "split": "validation",
+      "target_abs_r_bin": "[0,.1)",
+      "maf_pair_type": "2-2",
+      "n_pairs": 11651,
+      "rmse": 0.032170374499986575,
+      "bias": 0.00886709926467005,
+      "n_regions": 12
+    }
+  ],
+  "region_bootstrap": {
+    "seed": 20260923,
+    "resampling_unit": "region",
+    "replicates": 20000,
+    "development_weighted_rmse_ci95": [
+      0.10989177741928335,
+      0.11976825771232225
+    ],
+    "validation_weighted_rmse_ci95": [
+      0.11406405709408943,
+      0.15729929245769106
+    ],
+    "validation_minus_development_ci95": [
+      -0.0013470315614207843,
+      0.042962691192839714
+    ],
+    "ratio_ci95": [
+      0.9884045251924811,
+      1.3790608239907418
+    ]
+  },
+  "gates": {
+    "development_weighted_rmse_le_0.10": false,
+    "heldout_weighted_rmse_le_0.10": false,
+    "heldout_minus_dev_le_0.03": true,
+    "heldout_ratio_le_1.25": true,
+    "heldout_signed_r_corr_ge_0.90": true,
+    "heldout_r2_rmse_le_0.10": true,
+    "heldout_strong_abs_bias_le_0.10": false,
+    "alt_frequency_bound": true,
+    "hwe_95pct_for_maf_ge_0.05": false,
+    "all_validation_chrom_rmse_le_0.15": false,
+    "covered_ld_maf_strata_rmse_le_0.15": false,
+    "coverage_strata_n": 14,
+    "conversion_all": true
+  },
+  "single_theta_accepted": false,
+  "interpretation": "support only within sampled regions and adequately covered strata"
+}

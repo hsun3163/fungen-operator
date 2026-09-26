@@ -1,0 +1,107 @@
+{
+  "status": "complete",
+  "experiment": "two_stratum_v1",
+  "theta_low": 2.0,
+  "theta_high": 1.4305555555555556,
+  "dev_regions": 8,
+  "validation_regions": 6,
+  "development_primary_loss": 0.1145959231455672,
+  "reserved_validation_primary_rmse": 0.12235294125421668,
+  "reserved_hwe_baseline_rmse": 0.12411146438841693,
+  "validation_minus_development": 0.007757018108649483,
+  "validation_over_development": 1.0676901751452015,
+  "validation_chromosome_rmse": {
+    "2": 0.13379152909006164,
+    "20": 0.10972835190076805
+  },
+  "validation_max_alt_af_error": 2.5000000000052758e-05,
+  "validation_conversion_rate_min": 1.0,
+  "validation_hwe_95pct_min": 0.3407707910750507,
+  "validation_strong_abs_r_bias": -0.13528129251620138,
+  "validation_r2_rmse_mean": 0.08265795612405166,
+  "validation_signed_r_corr_mean": 0.9757177572134311,
+  "reserved_region_results": [
+    {
+      "region_id": "2_chr2_cand02",
+      "chromosome": "2",
+      "theta_low": 2.0,
+      "theta_high": 1.4305555555555556,
+      "primary_rmse": 0.11168733966723599,
+      "unweighted_rmse": 0.08016570100845842,
+      "conversion_rate": 1.0,
+      "max_alt_af_error": 2.5000000000052758e-05,
+      "hwe_95pct": 0.340956340956341,
+      "strong_abs_r_bias": -0.13188462439973836
+    },
+    {
+      "region_id": "2_chr2_cand03",
+      "chromosome": "2",
+      "theta_low": 2.0,
+      "theta_high": 1.4305555555555556,
+      "primary_rmse": 0.11406875965808051,
+      "unweighted_rmse": 0.0749670996574932,
+      "conversion_rate": 1.0,
+      "max_alt_af_error": 2.5000000000000716e-05,
+      "hwe_95pct": 0.9433962264150944,
+      "strong_abs_r_bias": -0.13532376260679052
+    },
+    {
+      "region_id": "2_chr2_cand04",
+      "chromosome": "2",
+      "theta_low": 2.0,
+      "theta_high": 1.4305555555555556,
+      "primary_rmse": 0.16797254536647635,
+      "unweighted_rmse": 0.09682449009698964,
+      "conversion_rate": 1.0,
+      "max_alt_af_error": 2.5000000000000716e-05,
+      "hwe_95pct": 0.5772357723577236,
+      "strong_abs_r_bias": -0.2045680064945363
+    },
+    {
+      "region_id": "20_chr20_cand02",
+      "chromosome": "20",
+      "theta_low": 2.0,
+      "theta_high": 1.4305555555555556,
+      "primary_rmse": 0.09746073354997886,
+      "unweighted_rmse": 0.0721995804845399,
+      "conversion_rate": 1.0,
+      "max_alt_af_error": 2.5000000000000716e-05,
+      "hwe_95pct": 0.5242105263157895,
+      "strong_abs_r_bias": -0.0992543572545008
+    },
+    {
+      "region_id": "20_chr20_cand03",
+      "chromosome": "20",
+      "theta_low": 2.0,
+      "theta_high": 1.4305555555555556,
+      "primary_rmse": 0.10250619543986897,
+      "unweighted_rmse": 0.08883262170953456,
+      "conversion_rate": 1.0,
+      "max_alt_af_error": 2.5000000000004186e-05,
+      "hwe_95pct": 0.3407707910750507,
+      "strong_abs_r_bias": -0.09462005804121286
+    },
+    {
+      "region_id": "20_chr20_cand04",
+      "chromosome": "20",
+      "theta_low": 2.0,
+      "theta_high": 1.4305555555555556,
+      "primary_rmse": 0.12694415679707263,
+      "unweighted_rmse": 0.08145181763716153,
+      "conversion_rate": 1.0,
+      "max_alt_af_error": 2.5000000000052758e-05,
+      "hwe_95pct": 0.5416666666666666,
+      "strong_abs_r_bias": -0.1460369463004294
+    }
+  ],
+  "acceptance": {
+    "development_rmse_le_0.10": false,
+    "validation_rmse_le_0.10": false,
+    "transfer_delta_le_0.03": true,
+    "transfer_ratio_le_1.25": true,
+    "max_af_error_bound": true,
+    "all_convert": true,
+    "limited_holdout": "six regions on chr2/chr20; adequate regime coverage must be reviewed"
+  },
+  "conclusion": "two-stratum follow-up requires scoped review of its six-region coverage and all frozen gates"
+}

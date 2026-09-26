@@ -1,0 +1,15 @@
+{
+  "theta": 1.0,
+  "theta_selection": "fixed",
+  "B": 10000,
+  "regions": 20,
+  "variants": 20000,
+  "bed_bytes": 50000003,
+  "expected_bed_bytes": 50000003,
+  "bed_sha256": "cd48b88a48021b52e3ff4353557a3bcb1eb448c5eb1e3263bb230696b47cd235",
+  "bim_sha256": "0cd1dcc3c8fa1faef55b77cd3075347ae8f076f4eea214351cc2cec3e7b6c23d",
+  "fam_sha256": "b2a6ff7eaae94645f25aed186090d67b5954e67184f95973a0755ddf27a3ad69",
+  "region_manifest_sha256": "bc2fd07e968b6cc0850f4dfd58a69cf603fe3fae5894e5b17a0bd76fe19f2e77",
+  "exporter_sha256": "7245cef4f30ee9c6aab8156e3760431ea697a327d186ea4b001689a3176d22af",
+  "prefix": "/sc/arion/projects/load/users/sunh14/fungen-operator/output/sketch_to_plink1/behavioral_fixture/genotype"
+}

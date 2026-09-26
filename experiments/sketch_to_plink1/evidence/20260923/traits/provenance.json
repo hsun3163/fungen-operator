@@ -1,0 +1,55 @@
+{
+  "generator": "/sc/arion/projects/load/users/sunh14/fungen-operator/experiments/sketch_to_plink1/simulate_traits.py",
+  "generator_sha256": "77bc5bb191e7e6301e137595c6e3b61b3f76d20444507907de3f5267eb67fb9e",
+  "seed": 20260924,
+  "command": [
+    "experiments/sketch_to_plink1/simulate_traits.py"
+  ],
+  "python": "3.11.11 | packaged by conda-forge | (main, Mar  3 2025, 20:43:55) [GCC 13.3.0]",
+  "LD_LIBRARY_PATH": "/sc/arion/work/sunh14/conda/envs/py3.11/lib",
+  "numpy_version": "1.25.2",
+  "pandas_version": "2.0.3",
+  "genotype_prefix": "/sc/arion/projects/load/users/sunh14/fungen-operator/output/sketch_to_plink1/behavioral_fixture/genotype",
+  "input_sha256": {
+    "bed": "cd48b88a48021b52e3ff4353557a3bcb1eb448c5eb1e3263bb230696b47cd235",
+    "bim": "0cd1dcc3c8fa1faef55b77cd3075347ae8f076f4eea214351cc2cec3e7b6c23d",
+    "fam": "b2a6ff7eaae94645f25aed186090d67b5954e67184f95973a0755ddf27a3ad69"
+  },
+  "canonical_reader": "/sc/arion/projects/load/users/sunh14/xqtl/xqtl-protocol/code/script/association_scan/TensorQTL/TensorQTL.py",
+  "canonical_reader_sha256": "92fc096909b7cb6dfa4c6723f6e294721bc7cdf86fb7d1706c8d9239b29a4159",
+  "pc_panel_size": 256,
+  "pc_variance_fractions": [
+    0.035601789496862636,
+    0.03261830382774849,
+    0.022727855681519606
+  ],
+  "causal_MAF_minimum": 0.05,
+  "pc_MAF_minimum": 0.1,
+  "genetic_variance_grid": [
+    0.03,
+    0.06,
+    0.12
+  ],
+  "covariate_variance": 0.25,
+  "epsilon": "independent standard Gaussian; not orthogonalized or outcome-selected",
+  "artifact_sha256": {
+    "causal_truth.tsv": "4c757ee71dd78e9c276ab7d59bcbdf1ae29b4356ff446307b66ac786e99be144",
+    "causal_variant_ids.txt": "b01e5ff137732aa33f2f224f5ba36a2233521a7eb45d401b3ea8859e534d71e1",
+    "covariate_correlations.tsv": "60d12901ee5241caf4c56e0aa798c5773effe5f6c933295d44d409b9988d28c5",
+    "covariate_model_truth.tsv": "db30d85a4fa52659a8f55f4ec087dcceb344a59f8539ea02d7f48951d869e606",
+    "covariates.cov.gz": "e29d2bd4a36d42e9a3d92e7ebcc1b4e423415b6cf09d6ddcec0508b55adc221e",
+    "covariates.tsv": "f2665a62a7639360b6865e2458458776d28a6892bb0632ab54b3724058a1a66f",
+    "joint_causal_recovery.tsv": "58dd2ff653c8b2822d08c40aee1a12a26ddaf564a4147ad345c53f65e28fec66",
+    "native_plink_association_qc.tsv": "18bfb6747272201db9ac6c517dc10ae6afe8ce53db8d0cacbf2c1c56928ea648",
+    "pc_variants.tsv": "7355c2dc302f2fa4948bf8b60bcc514a605a638c9897c6f18bceba04a722db76",
+    "phenotype_components.tsv.gz": "9d76c701af8690ecc29fb24bac0c866bcb4459827f4c3a81d545b63a54697d3f",
+    "phenotype_truth.tsv": "8532bf119e10cee41677843b86e1f0b049d8d6fc305f8d8542f71af8c8b1b1b2",
+    "phenotypes.bed": "13280544e8717c257f363e72ca61e6cddb3fe20ccbf34a4cc067fcd3e89c44d9",
+    "phenotypes.bed.gz": "796045f9b48dd37f950a231d3e9c48791533e86e02d3abc3d672fe9911c055bb",
+    "phenotypes.bed.gz.tbi": "2adc56e53305442c7a900d6313bab7ab6de32bcbbb4b693bc798c55e58ef437c",
+    "phenotypes.tsv": "64101606afc6d72af27b02b0869e0153fd5441857210b620e3502b6a93e3a43f",
+    "qc_summary.json": "e40811dbcec603add9e75c6ef7ed33850cf955aa35eba59fc54b7479a2cb54a6",
+    "regional_association_qc.tsv.gz": "86bc50a440806b44887aa7b23be7ab0bd07e33957ce8ef216f7d7c1ceed8d5b9",
+    "sample_metadata.tsv": "a3ed162cf21d3c7604c2a042ab2024ffbec1b20c2cd6571b07ee8471deac8545"
+  }
+}

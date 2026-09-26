@@ -10,9 +10,9 @@ That is the guiding principle for the replacement.
 
 ## Current status
 
-As of 2026-09-22, this repository is a **development and evidence repository**.
+As of 2026-09-23, this repository includes a **thin executable lab-tech prototype** alongside its development evidence.
 
-The accumulated material is substantial, but the replacement operator has not yet been implemented or validated. The repository currently contains:
+The [prototype](docs/operator_prototype.md) exposes configuration, readiness, and submission through typed MCP tools and fixed notebook cells. It includes scientific approval, retained superseded history, replay, and a synthetic lifecycle. [Live LSF readiness and gated submission](docs/readiness_reconciliation_20260924.md) are verified; scientific workflow completion and the full action catalog remain separate work. The repository also contains:
 
 - 19 imported skill entrypoints with domain procedures, helpers, templates, and site/runtime knowledge;
 - historical attempts and retired approaches under `archive/`;
@@ -25,6 +25,11 @@ The current skill collection contains overlapping and sometimes conflicting proc
 
 ## Start here
 
+For the executable harness, start with the [prototype architecture and setup](docs/operator_prototype.md),
+the [operator skill](skills/fungen-operator/SKILL.md), and the [executed synthetic notebook](examples/operator_lifecycle.ipynb).
+The [action-surface design](docs/operator_action_surface_20260923.md) supplies the fixed-cell model;
+the prototype implements its configuration/readiness/submission subset, with harmonization upstream.
+
 1. **[Operating model](docs/operator_model.md)** — the canonical current conceptual model: what the operator is, its positive action contract, ownership boundaries, state model, and parsimony principle.
 2. **[Benchmark](docs/benchmark.md)** — the canonical evaluation contract, explicitly aligned to Anthropic's task/trial/grader/outcome framework and peer-reviewed agent benchmarks (τ-bench, ToolSandbox, WorkArena++, AgentBoard, MAST, ScienceAgentBench).
 3. **[Skill baseline and migration map](skills/README.md)** — what capabilities exist in the current collection and how they should be treated during consolidation.
@@ -32,6 +37,10 @@ The current skill collection contains overlapping and sometimes conflicting proc
 5. **[Research basis](docs/research_basis.md)** — how the project's observed problems map to published work on compositional workflows, stateful tool use, rule-constrained agents, trajectory evaluation, scientific agents, and agent complexity.
 
 Only then descend into the evidence corpus when a design decision needs traceability.
+
+The workflow contract for the current implementation is the local `../xqtl/xqtl-protocol` checkout; see the [source boundary](docs/operator_model.md#authoritative-workflow-source). Existing individual-derived MWEs under `../xqtl/` are excluded from the new benchmark; see the [fixture boundary](docs/benchmark.md#legacy-mwe-exclusion).
+
+The active [MWS-01 development reference](benchmark/README.md) uses a verified **500-sample synthetic MWE**, with matched genotype, phenotype, and covariate inputs.
 
 ## Operating model in one page
 

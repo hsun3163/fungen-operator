@@ -1,0 +1,485 @@
+{
+  "status": "frozen_before_validation_review",
+  "theta_star": 1.4305555555555556,
+  "baseline_theta": 1.0,
+  "B": 10000,
+  "seed": 20260923,
+  "formula_version": "global_homozygosity_multiplier_rank_quantile_v1",
+  "objective": "equal region weight; equal nonempty target-|r| bins; fixed target pairs",
+  "selected_development_loss": 0.1147639800052275,
+  "baseline_development_loss": 0.11661559780321458,
+  "refinement": {
+    "status": "refinement_jobs_appended",
+    "coarse_winner": 1.5,
+    "baseline_loss": 0.11661559780321458,
+    "theta_values": [
+      1.4027777777777777,
+      1.4305555555555556,
+      1.4583333333333333,
+      1.4861111111111112,
+      1.5138888888888888,
+      1.5416666666666667,
+      1.5694444444444444,
+      1.5972222222222223
+    ],
+    "reason": "non-baseline coarse minimum; eight points within adjacent coarse intervals"
+  },
+  "region_pair_definitions": "frozen in prepared/regions.tsv and per-region .pairs.npz",
+  "acceptance_contract": "docs/sketch_genotype_mwe_luna_prompt.md initial thresholds, recorded pre-validation",
+  "runtime": {
+    "Rscript": "/sc/arion/work/sunh14/conda/envs/py3.11/bin/Rscript",
+    "python": "/sc/arion/work/sunh14/conda/envs/py3.11/bin/python",
+    "R_version": "4.3.3",
+    "pecotmr": "0.3.4",
+    "pgenlibr": "0.3.2",
+    "libpaths": [
+      "/sc/arion/work/sunh14/conda/envs/py3.11/lib/R/library"
+    ],
+    "reader": "pecotmr:::open_pgen/read_pgen, meanimpute=FALSE",
+    "source_root": "/sc/arion/projects/load/users/sunh14/myloid_paper/Myloid-paper/3_Production/cosi_archive/COSI/hg38/ADSP_reference_panel/ADSP_sketch_reference/EUR/rss_ld_sketch",
+    "B": 10000,
+    "seed": 20260923
+  },
+  "sources": [
+    {
+      "chromosome": "1",
+      "pgen": {
+        "path": "/sc/arion/projects/load/users/sunh14/myloid_paper/Myloid-paper/3_Production/cosi_archive/COSI/hg38/ADSP_reference_panel/ADSP_sketch_reference/EUR/rss_ld_sketch/chr1/ADSP.R4.EUR.admixture85.chr1.pgen",
+        "size": 24313840219,
+        "mtime_ns": 1786270161420281090,
+        "full_sha256": null
+      },
+      "pvar": {
+        "path": "/sc/arion/projects/load/users/sunh14/myloid_paper/Myloid-paper/3_Production/cosi_archive/COSI/hg38/ADSP_reference_panel/ADSP_sketch_reference/EUR/rss_ld_sketch/chr1/ADSP.R4.EUR.admixture85.chr1.pvar",
+        "size": 40403744,
+        "mtime_ns": 1786270161421281106,
+        "full_sha256": "ddf8f28d83665b1eb7ddbc60da2b7a45fdc7cb744fa7c22b1da09f00af590830"
+      },
+      "psam": {
+        "path": "/sc/arion/projects/load/users/sunh14/myloid_paper/Myloid-paper/3_Production/cosi_archive/COSI/hg38/ADSP_reference_panel/ADSP_sketch_reference/EUR/rss_ld_sketch/chr1/ADSP.R4.EUR.admixture85.chr1.psam",
+        "size": 147801,
+        "mtime_ns": 1786270161422281123,
+        "full_sha256": "fbaefd0f106795f7135ff0a4b563f4121c4e8c06c8fbc9c766d714c9288d90ba"
+      },
+      "afreq": {
+        "path": "/sc/arion/projects/load/users/sunh14/myloid_paper/Myloid-paper/3_Production/cosi_archive/COSI/hg38/ADSP_reference_panel/ADSP_sketch_reference/EUR/rss_ld_sketch/chr1/ADSP.R4.EUR.admixture85.chr1.afreq",
+        "size": 70224763,
+        "mtime_ns": 1786270161422281123,
+        "full_sha256": "9ba842d0a354ebdde2321420f024592c52ee7a5a437db869d45574a4f7c85f9f"
+      }
+    },
+    {
+      "chromosome": "6",
+      "pgen": {
+        "path": "/sc/arion/projects/load/users/sunh14/myloid_paper/Myloid-paper/3_Production/cosi_archive/COSI/hg38/ADSP_reference_panel/ADSP_sketch_reference/EUR/rss_ld_sketch/chr6/ADSP.R4.EUR.admixture85.chr6.pgen",
+        "size": 20349003930,
+        "mtime_ns": 1786270336064216292,
+        "full_sha256": null
+      },
+      "pvar": {
+        "path": "/sc/arion/projects/load/users/sunh14/myloid_paper/Myloid-paper/3_Production/cosi_archive/COSI/hg38/ADSP_reference_panel/ADSP_sketch_reference/EUR/rss_ld_sketch/chr6/ADSP.R4.EUR.admixture85.chr6.pvar",
+        "size": 33231690,
+        "mtime_ns": 1786270336066216326,
+        "full_sha256": "9c1eec4518176e891d56b50436a3608aa381dc9b73aab8efdeab1144d9aa4b9c"
+      },
+      "psam": {
+        "path": "/sc/arion/projects/load/users/sunh14/myloid_paper/Myloid-paper/3_Production/cosi_archive/COSI/hg38/ADSP_reference_panel/ADSP_sketch_reference/EUR/rss_ld_sketch/chr6/ADSP.R4.EUR.admixture85.chr6.psam",
+        "size": 147801,
+        "mtime_ns": 1786270336067216342,
+        "full_sha256": "fbaefd0f106795f7135ff0a4b563f4121c4e8c06c8fbc9c766d714c9288d90ba"
+      },
+      "afreq": {
+        "path": "/sc/arion/projects/load/users/sunh14/myloid_paper/Myloid-paper/3_Production/cosi_archive/COSI/hg38/ADSP_reference_panel/ADSP_sketch_reference/EUR/rss_ld_sketch/chr6/ADSP.R4.EUR.admixture85.chr6.afreq",
+        "size": 58370446,
+        "mtime_ns": 1786270336067216342,
+        "full_sha256": "fc8a33bf1f93f571d8daa98ddf2a97670d061e124e64e63c8603d414956e0e8f"
+      }
+    },
+    {
+      "chromosome": "19",
+      "pgen": {
+        "path": "/sc/arion/projects/load/users/sunh14/myloid_paper/Myloid-paper/3_Production/cosi_archive/COSI/hg38/ADSP_reference_panel/ADSP_sketch_reference/EUR/rss_ld_sketch/chr19/ADSP.R4.EUR.admixture85.chr19.pgen",
+        "size": 7217916743,
+        "mtime_ns": 1786267899056174019,
+        "full_sha256": null
+      },
+      "pvar": {
+        "path": "/sc/arion/projects/load/users/sunh14/myloid_paper/Myloid-paper/3_Production/cosi_archive/COSI/hg38/ADSP_reference_panel/ADSP_sketch_reference/EUR/rss_ld_sketch/chr19/ADSP.R4.EUR.admixture85.chr19.pvar",
+        "size": 12704467,
+        "mtime_ns": 1786267899058174053,
+        "full_sha256": "9e7ba4e0d5ae947bfd703ed33500537aa23af40f805e9fd068d98f029854bf0a"
+      },
+      "psam": {
+        "path": "/sc/arion/projects/load/users/sunh14/myloid_paper/Myloid-paper/3_Production/cosi_archive/COSI/hg38/ADSP_reference_panel/ADSP_sketch_reference/EUR/rss_ld_sketch/chr19/ADSP.R4.EUR.admixture85.chr19.psam",
+        "size": 147801,
+        "mtime_ns": 1786267899059174070,
+        "full_sha256": "fbaefd0f106795f7135ff0a4b563f4121c4e8c06c8fbc9c766d714c9288d90ba"
+      },
+      "afreq": {
+        "path": "/sc/arion/projects/load/users/sunh14/myloid_paper/Myloid-paper/3_Production/cosi_archive/COSI/hg38/ADSP_reference_panel/ADSP_sketch_reference/EUR/rss_ld_sketch/chr19/ADSP.R4.EUR.admixture85.chr19.afreq",
+        "size": 21794377,
+        "mtime_ns": 1786267899059174070,
+        "full_sha256": "fd972e97d1ed4a5fcd8078a14a40606776a123dcc5cafcede35b0cfaeb62574f"
+      }
+    },
+    {
+      "chromosome": "21",
+      "pgen": {
+        "path": "/sc/arion/projects/load/users/sunh14/myloid_paper/Myloid-paper/3_Production/cosi_archive/COSI/hg38/ADSP_reference_panel/ADSP_sketch_reference/EUR/rss_ld_sketch/chr21/ADSP.R4.EUR.admixture85.chr21.pgen",
+        "size": 4272987566,
+        "mtime_ns": 1786267808009647391,
+        "full_sha256": null
+      },
+      "pvar": {
+        "path": "/sc/arion/projects/load/users/sunh14/myloid_paper/Myloid-paper/3_Production/cosi_archive/COSI/hg38/ADSP_reference_panel/ADSP_sketch_reference/EUR/rss_ld_sketch/chr21/ADSP.R4.EUR.admixture85.chr21.pvar",
+        "size": 7726374,
+        "mtime_ns": 1786267808010647408,
+        "full_sha256": "ef714f641154567bba119797a2e9d0622a715f350727d584754cb6d94a4d7ba9"
+      },
+      "psam": {
+        "path": "/sc/arion/projects/load/users/sunh14/myloid_paper/Myloid-paper/3_Production/cosi_archive/COSI/hg38/ADSP_reference_panel/ADSP_sketch_reference/EUR/rss_ld_sketch/chr21/ADSP.R4.EUR.admixture85.chr21.psam",
+        "size": 147801,
+        "mtime_ns": 1786267808011647425,
+        "full_sha256": "fbaefd0f106795f7135ff0a4b563f4121c4e8c06c8fbc9c766d714c9288d90ba"
+      },
+      "afreq": {
+        "path": "/sc/arion/projects/load/users/sunh14/myloid_paper/Myloid-paper/3_Production/cosi_archive/COSI/hg38/ADSP_reference_panel/ADSP_sketch_reference/EUR/rss_ld_sketch/chr21/ADSP.R4.EUR.admixture85.chr21.afreq",
+        "size": 13069682,
+        "mtime_ns": 1786267808011647425,
+        "full_sha256": "d8bc89c637cf03c630dd23e12ad42f1638879c5ad4f51228f5032df05e731873"
+      }
+    },
+    {
+      "chromosome": "22",
+      "pgen": {
+        "path": "/sc/arion/projects/load/users/sunh14/myloid_paper/Myloid-paper/3_Production/cosi_archive/COSI/hg38/ADSP_reference_panel/ADSP_sketch_reference/EUR/rss_ld_sketch/chr22/ADSP.R4.EUR.admixture85.chr22.pgen",
+        "size": 4482247384,
+        "mtime_ns": 1786267807972646769,
+        "full_sha256": null
+      },
+      "pvar": {
+        "path": "/sc/arion/projects/load/users/sunh14/myloid_paper/Myloid-paper/3_Production/cosi_archive/COSI/hg38/ADSP_reference_panel/ADSP_sketch_reference/EUR/rss_ld_sketch/chr22/ADSP.R4.EUR.admixture85.chr22.pvar",
+        "size": 8077907,
+        "mtime_ns": 1786267807973646785,
+        "full_sha256": "e1d26b050f74668143afd9805c5b090dc9e9009e9f5c3b285afd20ef25726078"
+      },
+      "psam": {
+        "path": "/sc/arion/projects/load/users/sunh14/myloid_paper/Myloid-paper/3_Production/cosi_archive/COSI/hg38/ADSP_reference_panel/ADSP_sketch_reference/EUR/rss_ld_sketch/chr22/ADSP.R4.EUR.admixture85.chr22.psam",
+        "size": 147801,
+        "mtime_ns": 1786267807974646802,
+        "full_sha256": "fbaefd0f106795f7135ff0a4b563f4121c4e8c06c8fbc9c766d714c9288d90ba"
+      },
+      "afreq": {
+        "path": "/sc/arion/projects/load/users/sunh14/myloid_paper/Myloid-paper/3_Production/cosi_archive/COSI/hg38/ADSP_reference_panel/ADSP_sketch_reference/EUR/rss_ld_sketch/chr22/ADSP.R4.EUR.admixture85.chr22.afreq",
+        "size": 13678352,
+        "mtime_ns": 1786267807975646819,
+        "full_sha256": "ac4a399cf2c28291b0bf6e1f2f4ba2fece7316705906003b5846a913b78f7fb1"
+      }
+    }
+  ],
+  "grid_complete": true,
+  "grid_values": [
+    0.0,
+    0.125,
+    0.25,
+    0.375,
+    0.5,
+    0.625,
+    0.75,
+    0.875,
+    1.0,
+    1.125,
+    1.25,
+    1.375,
+    1.4027777777777777,
+    1.4305555555555556,
+    1.4583333333333333,
+    1.4861111111111112,
+    1.5,
+    1.5138888888888888,
+    1.5416666666666667,
+    1.5694444444444444,
+    1.5972222222222223,
+    1.625,
+    1.75,
+    1.875,
+    2.0
+  ],
+  "code_sha256": "e5a46dfd6ef94c3002b45d163c849620e720119b348111cd29c021b8843f0577",
+  "regions_sha256": "bc2fd07e968b6cc0850f4dfd58a69cf603fe3fae5894e5b17a0bd76fe19f2e77",
+  "input_hashes": {
+    "1_chr1_cand01": "5da8ad9d19b553459606aeb25eab2b03d03dcb0013b7b40c98fe8541bb0fc632",
+    "1_chr1_cand02": "f27e704ce61677f590d4fd511941dcce8b080d9533c4195edf0e5cca823f6b1c",
+    "1_chr1_cand03": "8f5a71282c70d9bfd584a40156aaab77920bf185b056b636a5af402e047ae3a0",
+    "6_chr6_cand01": "eb2a849991ee67f3b4437e8479e5af081427f4eab56f7ede1bc6b7678f2621b0",
+    "6_chr6_cand02": "7376e4d662313dd543617bdc3b7a99ec8f08fdcd42a80e53f62def902835b883",
+    "6_chr6_cand03": "203d75b64b719eaad45ffbfcfa83075516398ec33e473096716c5963643e2ddb",
+    "19_chr19_cand01": "aada7d54d3f8641fd6c3aa67c795f647630750e4d9e0e6e011b6c7e018ab5e77",
+    "19_chr19_cand02": "4d9bf33077a3110029550643c7e231ffee823151bde932efaa708261a25d185d",
+    "19_chr19_cand03": "c91c3af1bcb484b0fbfea7555573197a2f81f719a615706888d354d6885780a7",
+    "21_chr21_cand01": "8a82df45bbf5abf354ff6ab487a79bfe33f03c2fe13c9f774930d269112bd5a0",
+    "21_chr21_cand02": "0f85bac561686fa0816cb01b9d05e8bcb5ad1a9576c99a33bf08a9d152100054",
+    "21_chr21_cand03": "402137609ee88ba4b651c4ad5495fe91ddd43fc7542b46d203ffcb15638afc76",
+    "22_chr22_cand10": "9114e24790aeccbd03c2d7588c33debbb7f0d5a1928fa471c6b3cd62f1cf53b2",
+    "22_chr22_cand13": "4d0f04e4650793f75557b6235ed8f4961acff9307c240d4f96f12335c62dde0b",
+    "22_chr22_cand17": "e29359ef048cd240ccedbea97c8751a92ececbca05a46a4cf4ec530948a18a4e",
+    "22_chr22_cand18": "b2ccea6cba7502f963b8adb98f20ab6f93b0a7a4ba31f04069e2d64a3b94dc32",
+    "22_chr22_cand21": "eeccb0da58419986d08b2ba52aacf56862da2ad93414b3aaf593e1d1b617bbbe",
+    "22_chr22_cand22": "dead49195f68ffaf6bd249abbed7d62b0c5e386c9f17f1796bda3b0ee3d2664c",
+    "22_chr22_cand23": "49a08f8bc0ef05d1a3d0d976b0fdb135c281ae45fbf58b518c7ed80de503b08a",
+    "22_chr22_cand24": "7a76f5f8b1a3c6ccce9e709705a50c5bcc0c6ba14f9ada53931bf4a22830be83"
+  },
+  "selection_objective_loss_table": [
+    {
+      "theta": 0.0,
+      "primary_loss": NaN,
+      "mean_region_rmse": 0.16400070265388988,
+      "n_regions": 8,
+      "successful_regions": 7,
+      "globally_valid": false,
+      "invalid_regions": "22_chr22_cand23",
+      "distinct_assignment_signatures": 7
+    },
+    {
+      "theta": 0.125,
+      "primary_loss": 0.14363576989936097,
+      "mean_region_rmse": 0.14299682662447083,
+      "n_regions": 8,
+      "successful_regions": 8,
+      "globally_valid": true,
+      "invalid_regions": "",
+      "distinct_assignment_signatures": 8
+    },
+    {
+      "theta": 0.25,
+      "primary_loss": 0.13457596307334185,
+      "mean_region_rmse": 0.13421124153774078,
+      "n_regions": 8,
+      "successful_regions": 8,
+      "globally_valid": true,
+      "invalid_regions": "",
+      "distinct_assignment_signatures": 8
+    },
+    {
+      "theta": 0.375,
+      "primary_loss": 0.1288136526846877,
+      "mean_region_rmse": 0.12853628044325865,
+      "n_regions": 8,
+      "successful_regions": 8,
+      "globally_valid": true,
+      "invalid_regions": "",
+      "distinct_assignment_signatures": 8
+    },
+    {
+      "theta": 0.5,
+      "primary_loss": 0.12481050857338669,
+      "mean_region_rmse": 0.12456736074159853,
+      "n_regions": 8,
+      "successful_regions": 8,
+      "globally_valid": true,
+      "invalid_regions": "",
+      "distinct_assignment_signatures": 8
+    },
+    {
+      "theta": 0.625,
+      "primary_loss": 0.1218437892465373,
+      "mean_region_rmse": 0.12161511332680836,
+      "n_regions": 8,
+      "successful_regions": 8,
+      "globally_valid": true,
+      "invalid_regions": "",
+      "distinct_assignment_signatures": 8
+    },
+    {
+      "theta": 0.75,
+      "primary_loss": 0.11962081068830788,
+      "mean_region_rmse": 0.11939862979082433,
+      "n_regions": 8,
+      "successful_regions": 8,
+      "globally_valid": true,
+      "invalid_regions": "",
+      "distinct_assignment_signatures": 8
+    },
+    {
+      "theta": 0.875,
+      "primary_loss": 0.11790333159786957,
+      "mean_region_rmse": 0.11768131226548625,
+      "n_regions": 8,
+      "successful_regions": 8,
+      "globally_valid": true,
+      "invalid_regions": "",
+      "distinct_assignment_signatures": 8
+    },
+    {
+      "theta": 1.0,
+      "primary_loss": 0.11661559780321458,
+      "mean_region_rmse": 0.11639524777349852,
+      "n_regions": 8,
+      "successful_regions": 8,
+      "globally_valid": true,
+      "invalid_regions": "",
+      "distinct_assignment_signatures": 8
+    },
+    {
+      "theta": 1.125,
+      "primary_loss": 0.11570458900941245,
+      "mean_region_rmse": 0.115483535979973,
+      "n_regions": 8,
+      "successful_regions": 8,
+      "globally_valid": true,
+      "invalid_regions": "",
+      "distinct_assignment_signatures": 8
+    },
+    {
+      "theta": 1.25,
+      "primary_loss": 0.11511378831446754,
+      "mean_region_rmse": 0.11489266162708456,
+      "n_regions": 8,
+      "successful_regions": 8,
+      "globally_valid": true,
+      "invalid_regions": "",
+      "distinct_assignment_signatures": 8
+    },
+    {
+      "theta": 1.375,
+      "primary_loss": 0.11481289228183757,
+      "mean_region_rmse": 0.11459313143489719,
+      "n_regions": 8,
+      "successful_regions": 8,
+      "globally_valid": true,
+      "invalid_regions": "",
+      "distinct_assignment_signatures": 8
+    },
+    {
+      "theta": 1.4027777777777777,
+      "primary_loss": 0.11478689724466967,
+      "mean_region_rmse": 0.11456745078931901,
+      "n_regions": 8,
+      "successful_regions": 8,
+      "globally_valid": true,
+      "invalid_regions": "",
+      "distinct_assignment_signatures": 8
+    },
+    {
+      "theta": 1.4305555555555556,
+      "primary_loss": 0.1147639800052275,
+      "mean_region_rmse": 0.11454487433929567,
+      "n_regions": 8,
+      "successful_regions": 8,
+      "globally_valid": true,
+      "invalid_regions": "",
+      "distinct_assignment_signatures": 8
+    },
+    {
+      "theta": 1.4583333333333333,
+      "primary_loss": 0.11476302474525849,
+      "mean_region_rmse": 0.11454435773130667,
+      "n_regions": 8,
+      "successful_regions": 8,
+      "globally_valid": true,
+      "invalid_regions": "",
+      "distinct_assignment_signatures": 8
+    },
+    {
+      "theta": 1.4861111111111112,
+      "primary_loss": 0.11476683430985012,
+      "mean_region_rmse": 0.1145484932732992,
+      "n_regions": 8,
+      "successful_regions": 8,
+      "globally_valid": true,
+      "invalid_regions": "",
+      "distinct_assignment_signatures": 8
+    },
+    {
+      "theta": 1.5,
+      "primary_loss": 0.11477182888562118,
+      "mean_region_rmse": 0.11455411928452228,
+      "n_regions": 8,
+      "successful_regions": 8,
+      "globally_valid": true,
+      "invalid_regions": "",
+      "distinct_assignment_signatures": 8
+    },
+    {
+      "theta": 1.5138888888888888,
+      "primary_loss": 0.11479009307733024,
+      "mean_region_rmse": 0.11457215529817785,
+      "n_regions": 8,
+      "successful_regions": 8,
+      "globally_valid": true,
+      "invalid_regions": "",
+      "distinct_assignment_signatures": 8
+    },
+    {
+      "theta": 1.5416666666666667,
+      "primary_loss": 0.11481795522038801,
+      "mean_region_rmse": 0.11460062533884326,
+      "n_regions": 8,
+      "successful_regions": 8,
+      "globally_valid": true,
+      "invalid_regions": "",
+      "distinct_assignment_signatures": 8
+    },
+    {
+      "theta": 1.5694444444444444,
+      "primary_loss": 0.11485470025873974,
+      "mean_region_rmse": 0.11463688702556402,
+      "n_regions": 8,
+      "successful_regions": 8,
+      "globally_valid": true,
+      "invalid_regions": "",
+      "distinct_assignment_signatures": 8
+    },
+    {
+      "theta": 1.5972222222222223,
+      "primary_loss": 0.11492252349202259,
+      "mean_region_rmse": 0.11470457114167676,
+      "n_regions": 8,
+      "successful_regions": 8,
+      "globally_valid": true,
+      "invalid_regions": "",
+      "distinct_assignment_signatures": 8
+    },
+    {
+      "theta": 1.625,
+      "primary_loss": 0.11500116770381476,
+      "mean_region_rmse": 0.11478385775410635,
+      "n_regions": 8,
+      "successful_regions": 8,
+      "globally_valid": true,
+      "invalid_regions": "",
+      "distinct_assignment_signatures": 8
+    },
+    {
+      "theta": 1.75,
+      "primary_loss": 0.11551344870636732,
+      "mean_region_rmse": 0.11529392099897165,
+      "n_regions": 8,
+      "successful_regions": 8,
+      "globally_valid": true,
+      "invalid_regions": "",
+      "distinct_assignment_signatures": 8
+    },
+    {
+      "theta": 1.875,
+      "primary_loss": 0.11637112166809897,
+      "mean_region_rmse": 0.11614562628536798,
+      "n_regions": 8,
+      "successful_regions": 8,
+      "globally_valid": true,
+      "invalid_regions": "",
+      "distinct_assignment_signatures": 8
+    },
+    {
+      "theta": 2.0,
+      "primary_loss": 0.1175930922298863,
+      "mean_region_rmse": 0.11735266198935387,
+      "n_regions": 8,
+      "successful_regions": 8,
+      "globally_valid": true,
+      "invalid_regions": "",
+      "distinct_assignment_signatures": 8
+    }
+  ],
+  "tie_rule": "within 1E-6, theta closest to 1 then smaller theta"
+}

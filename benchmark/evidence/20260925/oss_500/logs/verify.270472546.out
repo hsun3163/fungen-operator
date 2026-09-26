@@ -1,0 +1,43 @@
+Sender: LSF System <lsfadmin@lh06c32>
+Subject: Job 270472546: <fungen_mws01_verify> in cluster <chimera> Done
+
+Job <fungen_mws01_verify> was submitted from host <lc06e02> by user <sunh14> in cluster <chimera> at Fri Sep 25 14:38:35 2026
+Job was executed on host(s) <lh06c32>, in queue <express>, as user <sunh14> in cluster <chimera> at Fri Sep 25 14:38:40 2026
+</hpc/users/sunh14> was used as the home directory.
+</hpc/users/sunh14/sunh14_project/fungen-operator> was used as the working directory.
+Started at Fri Sep 25 14:38:40 2026
+Terminated at Fri Sep 25 14:38:48 2026
+Results reported at Fri Sep 25 14:38:48 2026
+
+Your job looked like:
+
+------------------------------------------------------------
+# LSBATCH: User input
+/bin/bash -lc 'set -eo pipefail; source /sc/arion/work/sunh14/conda/mambaforge/etc/profile.d/conda.sh; conda activate /sc/arion/work/sunh14/conda/envs/xqtl-r-base-fsusie; export PATH=/sc/arion/work/sunh14/conda/envs/xqtl-r-base-fsusie/bin:$PATH; export PYTHONPATH=/sc/arion/projects/load/users/sunh14/fungen-operator/src; hash -r; cd /sc/arion/projects/load/users/sunh14/fungen-operator/runs/xqtl/benchmarks/mws01/oss_500_20260925_01; python -m fungen_operator verify /sc/arion/projects/load/users/sunh14/fungen-operator/runs/xqtl/benchmarks/mws01/oss_500_20260925_01/operator.ipynb; echo "verify_exit=$?"'
+------------------------------------------------------------
+
+Successfully completed.
+
+Resource usage summary:
+
+    CPU time :                                   5.26 sec.
+    Max Memory :                                 81 MB
+    Average Memory :                             51.29 MB
+    Total Requested Memory :                     32768.00 MB
+    Delta Memory :                               32687.00 MB
+    Max Swap :                                   -
+    Max Processes :                              5
+    Max Threads :                                18
+    Run time :                                   8 sec.
+    Turnaround time :                            13 sec.
+
+The output (if any) follows:
+
+All active cells re-render identically.
+verify_exit=0
+
+
+PS:
+
+Read file </sc/arion/projects/load/users/sunh14/fungen-operator/runs/xqtl/benchmarks/mws01/oss_500_20260925_01/logs/verify.270472546.err> for stderr output of this job.
+

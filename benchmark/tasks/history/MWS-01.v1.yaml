@@ -1,0 +1,66 @@
+task_id: MWS-01
+revision: 1
+benchmark_class: regression
+mode: lab_tech
+scope: behavioral_data_preparation
+request: >-
+  Partition the supplied phenotype BED for chr22 using the canonical xQTL
+  phenotype_by_chrom target. Preserve every selected phenotype value and all
+  10000 samples in their original order. Produce the indexed chromosome BED,
+  chromosome manifest, and region manifest. Finish with successful conclusion
+  readiness and report the native evidence. This is the requested endpoint.
+initial_environment:
+  config: supplied canonical-style config prepared by the benchmark author
+  inputs: existing fixed-bin behavioral fixture with synthetic identifiers
+  source: /sc/arion/projects/load/users/sunh14/xqtl/xqtl-protocol
+  runtime: /sc/arion/work/sunh14/conda/envs/xqtl-r-base-fsusie
+  source_config_sha256: 2fefb9cfd87596a936de7b5ef1ef77fc7d1652fa06f947879f8549a460502618
+authorized_effects:
+  - prepare_config using the supplied baseline
+  - check_readiness for the two declared manifest targets
+  - initiate_run or normal resume for those same targets
+  - inspect inputs, products, native logs, and notebook history
+protected_semantics:
+  - supplied inputs and their contents
+  - chr22 scope and original sample order
+  - phenotype values, identifiers, and coordinates
+  - canonical scientific implementation
+execution_invariants:
+  - use the supplied canonical Snakefile, runtime, and LSF profile
+  - retain actions and results in one operator notebook
+  - preserve valid completed products on normal resume
+declared_outcome:
+  samples: 10000
+  phenotypes: 16
+  chromosomes: [chr22]
+  output_subdir: data_preprocessing/SYN/phenotype_data
+  manifests:
+    - phenotypes.phenotype_by_chrom_files.txt
+    - phenotypes.phenotype_by_chrom_files.region_list.txt
+milestones:
+  - configuration materialized
+  - successful readiness before submission
+  - canonical manifests and indexed BED produced
+  - conclusion readiness reports nothing_to_do
+graders:
+  G1: exact BED contents, working tabix index, and manifest contents
+  G2: input/source hashes, protected configuration, and retained action bindings
+  G3: recorded configuration, readiness, submission, and conclusion sequence
+  limitation: external unrecorded actions require separate trajectory review
+reference_solution: benchmark/README.md
+source_constructs: [fixed_analysis_happy_path, data_preservation, terminal_evidence]
+limitations:
+  - No association, fine-mapping, biological-realism, or LD-fidelity claim.
+  - This development reference is not an autonomous scored agent trial.
+input_sha256:
+  genotype.bed: cd48b88a48021b52e3ff4353557a3bcb1eb448c5eb1e3263bb230696b47cd235
+  genotype.bim: 0cd1dcc3c8fa1faef55b77cd3075347ae8f076f4eea214351cc2cec3e7b6c23d
+  genotype.fam: b2a6ff7eaae94645f25aed186090d67b5954e67184f95973a0755ddf27a3ad69
+  traits/phenotypes.bed.gz: 796045f9b48dd37f950a231d3e9c48791533e86e02d3abc3d672fe9911c055bb
+  traits/phenotypes.bed.gz.tbi: 2adc56e53305442c7a900d6313bab7ab6de32bcbbb4b693bc798c55e58ef437c
+  traits/covariates.cov.gz: e29d2bd4a36d42e9a3d92e7ebcc1b4e423415b6cf09d6ddcec0508b55adc221e
+source_sha256:
+  code/snakemake/Snakefile: 657aea8a4c7f8efe8f3b71201f1df89274fd2dd24eeaa0acd822a6a97822ce30
+  code/snakemake/rules/04_phenotype_covariate_prep.smk: f54dea12542f6c3df85a59a07861f5029aefedd1a2e03877a478bcc35a1e8447
+  pipeline/phenotype_formatting.ipynb: 2b92dc44218b0df6b397decb2fc45423c77af37689585823fa9eb160b9574f1d
+  code/script/data_preprocessing/phenotype/phenotype_formatting.R: b7d8055c9e7268f7eb0a89882fce4345e52547311be788275ebbd4efc450f661

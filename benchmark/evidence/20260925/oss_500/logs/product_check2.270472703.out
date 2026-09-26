@@ -1,0 +1,52 @@
+Sender: LSF System <lsfadmin@lh06c17>
+Subject: Job 270472703: <fungen_mws01_check2> in cluster <chimera> Done
+
+Job <fungen_mws01_check2> was submitted from host <lc06e02> by user <sunh14> in cluster <chimera> at Fri Sep 25 14:54:33 2026
+Job was executed on host(s) <lh06c17>, in queue <express>, as user <sunh14> in cluster <chimera> at Fri Sep 25 14:54:35 2026
+</hpc/users/sunh14> was used as the home directory.
+</hpc/users/sunh14/sunh14_project/fungen-operator> was used as the working directory.
+Started at Fri Sep 25 14:54:35 2026
+Terminated at Fri Sep 25 14:54:39 2026
+Results reported at Fri Sep 25 14:54:39 2026
+
+Your job looked like:
+
+------------------------------------------------------------
+# LSBATCH: User input
+/bin/bash -lc 'set -eu; cd /sc/arion/projects/load/users/sunh14/fungen-operator/runs/xqtl/benchmarks/mws01/oss_500_20260925_01/work/data_preprocessing/SYN/phenotype_data; echo "== bed phenotype data rows (expect 16) =="; zcat phenotypes.chr22.bed.gz | awk "NR>1{n++} END{print n+0}"; echo "== bed sample columns from header (expect 500) =="; zcat phenotypes.chr22.bed.gz | awk -F"\t" "NR==1{print NF-4; exit}"; echo "== region_list data rows (expect 16) =="; awk "END{print NR-1}" phenotypes.phenotype_by_chrom_files.region_list.txt; echo "== chrom manifest data rows (expect 1) =="; awk "END{print NR-1}" phenotypes.phenotype_by_chrom_files.txt; echo "== distinct chroms in bed (expect chr22 only) =="; zcat phenotypes.chr22.bed.gz | awk -F"\t" "NR>1{print \$1}" | sort -u; echo check_exit=$?'
+------------------------------------------------------------
+
+Successfully completed.
+
+Resource usage summary:
+
+    CPU time :                                   1.37 sec.
+    Max Memory :                                 15 MB
+    Average Memory :                             13.00 MB
+    Total Requested Memory :                     32768.00 MB
+    Delta Memory :                               32753.00 MB
+    Max Swap :                                   -
+    Max Processes :                              7
+    Max Threads :                                8
+    Run time :                                   4 sec.
+    Turnaround time :                            6 sec.
+
+The output (if any) follows:
+
+== bed phenotype data rows (expect 16) ==
+16
+== bed sample columns from header (expect 500) ==
+500
+== region_list data rows (expect 16) ==
+16
+== chrom manifest data rows (expect 1) ==
+1
+== distinct chroms in bed (expect chr22 only) ==
+chr22
+check_exit=0
+
+
+PS:
+
+Read file </sc/arion/projects/load/users/sunh14/fungen-operator/runs/xqtl/benchmarks/mws01/oss_500_20260925_01/logs/product_check2.270472703.err> for stderr output of this job.
+

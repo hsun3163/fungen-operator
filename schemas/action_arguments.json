@@ -1,0 +1,316 @@
+{
+  "prepare_config": {
+    "$defs": {
+      "JsonValue": {}
+    },
+    "additionalProperties": false,
+    "properties": {
+      "notebook": {
+        "pattern": "^/[A-Za-z0-9_./:+-]+$",
+        "title": "Notebook",
+        "type": "string"
+      },
+      "configfile": {
+        "pattern": "^/[A-Za-z0-9_./:+-]+$",
+        "title": "Configfile",
+        "type": "string"
+      },
+      "workdir": {
+        "pattern": "^/[A-Za-z0-9_./:+-]+$",
+        "title": "Workdir",
+        "type": "string"
+      },
+      "parameters": {
+        "additionalProperties": {
+          "$ref": "#/$defs/JsonValue"
+        },
+        "title": "Parameters",
+        "type": "object"
+      }
+    },
+    "required": [
+      "notebook",
+      "configfile",
+      "workdir"
+    ],
+    "title": "PrepareConfig",
+    "type": "object"
+  },
+  "check_readiness": {
+    "additionalProperties": false,
+    "properties": {
+      "notebook": {
+        "pattern": "^/[A-Za-z0-9_./:+-]+$",
+        "title": "Notebook",
+        "type": "string"
+      },
+      "configfile": {
+        "pattern": "^/[A-Za-z0-9_./:+-]+$",
+        "title": "Configfile",
+        "type": "string"
+      },
+      "workdir": {
+        "pattern": "^/[A-Za-z0-9_./:+-]+$",
+        "title": "Workdir",
+        "type": "string"
+      },
+      "log_dir": {
+        "pattern": "^/[A-Za-z0-9_./:+-]+$",
+        "title": "Log Dir",
+        "type": "string"
+      },
+      "targets": {
+        "items": {
+          "pattern": "^[A-Za-z0-9_./][A-Za-z0-9_./:+-]*$",
+          "type": "string"
+        },
+        "maxItems": 1000,
+        "minItems": 1,
+        "title": "Targets",
+        "type": "array"
+      },
+      "job_name": {
+        "default": "fungen",
+        "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,63}$",
+        "title": "Job Name",
+        "type": "string"
+      },
+      "queue": {
+        "default": "premium",
+        "enum": [
+          "premium",
+          "express"
+        ],
+        "title": "Queue",
+        "type": "string"
+      },
+      "project": {
+        "const": "acc_LOAD",
+        "default": "acc_LOAD",
+        "title": "Project",
+        "type": "string"
+      },
+      "profile": {
+        "const": "canonical_lsf",
+        "default": "canonical_lsf",
+        "title": "Profile",
+        "type": "string"
+      },
+      "runtime": {
+        "const": "canonical",
+        "default": "canonical",
+        "title": "Runtime",
+        "type": "string"
+      },
+      "controller_cores": {
+        "default": 1,
+        "maximum": 72,
+        "minimum": 1,
+        "title": "Controller Cores",
+        "type": "integer"
+      },
+      "workflow_cores": {
+        "default": 72,
+        "maximum": 512,
+        "minimum": 1,
+        "title": "Workflow Cores",
+        "type": "integer"
+      },
+      "memory_gb": {
+        "default": 40,
+        "maximum": 1000,
+        "minimum": 32,
+        "title": "Memory Gb",
+        "type": "integer"
+      },
+      "jobs": {
+        "default": 100,
+        "maximum": 1000,
+        "minimum": 1,
+        "title": "Jobs",
+        "type": "integer"
+      },
+      "latency_wait": {
+        "default": 120,
+        "maximum": 3600,
+        "minimum": 1,
+        "title": "Latency Wait",
+        "type": "integer"
+      },
+      "walltime_minutes": {
+        "default": 60,
+        "maximum": 8640,
+        "minimum": 1,
+        "title": "Walltime Minutes",
+        "type": "integer"
+      },
+      "phase": {
+        "default": "before_run",
+        "enum": [
+          "before_run",
+          "conclusion"
+        ],
+        "title": "Phase",
+        "type": "string"
+      }
+    },
+    "required": [
+      "notebook",
+      "configfile",
+      "workdir",
+      "log_dir",
+      "targets"
+    ],
+    "title": "CheckReadiness",
+    "type": "object"
+  },
+  "initiate_run": {
+    "additionalProperties": false,
+    "properties": {
+      "notebook": {
+        "pattern": "^/[A-Za-z0-9_./:+-]+$",
+        "title": "Notebook",
+        "type": "string"
+      },
+      "configfile": {
+        "pattern": "^/[A-Za-z0-9_./:+-]+$",
+        "title": "Configfile",
+        "type": "string"
+      },
+      "workdir": {
+        "pattern": "^/[A-Za-z0-9_./:+-]+$",
+        "title": "Workdir",
+        "type": "string"
+      },
+      "log_dir": {
+        "pattern": "^/[A-Za-z0-9_./:+-]+$",
+        "title": "Log Dir",
+        "type": "string"
+      },
+      "targets": {
+        "items": {
+          "pattern": "^[A-Za-z0-9_./][A-Za-z0-9_./:+-]*$",
+          "type": "string"
+        },
+        "maxItems": 1000,
+        "minItems": 1,
+        "title": "Targets",
+        "type": "array"
+      },
+      "job_name": {
+        "default": "fungen",
+        "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,63}$",
+        "title": "Job Name",
+        "type": "string"
+      },
+      "queue": {
+        "default": "premium",
+        "enum": [
+          "premium",
+          "express"
+        ],
+        "title": "Queue",
+        "type": "string"
+      },
+      "project": {
+        "const": "acc_LOAD",
+        "default": "acc_LOAD",
+        "title": "Project",
+        "type": "string"
+      },
+      "profile": {
+        "const": "canonical_lsf",
+        "default": "canonical_lsf",
+        "title": "Profile",
+        "type": "string"
+      },
+      "runtime": {
+        "const": "canonical",
+        "default": "canonical",
+        "title": "Runtime",
+        "type": "string"
+      },
+      "controller_cores": {
+        "default": 1,
+        "maximum": 72,
+        "minimum": 1,
+        "title": "Controller Cores",
+        "type": "integer"
+      },
+      "workflow_cores": {
+        "default": 72,
+        "maximum": 512,
+        "minimum": 1,
+        "title": "Workflow Cores",
+        "type": "integer"
+      },
+      "memory_gb": {
+        "default": 40,
+        "maximum": 1000,
+        "minimum": 32,
+        "title": "Memory Gb",
+        "type": "integer"
+      },
+      "jobs": {
+        "default": 100,
+        "maximum": 1000,
+        "minimum": 1,
+        "title": "Jobs",
+        "type": "integer"
+      },
+      "latency_wait": {
+        "default": 120,
+        "maximum": 3600,
+        "minimum": 1,
+        "title": "Latency Wait",
+        "type": "integer"
+      },
+      "walltime_minutes": {
+        "default": 8640,
+        "maximum": 8640,
+        "minimum": 1,
+        "title": "Walltime Minutes",
+        "type": "integer"
+      }
+    },
+    "required": [
+      "notebook",
+      "configfile",
+      "workdir",
+      "log_dir",
+      "targets"
+    ],
+    "title": "InitiateRun",
+    "type": "object"
+  },
+  "inspect_run": {
+    "additionalProperties": false,
+    "properties": {
+      "notebook": {
+        "pattern": "^/[A-Za-z0-9_./:+-]+$",
+        "title": "Notebook",
+        "type": "string"
+      },
+      "paths": {
+        "items": {
+          "pattern": "^/[A-Za-z0-9_./:+-]+$",
+          "type": "string"
+        },
+        "title": "Paths",
+        "type": "array"
+      },
+      "max_bytes": {
+        "default": 10000,
+        "maximum": 100000,
+        "minimum": 1,
+        "title": "Max Bytes",
+        "type": "integer"
+      }
+    },
+    "required": [
+      "notebook"
+    ],
+    "title": "InspectRun",
+    "type": "object"
+  }
+}
