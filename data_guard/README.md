@@ -57,8 +57,8 @@ go to the run log.
 ## Setup
 
 ```bash
-repo=~/sunh14_project/fungen-operator            # this checkout
-L=${LIBRARIAN_HOME:-~/sunh14_project/librarian_agent}
+repo=~/sunh14/fungen-operator-data-guard   # this checkout (work space)
+L=${LIBRARIAN_HOME:-~/sunh14/librarian_agent}
 mkdir -p "$L/codex/skills" "$L/runs"
 cp "$repo/data_guard/config.toml" "$L/codex/config.toml"
 ln -s "$repo/data_guard/AGENTS.md" "$L/codex/AGENTS.md"
@@ -79,7 +79,7 @@ Environment (e.g. in `~/.bashrc`):
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `LIBRARIAN_HOME` | `~/sunh14_project/librarian_agent` | private `codex/`, `runs/`, `latest.md` |
+| `LIBRARIAN_HOME` | `~/sunh14/librarian_agent` | private `codex/`, `runs/`, `latest.md` |
 | `LIBRARIAN_PROTECTED` | — | colon-separated protected result paths (read by the frontier skill) |
 | `OLLAMA_HOST` | unset | pin the Qwen endpoint, e.g. `http://127.0.0.1:11435` |
 | `CODEX_OLLAMA_MODEL` | `qwen3.8-flash-next:125b-a6b-q4_K_M` | model name |

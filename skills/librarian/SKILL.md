@@ -10,7 +10,9 @@ the librarian reads the archive and answers.
 
 ## Protected paths
 
-`$LIBRARIAN_PROTECTED` is a colon-separated list of protected result paths.
+`$LIBRARIAN_PROTECTED` is a colon-separated list of protected result paths. Folders have several names on
+Minerva (`~/...` symlinks and `/sc/arion/...`), so compare with resolved paths (`realpath`); anything under a
+protected folder is protected, including result figures.
 
 - QC is your job: metadata, schemas, headers, identifiers, row/sample counts, missingness, joins, file sizes and
   checks that code ran correctly. Do these yourself.

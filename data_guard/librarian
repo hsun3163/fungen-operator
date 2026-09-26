@@ -7,7 +7,7 @@
 # The model endpoint comes from the `codex --oss` launcher: set OLLAMA_HOST to
 # pin it, otherwise the launcher finds the Ollama LSF job and tunnels to it.
 
-L=${LIBRARIAN_HOME:-$HOME/sunh14_project/librarian_agent}
+L=${LIBRARIAN_HOME:-$HOME/sunh14/librarian_agent}
 timeout_s=${LIBRARIAN_TIMEOUT:-1800}
 
 tag=agent
