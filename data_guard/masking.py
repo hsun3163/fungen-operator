@@ -781,6 +781,10 @@ def do_retrieve(config, document, requester=None):
         raise MaskError("retrieval-response")
     bind_slots(dictionary, document, replies)
     human, masked = import_markdown(dictionary, document, incoming)
+    # A newly bound value may already occur elsewhere without bold. Refresh
+    # those occurrences with the same deterministic known-value scan as export.
+    # Scan the masked text so existing slot IDs keep their immutable bindings.
+    masked = export_markdown(dictionary, document, masked)
     check_masked(dictionary, document, masked)
     save_dictionary(config["dictionary_path"], dictionary)
     record["revision"] = write_source(record["source"], live, human, current, config)

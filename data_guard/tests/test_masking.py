@@ -280,6 +280,17 @@ def test_failed_retrieval_keeps_pending_slots_and_outputs_unchanged(files,monkey
     assert [p.read_bytes() for p in watched]==before
 
 
+def test_retrieved_value_also_masks_existing_unbold_occurrences(files):
+    export(files,'Public reference 12.\n')
+    files[2].write_text('Public reference 12.\n\nWe need **invented count**.\n')
+    m.do_import(files[0],'synthetic')
+    entry,=m.load_dictionary(files[0]['dictionary_path'])['entries'].values()
+    m.do_retrieve(files[0],'synthetic',lambda _: {entry['id']:{'value':'12'}})
+    assert files[2].read_text().count(entry['id'])==2
+    assert '12' not in files[2].read_text()
+    assert m.load_dictionary(files[0]['dictionary_path'])['entries'][entry['id']]['value']=='12'
+
+
 def test_new_requests_must_be_imported_before_retrieval(files):
     export(files,'Public.\n')
     files[2].write_text('Want **invented count**.\n')
