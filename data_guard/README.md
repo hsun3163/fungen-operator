@@ -183,6 +183,9 @@ Markdown file or Google Doc; hosted agents edit its masked Markdown export and r
 `FRONTIER.md` contains their short instructions. The local model only retrieves or computes pending values.
 The existing `librarian --slots` request path carries descriptions and sentence contexts over stdin and returns
 JSON privately to the calling script. It does not publish these responses to the answers repository.
+Each request includes the document key and masked manuscript path so the librarian can follow its source
+references and active-run provenance. A failed request or malformed JSON response leaves pending slots and
+outputs unchanged; an explicit unresolved answer marks that slot `needs-human`.
 
 The implementation consists of plain functions in `masking.py` and the `google_docs.py` adapter. The existing
 shell launcher dispatches `librarian mask` directly to Python, outside the model's read-only run. There is no

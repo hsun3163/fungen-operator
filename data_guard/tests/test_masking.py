@@ -251,11 +251,33 @@ def test_request_path_uses_existing_librarian_with_private_stdin(monkeypatch):
         captured.append((command,kwargs))
         return type('Result',(),{'stdout':'{"{{TEXT-ABCD}}":{"value":"17"}}'})()
     monkeypatch.setattr(m.subprocess,'run',fake)
-    response=m.request_slots([{'id':'{{TEXT-ABCD}}','description':'invented count','context':'We count imaginary genes.'}])
+    response=m.request_slots([{'id':'{{TEXT-ABCD}}','description':'invented count','context':'We count imaginary genes.'}],
+                             document='synthetic',masked_path=Path('/invented/paper/text/masked.md'))
     assert response['{{TEXT-ABCD}}']['value']=='17'
     assert captured[0][0][-1]=='--slots'
     assert 'invented count' not in ' '.join(captured[0][0])
     assert 'invented count' in captured[0][1]['input']
+    payload=json.loads(captured[0][1]['input'].split('Request:\n',1)[1])
+    assert payload['document']=='synthetic'
+    assert payload['masked_path']=='/invented/paper/text/masked.md'
+    assert 'active-run provenance' in captured[0][1]['input']
+
+
+@pytest.mark.parametrize('failure',['transport','invalid-json'])
+def test_failed_retrieval_keeps_pending_slots_and_outputs_unchanged(files,monkeypatch,failure):
+    export(files,'Public.\n')
+    files[2].write_text('Count **invented count**.\n')
+    m.do_import(files[0],'synthetic')
+    watched=(files[0]['dictionary_path'],files[1],files[2],files[3])
+    before=[p.read_bytes() for p in watched]
+    def fake(*args,**kwargs):
+        if failure=='transport':
+            raise subprocess.CalledProcessError(1,['invented'],output='PRIVATE invented value')
+        return type('Result',(),{'stdout':'PRIVATE malformed reply'})()
+    monkeypatch.setattr(m.subprocess,'run',fake)
+    with pytest.raises(m.MaskError,match='^retrieval-request at position 0$'):
+        m.do_retrieve(files[0],'synthetic')
+    assert [p.read_bytes() for p in watched]==before
 
 
 def test_new_requests_must_be_imported_before_retrieval(files):

@@ -700,18 +700,31 @@ def do_upload(config, document, markdown_path, masked_path, status_path, folder,
     return {'folder': parent, 'document': identifier}
 
 
-def request_slots(slots):
+def request_slots(slots, *, document=None, masked_path=None):
+    request = {'slots': slots}
+    if document is not None:
+        request['document'] = document
+    if masked_path is not None:
+        request['masked_path'] = str(masked_path)
     prompt = ("Retrieve or compute only the requested private values. Do not classify, disambiguate, choose IDs, "
               "or edit files. Return exactly one JSON object keyed by the supplied IDs. Each result is "
               "{\"value\":\"plain text\",\"runs\":[{\"text\":\"plain text\"}]} or {\"status\":\"needs-human\"}. "
               "Runs may mark italic, superscript and subscript with true. Use needs-human if unresolved. "
-              "The response stays inside the local masking process. Requests:\n" + json.dumps(slots, ensure_ascii=False))
+              "Read the named masked manuscript for its source references and surrounding prose. Resolve "
+              "relative references against its repository, not your run directory. Follow the repository's "
+              "authoring brief and active-run provenance; verify that each result comes from the requested "
+              "analysis. Do not substitute a different run or invent missing findings. Inspect existing small "
+              "result exports first and honor the librarian's large-input limit. Keep supporting evidence in "
+              "your private run directory. The response stays inside the local masking process. Request:\n" +
+              json.dumps(request, ensure_ascii=False))
     try:
         result = subprocess.run([str(Path(__file__).with_name("librarian")), "--slots"],
                                 input=prompt, text=True, capture_output=True, check=True)
         return json.loads(result.stdout)
     except Exception:
-        return {}
+        # A broken transport or malformed reply is an operation failure, not
+        # evidence that every requested scientific value needs human resolution.
+        raise MaskError('retrieval-request') from None
 
 
 def bind_slots(dictionary, document, replies):
@@ -737,7 +750,7 @@ def bind_slots(dictionary, document, replies):
         entry.pop("description")
 
 
-def do_retrieve(config, document, requester=request_slots):
+def do_retrieve(config, document, requester=None):
     dictionary = load_dictionary(config["dictionary_path"])
     record = dictionary["documents"].get(document)
     if record is None:
@@ -756,7 +769,8 @@ def do_retrieve(config, document, requester=request_slots):
              if e.get("status") == "pending"]
     if not slots:
         return
-    replies = requester(slots)
+    replies = requester(slots) if requester is not None else request_slots(
+        slots, document=document, masked_path=masked_path)
     # Long-running retrieval must never overwrite intervening human edits.
     live, current = read_source(record["source"], config)
     check_revision(record, current)
