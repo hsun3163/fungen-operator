@@ -161,6 +161,8 @@ def paragraphs(document, source):
             for name in ('bold', 'italic'):
                 if style.get(name):
                     run[name] = True
+            if style.get('weightedFontFamily', {}).get('fontFamily') == 'Roboto Mono':
+                run['code'] = True
             baseline = style.get('baselineOffset')
             if baseline == 'SUPERSCRIPT':
                 run['superscript'] = True
@@ -199,7 +201,10 @@ def desired_paragraphs(markdown):
     result = []
     for block in m.markdown_blocks(markdown):
         if block['literal']:
-            if block['raw'].strip():
+            # Markdown source comments are invisible in the rendered manuscript.
+            # Leave them in the local source/export; do not turn them into prose.
+            visible = re.sub(r'<!--.*?-->', '', block['raw'], flags=re.S)
+            if visible.strip():
                 raise m.MaskError('unsupported-google-markup', block['position'])
             continue
         prefix = block['prefixes'][0]
@@ -243,8 +248,10 @@ def styled_insert(blocks, start, tab, final):
                      'baselineOffset': 'SUPERSCRIPT' if run.get('superscript') else 'SUBSCRIPT' if run.get('subscript') else 'NONE'}
             if run.get('link'):
                 style['link'] = {'url': run['link']}
+            if run.get('code'):
+                style['weightedFontFamily'] = {'fontFamily': 'Roboto Mono'}
             requests.append({'updateTextStyle': {'range': range_for(cursor, cursor + length, tab),
-                                                 'textStyle': style, 'fields': 'bold,italic,baselineOffset,link'}})
+                                                 'textStyle': style, 'fields': 'bold,italic,baselineOffset,link,weightedFontFamily'}})
             cursor += length
         if i < len(blocks)-1 or not final:
             text += '\n'

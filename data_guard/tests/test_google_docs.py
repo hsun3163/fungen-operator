@@ -233,3 +233,24 @@ def test_api_reports_disabled_service_without_private_response(monkeypatch):
     with pytest.raises(m.MaskError) as caught:
         g.api({}, 'GET', 'synthetic-doc')
     assert str(caught.value) == 'google-http-403-SERVICE_DISABLED at position 0'
+
+
+def test_source_comments_are_invisible_but_unsupported_blocks_still_fail():
+    text = '# Methods\n\n<!-- Synthetic operator note.\nSecond line. -->\n\nInvented prose.\n'
+    blocks = g.desired_paragraphs(text)
+    assert [m.plain(b['runs']) for b in blocks] == ['Methods', 'Invented prose.']
+    for unsupported in ('```\nexample\n```\n', '<!-- note -->\n\n---\n'):
+        with pytest.raises(m.MaskError, match='unsupported-google-markup'):
+            g.desired_paragraphs(unsupported)
+
+
+def test_inline_code_uses_monospaced_runs(recorded):
+    blocks = g.desired_paragraphs('Run `invented_flag`.\n')
+    text, requests = g.styled_insert(blocks, 1, 'synthetic-tab', True)
+    assert text == 'Run invented_flag.'
+    style = next(r['updateTextStyle'] for r in requests if r.get('updateTextStyle', {}).get('textStyle', {}).get('weightedFontFamily'))
+    assert style['textStyle']['weightedFontFamily'] == {'fontFamily': 'Roboto Mono'}
+    live = copy.deepcopy(recorded['document'])
+    run = live['tabs'][0]['documentTab']['body']['content'][1]['paragraph']['elements'][0]['textRun']
+    run['textStyle']['weightedFontFamily'] = {'fontFamily': 'Roboto Mono'}
+    assert g.paragraphs(live, {'tab': 'synthetic-tab'})[0]['runs'][0]['code'] is True
