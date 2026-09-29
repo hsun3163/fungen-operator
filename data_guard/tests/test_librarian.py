@@ -7,6 +7,7 @@ LIBRARIAN = Path(__file__).resolve().parents[1] / "librarian"
 STUB = """#!/bin/sh
 echo "NOISY tool output: secret-row-42"
 echo "NOISY stderr" >&2
+[ -n "$STUB_ARGS" ] && printf '%s\\n' "$@" > "$STUB_ARGS"
 while [ $# -gt 0 ]; do
     [ "$1" = -o ] && out=$2
     shift
@@ -132,3 +133,12 @@ def test_mask_entrypoint_uses_separate_config_without_starting_codex(tmp_path):
     assert p.returncode==0 and p.stdout=='OK\n'
     assert '12' not in masked.read_text()
     assert not (home / 'runs').exists()
+
+
+def test_explicit_write_roots_preserve_shell_metacharacters(tmp_path):
+    root = tmp_path / 'room with $dollars and `backticks`'
+    root.mkdir()
+    args = tmp_path / 'args.txt'
+    p = run(tmp_path, '--add-dir', str(root), '--add-dir', str(tmp_path), 'synthetic sync', STUB_ARGS=str(args))
+    assert p.returncode == 0
+    assert args.read_text().splitlines()[:4] == ['--add-dir', str(root), '--add-dir', str(tmp_path)]

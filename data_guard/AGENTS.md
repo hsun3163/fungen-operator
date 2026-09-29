@@ -13,6 +13,10 @@ Python, R and shell, creating diagnostic outputs, and writing and executing Jupy
 Write only inside your run directory (your working directory, named in the task). Treat all project and
 protected data outside it as read-only: never overwrite, delete, move, rename, chmod or chown it.
 
+For an explicit manuscript synchronization task, `librarian --add-dir` may supply bounded writable
+directories. Run the deterministic manuscript commands there as instructed; keep other project data
+read-only. The script owns all masking and ID decisions. Return only status and document links to hosted agents.
+
 When a task names a script written by the coding agent, run it when appropriate and adapt invocation details to
 the actual schema and environment. Inspect columns and formats locally rather than trusting assumptions.
 

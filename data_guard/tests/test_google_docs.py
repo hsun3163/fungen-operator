@@ -137,3 +137,99 @@ def test_api_errors_never_expose_response_or_credentials(monkeypatch):
     with pytest.raises(m.MaskError) as caught:
         g.api({},'GET','synthetic-doc')
     assert str(caught.value)=='google-request at position 0'
+
+
+def upload_responses(recorded, monkeypatch, *, legacy=False, edited=False):
+    calls = []
+    uploaded = copy.deepcopy(recorded['legacy_document'] if legacy else recorded['document'])
+    if not legacy:
+        uploaded['tabs'][0]['documentTab']['body']['content'] = uploaded['tabs'][0]['documentTab']['body']['content'][:3]
+    uploaded['revisionId'] = 'synthetic-r2'
+    posted = [edited]
+    def fake(config, method, identifier, *, params=None, body=None):
+        calls.append((method, identifier, params, body))
+        if method == 'GET':
+            return copy.deepcopy(uploaded if posted[0] else recorded['empty_document'])
+        posted[0] = True
+        return copy.deepcopy(recorded['batch_update'])
+    monkeypatch.setattr(g, 'api', fake)
+    monkeypatch.setattr(g, 'ensure_folder', lambda *_: 'synthetic-folder')
+    monkeypatch.setattr(g, 'ensure_file', lambda *_: 'synthetic-doc')
+    return calls, uploaded
+
+
+def test_first_upload_formats_private_doc_masks_file_and_reuses_ids(files, recorded, monkeypatch):
+    calls, _ = upload_responses(recorded, monkeypatch)
+    files[1].write_text('# **Synthetic findings**\n\nInvented 😀 ***FABLE1*** at **2 x 10<sup>−7</sup>**.\n')
+    result = m.do_upload(files[0], 'synthetic', files[1], files[2], files[3], 'Invented/manuscript', 'Results')
+    assert result == {'folder': 'synthetic-folder', 'document': 'synthetic-doc'}
+    d = m.load_dictionary(files[0]['dictionary_path'])
+    assert d['documents']['synthetic']['source']['kind'] == 'google'
+    assert d['documents']['synthetic']['revision'] == 'synthetic-r2'
+    assert 'FABLE1' not in files[2].read_text()
+    assert all(e['value'] is not None for e in d['entries'].values())
+    assert len([c for c in calls if c[0] == 'POST']) == 1
+    assert m.do_upload(files[0], 'synthetic', files[1], files[2], files[3], 'Invented/manuscript', 'Results') == result
+    assert len([c for c in calls if c[0] == 'POST']) == 1
+
+
+def test_upload_migrates_legacy_request_and_allows_same_initial_masked_path(files, recorded, monkeypatch):
+    upload_responses(recorded, monkeypatch, legacy=True)
+    files[1].write_text('Count {{NUM:imaginary_count}}.\n')
+    m.do_upload(files[0], 'synthetic', files[1], files[1], files[3], 'Invented', 'Results')
+    d = m.load_dictionary(files[0]['dictionary_path'])
+    entry, = d['entries'].values()
+    assert entry['type'] == 'VALUE' and entry['status'] == 'pending'
+    assert entry['description'] == 'imaginary count' and entry['value'] is None
+    assert files[1].read_text() == 'Count ' + entry['id'] + '.\n'
+
+
+def test_upload_refuses_changed_existing_google_content(files, recorded, monkeypatch):
+    calls, _ = upload_responses(recorded, monkeypatch, edited=True)
+    files[1].write_text('Different synthetic text.\n')
+    with pytest.raises(m.MaskError, match='existing-google-content'):
+        m.do_upload(files[0], 'synthetic', files[1], files[2], files[3], 'Invented', 'Results')
+    assert not files[2].exists() and not any(c[0] == 'POST' for c in calls)
+
+
+def test_upload_dictionary_failure_prevents_remote_mutation_and_masked_output(files, monkeypatch):
+    files[1].write_text('Private **12**.\n')
+    with patch.object(m, 'save_dictionary', side_effect=OSError('synthetic disk error')), patch.object(g, 'ensure_folder') as remote:
+        with pytest.raises(OSError):
+            m.do_upload(files[0], 'synthetic', files[1], files[2], files[3], 'Invented', 'Results')
+    remote.assert_not_called()
+    assert not files[2].exists()
+
+
+def test_drive_creation_is_private_and_reuses_only_matching_files(monkeypatch):
+    calls = []
+    rows = []
+    def fake(config, method, *, params=None, body=None):
+        calls.append((method, params, body))
+        return {'files': rows} if method == 'GET' else {'id': 'synthetic-created'}
+    monkeypatch.setattr(g, 'drive_api', fake)
+    mime = 'application/vnd.google-apps.document'
+    assert g.ensure_file({}, 'synthetic-parent', "A ' title", mime, {'seed': 'invented'}) == 'synthetic-created'
+    assert calls[-1][1]['ignoreDefaultVisibility'] == 'true'
+    assert calls[-1][2]['parents'] == ['synthetic-parent']
+    rows.append({'id': 'synthetic-existing', 'mimeType': mime, 'appProperties': {'seed': 'invented'}})
+    assert g.ensure_file({}, 'synthetic-parent', 'title', mime, {'seed': 'invented'}) == 'synthetic-existing'
+    with pytest.raises(m.MaskError, match='unrelated-drive-document'):
+        g.ensure_file({}, 'synthetic-parent', 'title', mime, {'seed': 'different'})
+    rows.append(copy.deepcopy(rows[0]))
+    with pytest.raises(m.MaskError, match='ambiguous-drive-name'):
+        g.ensure_file({}, 'synthetic-parent', 'title', mime)
+
+
+def test_api_reports_disabled_service_without_private_response(monkeypatch):
+    from io import BytesIO
+    from urllib.error import HTTPError
+    monkeypatch.setattr(g, 'access_token', lambda _: 'invented-token')
+    def denied(*args, **kwargs):
+        raise HTTPError('https://synthetic.invalid', 403, 'private text', {}, BytesIO(json.dumps({
+            'error': {'message': 'PRIVATE FABLE1', 'details': [{'reason': 'SERVICE_DISABLED', 'metadata': {'secret': 'private'}}]}
+        }).encode()))
+    monkeypatch.setattr(g, 'urlopen', denied)
+    with pytest.raises(m.MaskError) as caught:
+        g.api({}, 'GET', 'synthetic-doc')
+    assert str(caught.value) == 'google-http-403-SERVICE_DISABLED at position 0'

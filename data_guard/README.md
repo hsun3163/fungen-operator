@@ -227,6 +227,32 @@ single-tab Google Doc. Its ID is configuration, not a second dictionary store.
 
 ### Commands the user or local librarian runs
 
+For the first upload, create a native Google Doc and initialize its masked export in one command:
+
+```bash
+librarian mask upload --document results \
+  --markdown ~/Myloid-paper/3_Production/COSI_paper/text/results_draft.md \
+  --masked ~/Myloid-paper/3_Production/COSI_paper/text/results_draft.md \
+  --folder COSI-paper/manuscript --title Results
+```
+
+This one-time operation permits the initial source and masked output to be the same Markdown path: it uploads
+and verifies the human Doc before replacing that local file with placeholders. Existing `{{NUM:name}}` and
+`{{INFO:name}}` requests become pending slots; the script uses their names as descriptions without inventing
+values. Other body bold spans follow the ordinary protection rules. Repeating a completed upload returns its
+recorded links and does not overwrite human edits. An interrupted upload reuses only an app-tagged Doc with the
+same source hash and refuses different content. Sources with unsupported markup stop before creating a Doc.
+
+The upload prints only the folder and document URLs. It uses the existing rclone OAuth account through the
+direct [Drive files API](https://developers.google.com/workspace/drive/api/reference/rest/v3/files/create)
+and Docs API; it does not change sharing permissions. Native Docs API errors report only a status and a safe
+reason such as `SERVICE_DISABLED`.
+
+When explicitly delegating manuscript setup to the local librarian, prepend repeated `--add-dir DIR` options
+to the usual `librarian "task"` command for just the manuscript output directory, separate librarian home,
+and rclone configuration directory. These are ordinary Codex writable-directory arguments. Normal retrieval
+calls retain their existing read-only project boundary; the local model still makes no masking decisions.
+
 Export an existing human Markdown source. These are examples with explicit paths; substitute your own files.
 The masked file's parent directory must already exist.
 

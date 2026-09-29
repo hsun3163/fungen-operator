@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 # librarian [--me] "<task>"
 #
 # default: final librarian message -> stdout
@@ -9,6 +9,18 @@
 
 L=${LIBRARIAN_HOME:-$HOME/sunh14/librarian_agent}
 timeout_s=${LIBRARIAN_TIMEOUT:-1800}
+
+# Native Codex writable roots for explicitly authorized manuscript operations.
+# Normal retrieval calls keep their existing read-only project boundary.
+codex_dirs=()
+while [ "$1" = --add-dir ]; do
+    if [ -z "$2" ] || [ ! -d "$2" ]; then
+        echo 'Librarian failed: --add-dir requires an existing directory'
+        exit 2
+    fi
+    codex_dirs+=(--add-dir "$2")
+    shift 2
+done
 
 # Deterministic masking is a normal CLI, separate from the model's read-only run.
 if [ "$1" = mask ]; then
@@ -53,7 +65,7 @@ export IPYTHONDIR="$run/.jupyter/ipython"
 # otherwise wait on a caller's open pipe.
 timeout -k 30 "$timeout_s" \
     env CODEX_HOME="$L/codex" \
-    codex exec --oss \
+    codex "${codex_dirs[@]}" exec --oss \
         --skip-git-repo-check \
         -s workspace-write \
         -C "$run" \
@@ -70,7 +82,7 @@ sid=$(sed -n 's/^session id: //p' "$run/log" | head -n 1)
 if [ $rc -eq 0 ] && [ ! -s "$run/answer.md" ] && [ -n "$sid" ]; then
     timeout -k 30 "$timeout_s" \
         env CODEX_HOME="$L/codex" \
-        codex exec --oss -c 'model_reasoning_effort="none"' \
+        codex "${codex_dirs[@]}" exec --oss -c 'model_reasoning_effort="none"' \
             resume --skip-git-repo-check \
             -o "$run/answer.md" \
             "$sid" \

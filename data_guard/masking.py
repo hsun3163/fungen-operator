@@ -21,6 +21,10 @@ import zstandard
 from markdown_it import MarkdownIt
 from markdown_it.rules_inline.emphasis import tokenize as emphasis
 
+# The adapter imports this module too when the thin CLI is run as a script.
+if __name__ == '__main__':
+    sys.modules['masking'] = sys.modules[__name__]
+
 ID = re.compile(r"\{\{([A-Z][A-Z0-9]*-[A-Z2-7]{4})\}\}")
 ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"
 TRANSLATE = str.maketrans({**{c: "-" for c in "‐‑‒–—―−﹘﹣－"},
@@ -338,6 +342,10 @@ def mask_runs(dictionary, document, runs, heading=False, literal=False):
     text = plain(runs)
     replacements = []
     for a, b in protected_ranges(items, heading or literal):
+        if ID.fullmatch(text[a:b]):
+            strict_placeholders(text[a:b], dictionary, document)
+            replacements.append((a, b, text[a:b]))
+            continue
         captured = runs_from_chars([(c, {k:v for k,v in s.items() if k != "bold"}) for c, s in items[a:b]])
         identifier = value_id(dictionary, document, text[a:b], captured, sentence(text, a, b))
         replacements.append((a, b, identifier))
@@ -631,6 +639,67 @@ def do_import(config, document):
     publish(config["dictionary_path"], dictionary, masked, masked_path, status_path)
 
 
+def do_upload(config, document, markdown_path, masked_path, status_path, folder, title):
+    """Initialize a Google human source from Markdown, without replacing existing Docs."""
+    from google_docs import (ensure_folder, ensure_file, read_document, write_document,
+                             desired_paragraphs, paragraphs, signature)
+    dictionary = load_dictionary(config["dictionary_path"])
+    record = dictionary['documents'].setdefault(document, {})
+    if record.get('upload_complete'):
+        return {'folder': record['drive_folder'], 'document': record['source']['id']}
+    if record.get('source') and not record.get('upload_seed'):
+        raise MaskError('document-already-registered')
+    if masked_path == status_path or config['dictionary_path'] in (markdown_path, masked_path, status_path):
+        raise MaskError('output-location')
+    data = markdown_path.read_bytes()
+    seed = {'path': str(markdown_path), 'hash': fingerprint(data), 'folder': folder, 'title': title,
+            'masked': str(masked_path), 'slots': str(status_path)}
+    if record.get('upload_seed', seed) != seed:
+        raise MaskError('upload-source-changed')
+    record['upload_seed'] = seed
+    text = data.decode('utf-8')
+    # The previous manuscript integration used named NUM/INFO tokens. Their
+    # names specify pending requests, never retrieved or inferred values.
+    legacy = re.compile(r'\{\{(NUM|INFO):([A-Za-z0-9_]+)\}\}')
+    mapping = record.setdefault('legacy_slots', {})
+    def migrate(match):
+        token = match[0]
+        if token not in mapping:
+            mapping[token] = add_entry(dictionary, document, description=match[2].replace('_', ' '),
+                                      context=sentence(text, match.start(), match.end()),
+                                      kind='VALUE' if match[1] == 'NUM' else 'TEXT')
+        return mapping[token]
+    migrated = legacy.sub(migrate, text)
+    strict_placeholders(migrated, dictionary, document)
+    masked = export_markdown(dictionary, document, migrated)
+    check_masked(dictionary, document, masked)
+    human, masked = import_markdown(dictionary, document, masked)
+    desired = desired_paragraphs(human)  # Validate before any remote mutation.
+    save_dictionary(config['dictionary_path'], dictionary)
+    parent = ensure_folder(config, folder)
+    identifier = ensure_file(config, parent, title, 'application/vnd.google-apps.document', {
+        'librarianDocument': fingerprint((str(masked_path) + '\n' + document).encode()),
+        'librarianSeed': seed['hash']})
+    source = {'kind': 'google', 'id': identifier, 'tab': None}
+    live, revision = read_document(source, config)
+    current = paragraphs(live, source)
+    if current and [signature(b) for b in current] != [signature(b) for b in desired]:
+        raise MaskError('existing-google-content')
+    if fingerprint(markdown_path.read_bytes()) != seed['hash']:
+        raise MaskError('upload-source-changed')
+    if not current:
+        revision = write_document(source, live, human, revision, config)
+    verified, verified_revision = read_document(source, config)
+    if verified_revision != revision or [signature(b) for b in paragraphs(verified, source)] != [signature(b) for b in desired]:
+        raise MaskError('google-upload-verification')
+    record.update(source=source, revision=revision, masked=str(masked_path), slots=str(status_path),
+                  drive_folder=parent)
+    publish(config['dictionary_path'], dictionary, masked, masked_path, status_path)
+    record['upload_complete'] = True
+    save_dictionary(config['dictionary_path'], dictionary)
+    return {'folder': parent, 'document': identifier}
+
+
 def request_slots(slots):
     prompt = ("Retrieve or compute only the requested private values. Do not classify, disambiguate, choose IDs, "
               "or edit files. Return exactly one JSON object keyed by the supplied IDs. Each result is "
@@ -716,6 +785,13 @@ def main(argv=None):
     export.add_argument("--tab")
     export.add_argument("--masked", type=Path, required=True)
     export.add_argument("--slots", type=Path)
+    upload = sub.add_parser('upload', help='Create the initial Google Doc from Markdown')
+    upload.add_argument('--document', required=True)
+    upload.add_argument('--markdown', type=Path, required=True)
+    upload.add_argument('--masked', type=Path, required=True)
+    upload.add_argument('--slots', type=Path)
+    upload.add_argument('--folder', required=True)
+    upload.add_argument('--title', required=True)
     for name in ("import", "retrieve"):
         sub.add_parser(name).add_argument("--document", required=True)
     sub.add_parser("sync-dictionary")
@@ -726,7 +802,14 @@ def main(argv=None):
         # the dictionary remains the only persistent file for this mechanism.
         lock = os.open(config["dictionary_path"].parent, os.O_RDONLY | os.O_DIRECTORY)
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        if args.command == "export":
+        if args.command == 'upload':
+            masked = args.masked.expanduser().resolve()
+            slots = args.slots.expanduser().resolve() if args.slots else masked.with_suffix('.slots.tsv')
+            result = do_upload(config, args.document, args.markdown.expanduser().resolve(), masked, slots,
+                               args.folder, args.title)
+            print(json.dumps({'folder': 'https://drive.google.com/drive/folders/' + result['folder'],
+                              'document': 'https://docs.google.com/document/d/' + result['document'] + '/edit'}))
+        elif args.command == "export":
             source = {"kind": "markdown", "path": str(args.markdown.expanduser().resolve())} if args.markdown else {
                 "kind": "google", "id": args.google_doc, "tab": args.tab}
             masked = args.masked.expanduser().resolve()

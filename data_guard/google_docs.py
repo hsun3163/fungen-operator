@@ -5,6 +5,7 @@ import re
 import subprocess
 from urllib.parse import urlencode, quote
 from urllib.request import Request, urlopen
+from urllib.error import HTTPError
 
 import masking as m
 
@@ -37,6 +38,10 @@ def api(config, method, document_id, *, params=None, body=None):
         url += ':batchUpdate'
     if params:
         url += '?' + urlencode(params)
+    return request(config, method, url, body)
+
+
+def request(config, method, url, body=None):
     payload = json.dumps(body).encode() if body is not None else None
     try:
         request = Request(url, data=payload, method=method, headers={
@@ -45,8 +50,58 @@ def api(config, method, document_id, *, params=None, body=None):
             return json.load(response)
     except m.MaskError:
         raise
+    except HTTPError as error:
+        # Only enumerated API reasons may reach the caller, never response text.
+        reason = ''
+        try:
+            details = json.load(error).get('error', {}).get('details', [])
+            allowed = {'SERVICE_DISABLED', 'ACCESS_TOKEN_SCOPE_INSUFFICIENT', 'RATE_LIMIT_EXCEEDED'}
+            reason = next((d['reason'] for d in details if d.get('reason') in allowed), '')
+        except Exception:
+            pass
+        raise m.MaskError('google-http-' + str(error.code) + ('-' + reason if reason else '')) from None
     except Exception:
         raise m.MaskError('google-request') from None
+
+
+def drive_api(config, method, *, params=None, body=None):
+    url = 'https://www.googleapis.com/drive/v3/files'
+    if params:
+        url += '?' + urlencode(params)
+    return request(config, method, url, body)
+
+
+def ensure_file(config, parent, name, mime, properties=None):
+    """Create once; refuse ambiguous names and unrelated existing documents."""
+    def escape(value):
+        return value.replace('\\', '\\\\').replace("'", "\\'")
+    result = drive_api(config, 'GET', params={
+        'q': "trashed = false and '" + escape(parent) + "' in parents and name = '" + escape(name) + "'",
+        'fields': 'nextPageToken,files(id,mimeType,appProperties)', 'pageSize': 100})
+    rows = result.get('files', [])
+    if len(rows) > 1 or result.get('nextPageToken'):
+        raise m.MaskError('ambiguous-drive-name')
+    if rows:
+        row = rows[0]
+        if row.get('mimeType') != mime or any(row.get('appProperties', {}).get(k) != v for k, v in (properties or {}).items()):
+            raise m.MaskError('unrelated-drive-document')
+    else:
+        row = drive_api(config, 'POST', params={'fields': 'id', 'ignoreDefaultVisibility': 'true'}, body={
+            'name': name, 'mimeType': mime, 'parents': [parent], **({'appProperties': properties} if properties else {})})
+    identifier = row.get('id', '')
+    if not re.fullmatch(r'[A-Za-z0-9_-]+', identifier):
+        raise m.MaskError('google-document-id')
+    return identifier
+
+
+def ensure_folder(config, path):
+    parent = 'root'
+    parts = path.split('/')
+    if not all(part and part not in ('.', '..') for part in parts):
+        raise m.MaskError('drive-folder-path')
+    for part in parts:
+        parent = ensure_file(config, parent, part, 'application/vnd.google-apps.folder')
+    return parent
 
 
 def tabs(document):
