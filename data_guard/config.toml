@@ -13,3 +13,12 @@ approval_policy = "never"
 
 [sandbox_workspace_write]
 network_access = true
+
+# Read by `librarian mask`. Relative paths resolve beside this config file.
+# The dictionary must be beside the librarian's separate CODEX_HOME, outside Git.
+[masking]
+dictionary = "../dict.json.zst"
+# Existing rclone account; credentials stay in rclone's configuration.
+rclone_remote = "cosi_drive"
+# Set this to the private dictionary Google Doc ID for one-way publication.
+dictionary_doc = ""

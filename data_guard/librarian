@@ -10,6 +10,13 @@
 L=${LIBRARIAN_HOME:-$HOME/sunh14/librarian_agent}
 timeout_s=${LIBRARIAN_TIMEOUT:-1800}
 
+# Deterministic masking is a normal CLI, separate from the model's read-only run.
+if [ "$1" = mask ]; then
+    shift
+    script=$(readlink -f "$0")
+    exec python3 "$(dirname "$script")/masking.py" --config "$L/codex/config.toml" "$@"
+fi
+
 tag=agent
 aud="the coding agent"
 
@@ -19,8 +26,15 @@ if [ "$1" = --me ]; then
     shift
 fi
 
-if [ -z "$*" ]; then
-    echo 'usage: librarian [--me] "<task>"'
+task=$*
+if [ "$1" = --slots ]; then
+    tag=slots
+    aud="the local masking script, which keeps the response private; return the requested JSON only"
+    task=$(cat)
+fi
+
+if [ -z "$task" ]; then
+    echo 'usage: librarian [--me] "<task>" | librarian mask <command>'
     exit 2
 fi
 
@@ -28,7 +42,7 @@ id=$(date +%Y%m%d-%H%M%S)-$tag-$$
 run=$L/runs/$id
 
 mkdir -p "$run" || { echo "Librarian failed: cannot create $run"; exit 1; }
-printf '%s\n' "$*" > "$run/task"
+printf '%s\n' "$task" > "$run/task"
 
 # Jupyter writes to its config and runtime dirs, which the sandbox makes read-only.
 export JUPYTER_CONFIG_DIR="$run/.jupyter"
@@ -44,7 +58,7 @@ timeout -k 30 "$timeout_s" \
         -s workspace-write \
         -C "$run" \
         -o "$run/answer.md" \
-        "Your answer goes to $aud. Your run directory is $run. Task: $*" \
+        "Your answer goes to $aud. Your run directory is $run. Task: $task" \
         < /dev/null > "$run/log" 2>&1
 
 rc=$?

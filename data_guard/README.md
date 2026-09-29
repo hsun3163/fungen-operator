@@ -175,3 +175,144 @@ Limits:
 - They may receive QC and debugging facts needed to do their job, and anything I choose to share.
 - The librarian has network access.
 - Nothing here resists a malicious agent or user; it relies on cooperative agents following the skill.
+
+## Placeholder manuscripts
+
+`librarian mask` is the single deterministic implementation for manuscript exchange. The user edits the human
+Markdown file or Google Doc; hosted agents edit its masked Markdown export and read its slot-status file.
+`FRONTIER.md` contains their short instructions. The local model only retrieves or computes pending values.
+The existing `librarian --slots` request path carries descriptions and sentence contexts over stdin and returns
+JSON privately to the calling script. It does not publish these responses to the answers repository.
+
+The implementation consists of plain functions in `masking.py` and the `google_docs.py` adapter. The existing
+shell launcher dispatches `librarian mask` directly to Python, outside the model's read-only run. There is no
+background process. Every successful export/import/retrieval updates just the private dictionary, the masked
+file, and its slot-status file (plus the human source for import/retrieval).
+
+### Setup
+
+Install the optional Python dependencies in the environment used by `python3`:
+
+```bash
+python3 -m pip install 'markdown-it-py==3.0.0' 'zstandard>=0.22,<1'
+```
+
+Add the `[masking]` section from `data_guard/config.toml` to the existing librarian config, preserving its other
+settings. The launcher already sets its separate home to `$LIBRARIAN_HOME/codex`, with
+`LIBRARIAN_HOME` defaulting to `~/sunh14/librarian_agent`. No production configuration was edited during development.
+
+```toml
+[masking]
+dictionary = "../dict.json.zst"
+rclone_remote = "cosi_drive"
+dictionary_doc = "YOUR_PRIVATE_DICTIONARY_GOOGLE_DOC_ID"
+```
+
+`dictionary` resolves relative to the config file. It must resolve to `dict.json.zst` beside this separate
+CODEX_HOME, never inside CODEX_HOME or a Git repository. With the current launcher layout the location is
+`~/sunh14/librarian_agent/dict.json.zst`. The command refuses the shared default `~/.codex`. The dictionary is
+zstd-compressed JSON, atomically replaced with mode 0600; its containing directory is locked for each command.
+Keep the dictionary private and back it up yourself. A saved dictionary plus the repository's code and masked
+files preserves the assigned IDs and allows the human text to be reconstructed. Tests require no tracking.
+
+The current librarian code/config has no knowledge-map ID allocator or type assignments. Resolved numbers get
+VALUE, other new values get TEXT. Pending descriptions are TEXT unless already supplied with a type by a caller;
+a pending slot retains that type and ID when it binds. IDs use four random uppercase base32 characters and are
+unique across the dictionary. Existing entries and their types are reused according to the rules below.
+
+For Google Docs, reuse the existing rclone account and enable the Google Docs API in its Google Cloud project.
+The adapter lets rclone refresh its own token, then uses that token in memory for direct Docs API requests.
+Credentials and HTTP bodies are never printed. The dictionary destination should be a dedicated, private,
+single-tab Google Doc. Its ID is configuration, not a second dictionary store.
+
+### Commands the user or local librarian runs
+
+Export an existing human Markdown source. These are examples with explicit paths; substitute your own files.
+The masked file's parent directory must already exist.
+
+```bash
+librarian mask export --document results \
+  --markdown ~/private-paper/results.md \
+  --masked ~/Myloid-paper/3_Production/COSI_paper/text/results_draft.md
+```
+
+For a Google Doc, export the selected tab instead:
+
+```bash
+librarian mask export --document results \
+  --google-doc YOUR_MANUSCRIPT_GOOGLE_DOC_ID --tab YOUR_TAB_ID \
+  --masked ~/Myloid-paper/3_Production/COSI_paper/text/results_draft.md
+```
+
+`--tab` can be omitted only for a single-tab Doc. The source, revision/hash, and output paths are stored under
+`results` in the private dictionary. Use a different `--document` key for each manuscript section. `--slots`
+overrides the default status filename, which is the masked filename with `.slots.tsv` in place of `.md`.
+
+After hosted edits to the masked file:
+
+```bash
+librarian mask import --document results
+librarian mask retrieve --document results
+librarian mask sync-dictionary
+```
+
+Import registers new requests, renders their descriptions in bold in the human source, and rewrites them as IDs
+in the masked file. Retrieval sends pending requests through the existing local librarian, binds answers once,
+updates the human source, and refreshes the masked file and statuses. Unresolved slots become `needs-human`.
+Retrieval requires new bold requests to have been imported first. The final command publishes a readable
+one-way dictionary view; it is an explicit operator step after dictionary updates.
+
+After editing the human source, run its original export command again before further imports. A changed human
+revision/hash blocks import and retrieval, including changes made while retrieval was running. Preserve and
+merge any pending masked edits yourself before re-exporting. Errors contain fixed codes, IDs and positions;
+source text, contexts, API response bodies and values are excluded.
+
+### Deterministic rules
+
+- Every bold body span is protected. Adjacent/overlapping bold runs merge; surrounding whitespace is trimmed;
+  partial tokens expand. Letters/digits form tokens; `.` and `-` belong to a token only between letters/digits.
+  Bold in real Markdown/Google headings is structural. The known-value scan still covers headings.
+- Comparisons normalize Unicode minus/dash variants, non-breaking/thin spaces, and `×`/`x`. A pending description
+  in this document matches its existing slot first. One equal resolved value reuses its ID. Multiple equal IDs
+  use one document-specific generic entry, created once and reused. Otherwise a new entry is created. If repeated
+  pending descriptions exist, dictionary insertion order selects the first; there is no semantic disambiguation.
+- Whole bold spans are masked first. Known values from this document are then matched longest first, with token
+  boundaries and no overlaps. A known substring never splits a larger bold span. A value that remains in a link
+  target or unsupported structural syntax causes a closed failure rather than an incomplete masked export.
+- Each entry has `id`, `value`, original formatting `runs`, `type`, `context`, and `documents`. Unbound slots also
+  have `description` and `status`. Binding removes those two pending-only fields. Bound values/runs/types are
+  immutable; human value changes get new IDs. Exported status lines contain only ID and `resolved`, `pending`,
+  or `needs-human`.
+- Import rejects unknown, foreign-document, malformed and escaped placeholders. Bold around exactly one
+  placeholder has no separate meaning. Other bold body spans create pending requests, with their sentence as
+  context. Values are restored in bold, retaining italic/superscript/subscript runs. New unbolded quantities and
+  reworded quantities receive no semantic classification; published values are not automatically declassified.
+- Dictionary persistence precedes masked output. A save failure leaves the prior masked file intact and releases
+  no new masked file. An interrupted human-source update can be recovered by exporting the current human source;
+  stored values and IDs remain available in the dictionary.
+
+Markdown parses with CommonMark and supports `<sup>`/`<sub>` for run formatting. Untouched Markdown paragraphs
+retain their original bytes. Google Docs edits use `SUGGESTIONS_INLINE`, UTF-16 indexes, and
+`requiredRevisionId`; only changed paragraphs are patched. Unchanged paragraphs containing comments,
+suggestions, and citation fields receive no write requests. Editing a paragraph containing a suggestion or
+non-text field stops for a human edit. Tables and other unsupported Google structures stop export, preserving
+those structures in the original Doc. The adapter edits only the chosen tab's body.
+
+Dictionary Doc sync reads revision and body-length metadata only, then replaces that dedicated Doc's body with
+the local dictionary's readable rendering. It never reads document text or imports dictionary entries from it.
+
+API contracts: [document structures and UTF-16 indexes](https://developers.google.com/workspace/docs/api/reference/rest/v1/documents),
+[revision-controlled batch updates](https://developers.google.com/workspace/docs/api/reference/rest/v1/documents/batchUpdate),
+[tab targeting](https://developers.google.com/workspace/docs/api/how-tos/tabs), and
+[suggestion-safe indexes](https://developers.google.com/workspace/docs/api/how-tos/suggestions).
+
+### Synthetic verification
+
+```bash
+python3 -m pytest data_guard/tests
+```
+
+Tests use invented genes/numbers, temporary dictionaries and manuscripts, a stub local librarian, and recorded
+synthetic Google API responses in `tests/fixtures/google_docs.json`. Network and credential operations are mocked
+for adapter tests. No production dictionary, manuscript, private session log, dictionary Google Doc, or credential
+was opened during development. Live Google authorization and live document edits are operator-run checks.

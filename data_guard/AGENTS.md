@@ -36,6 +36,17 @@ Do not work around this rule.
 
 **The user.** Give the full scientific result, with useful file paths and notebook paths.
 
+**The local masking script.** A `--slots` request supplies fixed slot IDs,
+descriptions and sentence contexts. Retrieve or compute the requested values and
+return the requested JSON only. Use `needs-human` for an unresolved slot. The
+script owns masking, types, ID assignment, binding and document updates. Treat
+these requests as private machine responses; make no classification or
+disambiguation decisions and make no project-file edits.
+
+The user may run `librarian mask` outside the model's read-only run to export,
+import, resolve slots, and publish the readable dictionary. Hosted agents work
+only on the masked output, following `FRONTIER.md`.
+
 Write every path as `~/...` (e.g. `~/sunh14_project/...`, not `/sc/arion/projects/load/users/sunh14/...`); the user
 opens them in JupyterLab, which only reaches paths under `~`.
 

@@ -106,3 +106,29 @@ def test_me_mode_links_paths_to_jupyterlab(tmp_path):
     text = (tmp_path / "home" / "latest.md").read_text()
     assert "[`~/proj/analysis.ipynb`](http://127.0.0.1:8548/lab/tree/proj/analysis.ipynb)" in text
     assert "cat ~/proj/x.tsv" in text
+
+
+def test_slots_mode_is_private_machine_response(tmp_path):
+    # Bootstrap the existing stub without contacting a real model.
+    run(tmp_path, 'bootstrap')
+    env = dict(os.environ, PATH=f"{tmp_path / 'bin'}:{os.environ['PATH']}",
+               LIBRARIAN_HOME=str(tmp_path / 'home'), STUB_ANSWER='{"{{TEXT-ABCD}}":{"value":"17"}}')
+    p = subprocess.run([str(LIBRARIAN), '--slots'], input='Synthetic retrieval request',
+                       env=env, capture_output=True, text=True)
+    assert p.returncode == 0 and p.stdout == '{"{{TEXT-ABCD}}":{"value":"17"}}\n'
+    assert not (tmp_path / 'home/latest.md').exists()
+    assert any('-slots-' in path.name for path in runs(tmp_path))
+
+
+def test_mask_entrypoint_uses_separate_config_without_starting_codex(tmp_path):
+    home=tmp_path / 'mask-home'
+    (home / 'codex').mkdir(parents=True)
+    (home / 'codex/config.toml').write_text('[masking]\ndictionary="../dict.json.zst"\n')
+    source=tmp_path / 'invented-human.md'
+    source.write_text('Invented **12** genes.\n')
+    masked=tmp_path / 'invented-masked.md'
+    p=subprocess.run([str(LIBRARIAN),'mask','export','--document','synthetic','--markdown',str(source),'--masked',str(masked)],
+                     env=dict(os.environ,LIBRARIAN_HOME=str(home)),capture_output=True,text=True)
+    assert p.returncode==0 and p.stdout=='OK\n'
+    assert '12' not in masked.read_text()
+    assert not (home / 'runs').exists()
