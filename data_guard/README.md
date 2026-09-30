@@ -299,13 +299,19 @@ private run directory and apply it directly:
 librarian mask retrieve --document results --reply-file /private/run/slot-replies.json
 ```
 
-This starts no second model. Each file can contain one small group of pending slots; only those IDs are
-bound or marked `needs-human`, and other pending slots remain pending. The script still checks the live
+This starts no second model. Each file can contain one small group of unbound slots, including an explicit
+retry of `needs-human` slots when answers become available; only those IDs are bound or marked `needs-human`.
+Unrelated slots keep their status. Ordinary retrieval requests only pending slots. The script still checks the live
 revision, validates document membership, preserves immutable bindings, and masks before publishing. An
 empty, malformed, unknown-ID, or already-bound-ID response fails without changing outputs. Keep reply files
 outside repositories and hosted-agent access. A local librarian operating the manuscript should use this
 form instead of nesting another timed librarian inside its own run; the default retrieval command remains
 the direct request path for a human operator.
+
+Equal values are valid. When a later export finds several IDs holding the same value, it uses the documented
+generic entry for their occurrences. The original IDs keep their immutable values in the dictionary; using
+the generic placeholder does not rebind them. Verify value equivalence rather than requiring identical
+placeholder labels across that export. An equal value alone is not a reason to mark a slot `needs-human`.
 
 After editing the human source, run its original export command again before further imports. A changed human
 revision/hash blocks import and retrieval, including changes made while retrieval was running. Preserve and

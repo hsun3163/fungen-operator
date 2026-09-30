@@ -728,7 +728,9 @@ def request_slots(slots, *, document=None, masked_path=None):
 
 
 def bind_slots(dictionary, document, replies, requested_ids=None):
-    pending = [e for e in doc_entries(dictionary, document) if e.get("status") == "pending"
+    pending = [e for e in doc_entries(dictionary, document) if e["value"] is None
+               and (e.get("status") == "pending" or
+                    (requested_ids is not None and e.get("status") == "needs-human"))
                and (requested_ids is None or e["id"] in requested_ids)]
     if not isinstance(replies, dict) or set(replies) - {e["id"] for e in pending}:
         raise MaskError("retrieval-response")
@@ -767,11 +769,12 @@ def do_retrieve(config, document, requester=None, reply_file=None):
             if any(not ID.fullmatch(text[a:b]) for a, b in protected_ranges(chars(block["runs"]), bool(block.get("heading")))):
                 raise MaskError("import-slot-requests-first", block["position"])
     slots = [{k: e[k] for k in ("id", "description", "context")} for e in doc_entries(dictionary, document)
-             if e.get("status") == "pending"]
+             if e["value"] is None and (e.get("status") == "pending" or
+                                       (reply_file is not None and e.get("status") == "needs-human"))]
     if reply_file is not None:
         # A local librarian can supply its own private answers without starting
-        # another model inside its timed run. Only the named slots are requested
-        # in this round; unrelated pending work remains pending.
+        # another model inside its timed run. Explicit replies can retry unbound
+        # needs-human slots; unrelated slots keep their existing status.
         try:
             replies = json.loads(Path(reply_file).read_text())
         except Exception:

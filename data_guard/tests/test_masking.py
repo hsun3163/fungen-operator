@@ -188,6 +188,41 @@ def test_private_reply_file_commits_only_its_slots_without_another_model(files):
     assert c['id'] + '\tpending' in files[3].read_text()
 
 
+def test_retry_needs_human_equal_value_preserves_original_bindings(files):
+    export(files, 'A public sentence.\n')
+    files[2].write_text('Counts **first imaginary count**, **second imaginary count**, '
+                        '**unavailable imaginary count**, and **later imaginary count**.\n')
+    m.do_import(files[0], 'synthetic')
+    a, b, c, d = entries(m.load_dictionary(files[0]['dictionary_path']))
+    reply = files[1].parent / 'private-reply.json'
+    reply.write_text(json.dumps({a['id']: {'value': '17'},
+                                 b['id']: {'status': 'needs-human'},
+                                 c['id']: {'status': 'needs-human'}}))
+    m.do_retrieve(files[0], 'synthetic', reply_file=reply)
+    before = m.load_dictionary(files[0]['dictionary_path'])
+    reply.write_text(json.dumps({b['id']: {'value': '17'}}))
+    with patch.object(m, 'request_slots', side_effect=AssertionError('must not start another model')):
+        m.do_retrieve(files[0], 'synthetic', reply_file=reply)
+    after = m.load_dictionary(files[0]['dictionary_path'])
+    assert after['entries'][a['id']] == before['entries'][a['id']]
+    assert after['entries'][b['id']]['value'] == '17'
+    assert 'status' not in after['entries'][b['id']]
+    assert after['entries'][c['id']] == before['entries'][c['id']]
+    assert after['entries'][d['id']] == before['entries'][d['id']]
+    assert files[1].read_text().count('**17**') == 2
+    assert b['id'] + '\tresolved' in files[3].read_text()
+    # A later export uses the documented generic alias, without rebinding
+    # either original slot or resolving any unrelated request.
+    exported = export(files, files[1].read_text())
+    generic = exported['documents']['synthetic']['generics']['17']
+    assert files[2].read_text().count(generic) == 2
+    for original in (a, b, c, d):
+        assert exported['entries'][original['id']] == after['entries'][original['id']]
+    again = export(files, files[1].read_text())
+    assert again['documents']['synthetic']['generics']['17'] == generic
+    assert len(again['entries']) == len(exported['entries'])
+
+
 @pytest.mark.parametrize('bad', ['not JSON', '[]', '{}', '{"{{VALUE-AAAA}}":{"value":"19"}}'])
 def test_invalid_private_reply_file_changes_nothing(files, bad):
     export(files, 'A public sentence.\n')
@@ -202,12 +237,16 @@ def test_invalid_private_reply_file_changes_nothing(files, bad):
     assert [p.read_bytes() for p in paths] == before
 
 
-def test_private_reply_cli_and_immutable_binding(files):
+@pytest.mark.parametrize('needs_human', [False, True])
+def test_private_reply_cli_and_immutable_binding(files, needs_human):
     export(files, 'A public sentence.\n')
     files[2].write_text('Count **imaginary count**.\n')
     m.do_import(files[0], 'synthetic')
     entry = entries(m.load_dictionary(files[0]['dictionary_path']))[0]
     reply = files[1].parent / 'private-reply.json'
+    if needs_human:
+        reply.write_text(json.dumps({entry['id']: {'status': 'needs-human'}}))
+        m.do_retrieve(files[0], 'synthetic', reply_file=reply)
     reply.write_text(json.dumps({entry['id']: {'value': '17'}}))
     command = [sys.executable, str(Path(m.__file__)), '--config', str(files[4]),
                'retrieve', '--document', 'synthetic', '--reply-file', str(reply)]
