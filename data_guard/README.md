@@ -291,6 +291,21 @@ updates the human source, and refreshes the masked file and statuses. Unresolved
 Retrieval requires new bold requests to have been imported first. The final command publishes a readable
 one-way dictionary view; it is an explicit operator step after dictionary updates.
 
+When the local librarian already retrieved answers, have it save the same ID-keyed response JSON in its
+private run directory and apply it directly:
+
+```bash
+librarian mask retrieve --document results --reply-file /private/run/slot-replies.json
+```
+
+This starts no second model. Each file can contain one small group of pending slots; only those IDs are
+bound or marked `needs-human`, and other pending slots remain pending. The script still checks the live
+revision, validates document membership, preserves immutable bindings, and masks before publishing. An
+empty, malformed, unknown-ID, or already-bound-ID response fails without changing outputs. Keep reply files
+outside repositories and hosted-agent access. A local librarian operating the manuscript should use this
+form instead of nesting another timed librarian inside its own run; the default retrieval command remains
+the direct request path for a human operator.
+
 After editing the human source, run its original export command again before further imports. A changed human
 revision/hash blocks import and retrieval, including changes made while retrieval was running. Preserve and
 merge any pending masked edits yourself before re-exporting. Errors contain fixed codes, IDs and positions;

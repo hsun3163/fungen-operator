@@ -170,6 +170,59 @@ def test_pending_description_exports_to_same_id(files):
     assert entries(d)[0]['value'] is None
 
 
+def test_private_reply_file_commits_only_its_slots_without_another_model(files):
+    export(files, 'A public sentence.\n')
+    files[2].write_text('Counts **imaginary count** and **unavailable count** and **later count**.\n')
+    m.do_import(files[0], 'synthetic')
+    before = m.load_dictionary(files[0]['dictionary_path'])
+    a, b, c = entries(before)
+    reply = files[1].parent / 'private-reply.json'
+    reply.write_text(json.dumps({a['id']: {'value': '17'}, b['id']: {'status': 'needs-human'}}))
+    with patch.object(m, 'request_slots', side_effect=AssertionError('must not start another model')):
+        m.do_retrieve(files[0], 'synthetic', reply_file=reply)
+    after = m.load_dictionary(files[0]['dictionary_path'])
+    assert after['entries'][a['id']]['value'] == '17'
+    assert after['entries'][b['id']]['status'] == 'needs-human'
+    assert after['entries'][c['id']] == c
+    assert '**17**' in files[1].read_text()
+    assert c['id'] + '\tpending' in files[3].read_text()
+
+
+@pytest.mark.parametrize('bad', ['not JSON', '[]', '{}', '{"{{VALUE-AAAA}}":{"value":"19"}}'])
+def test_invalid_private_reply_file_changes_nothing(files, bad):
+    export(files, 'A public sentence.\n')
+    files[2].write_text('Count **imaginary count**.\n')
+    m.do_import(files[0], 'synthetic')
+    paths = [files[0]['dictionary_path'], *files[1:4]]
+    before = [p.read_bytes() for p in paths]
+    reply = files[1].parent / 'private-reply.json'
+    reply.write_text(bad)
+    with pytest.raises(m.MaskError, match='retrieval-response'):
+        m.do_retrieve(files[0], 'synthetic', reply_file=reply)
+    assert [p.read_bytes() for p in paths] == before
+
+
+def test_private_reply_cli_and_immutable_binding(files):
+    export(files, 'A public sentence.\n')
+    files[2].write_text('Count **imaginary count**.\n')
+    m.do_import(files[0], 'synthetic')
+    entry = entries(m.load_dictionary(files[0]['dictionary_path']))[0]
+    reply = files[1].parent / 'private-reply.json'
+    reply.write_text(json.dumps({entry['id']: {'value': '17'}}))
+    command = [sys.executable, str(Path(m.__file__)), '--config', str(files[4]),
+               'retrieve', '--document', 'synthetic', '--reply-file', str(reply)]
+    result = subprocess.run(command, capture_output=True, text=True)
+    assert result.returncode == 0 and result.stdout == 'OK\n'
+    assert '**17**' in files[1].read_text()
+    paths = [files[0]['dictionary_path'], *files[1:4]]
+    before = [p.read_bytes() for p in paths]
+    reply.write_text(json.dumps({entry['id']: {'value': '18'}}))
+    result = subprocess.run(command, capture_output=True, text=True)
+    assert result.returncode == 1 and 'retrieval-response' in result.stderr
+    assert '18' not in result.stdout + result.stderr
+    assert [p.read_bytes() for p in paths] == before
+
+
 def test_revision_change_blocks_import_and_long_retrieval(files):
     export(files, 'Original **12**.\n')
     files[1].write_text('Human edit **13**.\n')

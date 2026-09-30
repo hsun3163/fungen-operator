@@ -727,8 +727,9 @@ def request_slots(slots, *, document=None, masked_path=None):
         raise MaskError('retrieval-request') from None
 
 
-def bind_slots(dictionary, document, replies):
-    pending = [e for e in doc_entries(dictionary, document) if e.get("status") == "pending"]
+def bind_slots(dictionary, document, replies, requested_ids=None):
+    pending = [e for e in doc_entries(dictionary, document) if e.get("status") == "pending"
+               and (requested_ids is None or e["id"] in requested_ids)]
     if not isinstance(replies, dict) or set(replies) - {e["id"] for e in pending}:
         raise MaskError("retrieval-response")
     for entry in pending:
@@ -750,7 +751,7 @@ def bind_slots(dictionary, document, replies):
         entry.pop("description")
 
 
-def do_retrieve(config, document, requester=None):
+def do_retrieve(config, document, requester=None, reply_file=None):
     dictionary = load_dictionary(config["dictionary_path"])
     record = dictionary["documents"].get(document)
     if record is None:
@@ -767,10 +768,22 @@ def do_retrieve(config, document, requester=None):
                 raise MaskError("import-slot-requests-first", block["position"])
     slots = [{k: e[k] for k in ("id", "description", "context")} for e in doc_entries(dictionary, document)
              if e.get("status") == "pending"]
-    if not slots:
+    if reply_file is not None:
+        # A local librarian can supply its own private answers without starting
+        # another model inside its timed run. Only the named slots are requested
+        # in this round; unrelated pending work remains pending.
+        try:
+            replies = json.loads(Path(reply_file).read_text())
+        except Exception:
+            raise MaskError("retrieval-response") from None
+        if not isinstance(replies, dict) or not replies or set(replies) - {s["id"] for s in slots}:
+            raise MaskError("retrieval-response")
+        slots = [s for s in slots if s["id"] in replies]
+    elif not slots:
         return
-    replies = requester(slots) if requester is not None else request_slots(
-        slots, document=document, masked_path=masked_path)
+    else:
+        replies = requester(slots) if requester is not None else request_slots(
+            slots, document=document, masked_path=masked_path)
     # Long-running retrieval must never overwrite intervening human edits.
     live, current = read_source(record["source"], config)
     check_revision(record, current)
@@ -779,7 +792,7 @@ def do_retrieve(config, document, requester=None):
     # Only slots requested in this round can be bound.
     if not isinstance(replies, dict) or set(replies) - {s["id"] for s in slots}:
         raise MaskError("retrieval-response")
-    bind_slots(dictionary, document, replies)
+    bind_slots(dictionary, document, replies, {s["id"] for s in slots})
     human, masked = import_markdown(dictionary, document, incoming)
     # A newly bound value may already occur elsewhere without bold. Refresh
     # those occurrences with the same deterministic known-value scan as export.
@@ -810,8 +823,11 @@ def main(argv=None):
     upload.add_argument('--slots', type=Path)
     upload.add_argument('--folder', required=True)
     upload.add_argument('--title', required=True)
-    for name in ("import", "retrieve"):
-        sub.add_parser(name).add_argument("--document", required=True)
+    sub.add_parser("import").add_argument("--document", required=True)
+    retrieve = sub.add_parser("retrieve")
+    retrieve.add_argument("--document", required=True)
+    retrieve.add_argument("--reply-file", type=Path,
+                          help="Private JSON answers already retrieved by the local librarian; no nested model call")
     sub.add_parser("sync-dictionary")
     args = parser.parse_args(argv)
     try:
@@ -836,7 +852,7 @@ def main(argv=None):
         elif args.command == "import":
             do_import(config, args.document)
         elif args.command == "retrieve":
-            do_retrieve(config, args.document)
+            do_retrieve(config, args.document, reply_file=args.reply_file)
         else:
             from google_docs import sync_dictionary
             sync_dictionary(load_dictionary(config["dictionary_path"]), config)
