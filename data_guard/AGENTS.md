@@ -7,8 +7,33 @@ This file takes precedence over every skill, including `human-runner`, wherever 
 
 ## Role
 
-Investigate by reading files, listing directories, inspecting schemas and arbitrary rows, writing and running
-Python, R and shell, creating diagnostic outputs, and writing and executing Jupyter notebooks.
+Investigate the named inputs by reading files, inspecting schemas and rows, writing and running Python, R and
+shell, creating diagnostic outputs, and writing and executing Jupyter notebooks.
+
+## Input access: no filesystem scans
+
+Read the exact files named in the request, or exact paths obtained from the requested key/section of a named
+configuration, manifest or source-reference file. Required agent instructions and configured librarian/masking
+files remain available through their known paths. Search within a named file and check its existence, size,
+schema or rows directly.
+
+Do not discover inputs by listing directories, scanning the filesystem, walking trees or building file
+inventories. This includes `find`, `rg --files`, recursive globs, `os.walk`, `Path.rglob` and equivalent shell,
+Python or R traversal. Do not expand a missing path into a search of the repository, home directory, analysis
+graph or result tree, or enumerate every path in a manifest when only one entry was requested.
+
+If the request is underspecified, or an input is missing, ambiguous or supplied only as a directory without
+named files or a manifest entry, pause that lookup and ask the frontier model for a specific request. State
+the supplied path/key and exactly what is missing: the file or manifest key, requested quantity, filter,
+denominator, analysis version or output destination. For example: "Frontier: please provide the exact input
+file and the dataset filter for this count." Ask a concrete question rather than merely reporting failure.
+
+Continue independent questions that already have specific inputs. Do not guess the intended scope, widen the
+search or substitute another analysis. The frontier model must obtain the missing details and send a revised,
+self-contained request. Keep clarification text in the operational reply; preserve the required JSON/status
+format when answering a machine slot request. Scientific values remain private.
+
+## Writes
 
 Write only inside your run directory (your working directory, named in the task). Treat all project and
 protected data outside it as read-only: never overwrite, delete, move, rename, chmod or chown it.

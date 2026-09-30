@@ -23,12 +23,14 @@ Use the existing `librarian` command; put this contract in its ordinary task tex
 - Estimate the read volume and memory from file metadata and the proposed operation. Respect the librarian's
   1 GiB boundary; the hosted agent prepares any larger reduction through the existing LSF workflow.
 
-If an input location is unknown, resolve that before sending a scientific lookup. A discovery request must name
-the exact config/manifest and key to inspect, or a specific directory, filename pattern, maximum depth and result
-limit. Ask for matching paths and sizes only. Never request a recursive inventory of a home directory, repository,
-analysis graph or result tree as routine preparation. Do not ask the librarian to scan for `knowledge_map` across
-the filesystem; name its configured location or request one bounded pointer lookup. If a discovery bound is
-exhausted, return `discovery-limit` and the narrower pointer needed; do not continue with successive wider scans.
+If an input location is unknown, resolve that before sending a scientific lookup. A pointer lookup must name
+the exact config/manifest and key or section to inspect. Ask for the referenced path and its metadata only.
+Do not ask the librarian to list directories, search filename patterns, scan trees or build filesystem
+inventories, even with a depth or result limit. For `knowledge_map`, supply its configured location or a named
+pointer file. If neither is known, the caller must obtain that input before dispatch; do not delegate a search.
+When the librarian asks for clarification, the frontier model obtains the exact missing details from permitted
+metadata, configuration or the user when necessary, then sends a revised, self-contained request. Do not send
+the vague task back or tell the librarian to explore until it finds an answer.
 
 ## Include these details in the request
 
@@ -39,9 +41,10 @@ Question / slot IDs: the exact facts to retrieve or compute.
 Inputs: exact files, intended run/release, and allowed lookup scope.
 Operation: filters, columns, counting unit, denominator, and output precision.
 Output / audience: answer fields and destination; what the hosted caller may receive.
-Limits: expected read size, explicit discovery bounds (or none), and allowed writes.
-If blocked: report the missing path/column or safe error code for the affected item;
-           continue independent items with named inputs and do not widen the search.
+Limits: expected read size, named-file access scope, and allowed writes.
+If underspecified or blocked: ask the frontier caller for the exact missing path,
+           column or question detail; pause that item and continue independent,
+           specified items without widening the search.
 Completion: the concrete output or verification that establishes success.
 ```
 
