@@ -52,6 +52,7 @@ go to the run log.
 | `AGENTS.md` | librarian instructions; linked into the librarian's `CODEX_HOME` |
 | `config.toml` | librarian Codex config template |
 | `../skills/librarian/` | frontier skill: how hosted agents use the librarian |
+| `../skills/query/` | required request guidance: exact inputs, bounded questions, outputs and missing-input actions |
 | `tests/test_librarian.py` | wrapper test with a stub `codex` |
 
 ## Setup

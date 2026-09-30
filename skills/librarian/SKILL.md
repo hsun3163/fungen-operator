@@ -26,6 +26,10 @@ unless the user explicitly tells you to.
 
 ## Calls
 
+Before every request, follow [Query the librarian](../query/SKILL.md) to name the exact inputs, question,
+operation, output audience and missing-input action. This includes follow-ups, retries and tasks sent through
+LSF. The hosted agent selects and bounds the work; the librarian receives a concrete lookup to perform.
+
 ```bash
 librarian "<task>"        # answer comes back to you on stdout
 librarian --me "<task>"   # answer goes to the user's latest.md; you get only "Done"
