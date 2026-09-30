@@ -37,6 +37,13 @@ $LIBRARIAN_HOME/latest.md / review notebook  -> user
 The frontier only ever receives the librarian's final message. The Codex transcript, commands and their output
 go to the run log.
 
+For manuscript slot operations, use `librarian --receipt "<specific task>"` after any `--add-dir` options.
+This mode filters the final answer locally before releasing it. Only `VALUE`/`TEXT` placeholder IDs with
+`resolved`, `pending`, or `needs-human` statuses, four Boolean verification fields (`doc_verified`,
+`mask_verified`, `dictionary_synced`, `preserved`), and fixed blocker codes can pass. Extra fields are dropped;
+malformed allowed fields fail closed with a fixed message. The complete answer stays in the private run.
+Default free-text operational replies are not a reliable boundary for numeric QC values.
+
 | Boundary | Rule |
 |---|---|
 | scientific results | final findings -> user (`--me`) |

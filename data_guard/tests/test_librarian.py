@@ -1,6 +1,9 @@
 import os
+import json
 import subprocess
 from pathlib import Path
+
+import pytest
 
 LIBRARIAN = Path(__file__).resolve().parents[1] / "librarian"
 
@@ -45,6 +48,38 @@ def test_default_mode_prints_only_answer(tmp_path):
     assert "-agent-" in rd.name
     assert "NOISY tool output" in (rd / "log").read_text()
     assert (rd / "task").read_text() == "task\n"
+
+
+def receipt(**extra):
+    return {'slots': {'{{VALUE-ABCD}}': 'resolved'}, 'doc_verified': True,
+            'mask_verified': True, 'dictionary_synced': True, 'preserved': True, **extra}
+
+
+def test_receipt_mode_filters_private_values_locally(tmp_path):
+    allowed = receipt(blockers={'{{VALUE-ABCD}}': 'source-mismatch'})
+    answer = {**allowed, 'invented_qc_bound': 0.123456, 'invented_genes': ['FABLE1']}
+    p = run(tmp_path, '--receipt', 'synthetic operation', STUB_ANSWER=json.dumps(answer))
+    assert p.returncode == 0 and json.loads(p.stdout) == allowed and p.stderr == ''
+    assert '0.123456' not in p.stdout and 'FABLE1' not in p.stdout and 'NOISY' not in p.stdout
+    (rd,) = runs(tmp_path)
+    assert '-receipt-' in rd.name and 'FABLE1' in (rd / 'answer.md').read_text()
+    assert not (tmp_path / 'home/latest.md').exists()
+
+
+@pytest.mark.parametrize('answer', [
+    'Invented value 0.123456',
+    '[]',
+    json.dumps(receipt(doc_verified=1)),
+    json.dumps(receipt(slots={'{{VALUE-ABCD}}': {'value': '0.123456'}})),
+    json.dumps(receipt(slots={'FABLE1': 'resolved'})),
+    json.dumps(receipt(slots={'{{VALUE-ABCD}}': '0.123456'})),
+    json.dumps(receipt(blockers={'{{VALUE-ABCD}}': 'Invented value 0.123456'})),
+])
+def test_invalid_receipt_fails_without_leaking_answer(tmp_path, answer):
+    p = run(tmp_path, '--receipt', 'synthetic operation', STUB_ANSWER=answer)
+    assert p.returncode == 1
+    assert p.stdout == 'Librarian failed: invalid status receipt; private answer retained.\n'
+    assert p.stderr == '' and '0.123456' not in p.stdout and 'FABLE1' not in p.stdout
 
 
 def test_me_mode_writes_latest_and_prints_done(tmp_path):

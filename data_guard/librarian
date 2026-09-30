@@ -1,8 +1,9 @@
 #!/bin/bash
-# librarian [--me] "<task>"
+# librarian [--me | --receipt] "<task>"
 #
 # default: final librarian message -> stdout
 # --me:    final librarian message -> latest.md; caller receives only "Done"
+# --receipt: local allowlist emits only slot statuses and verification flags
 #
 # The model endpoint comes from the `codex --oss` launcher: set OLLAMA_HOST to
 # pin it, otherwise the launcher finds the Ollama LSF job and tunnels to it.
@@ -36,6 +37,10 @@ if [ "$1" = --me ]; then
     tag=me
     aud="the user"
     shift
+elif [ "$1" = --receipt ]; then
+    tag=receipt
+    aud='the coding agent through a strict local status filter. Return only a JSON object with slots (a map of placeholder IDs to resolved, pending, or needs-human), doc_verified, mask_verified, dictionary_synced, and preserved (four JSON booleans). Optionally include blockers (a map of placeholder IDs to missing-input, source-mismatch, revision-conflict, definition-needed, verification-failed, or unresolved). No Markdown or other prose. Keep all result values, including numeric QC bounds, in your private evidence'
+    shift
 fi
 
 task=$*
@@ -46,7 +51,7 @@ if [ "$1" = --slots ]; then
 fi
 
 if [ -z "$task" ]; then
-    echo 'usage: librarian [--me] "<task>" | librarian mask <command>'
+    echo 'usage: librarian [--me | --receipt] "<task>" | librarian mask <command>'
     exit 2
 fi
 
@@ -142,7 +147,43 @@ link_paths() {
         }'
 }
 
-if [ "$tag" = me ]; then
+if [ "$tag" = receipt ]; then
+    # Filter on Minerva before any answer reaches a hosted caller. Unknown
+    # fields stay private; malformed allowed fields produce no partial receipt.
+    python3 - "$run/answer.md" <<'PY'
+import json
+from pathlib import Path
+import re
+import sys
+
+try:
+    answer = json.loads(Path(sys.argv[1]).read_text())
+    flags = ('doc_verified', 'mask_verified', 'dictionary_synced', 'preserved')
+    identifier = re.compile(r'\{\{(?:VALUE|TEXT)-[A-Z2-7]{4}\}\}')
+    statuses = {'resolved', 'pending', 'needs-human'}
+    reasons = {'missing-input', 'source-mismatch', 'revision-conflict',
+               'definition-needed', 'verification-failed', 'unresolved'}
+    if not isinstance(answer, dict) or not isinstance(answer.get('slots'), dict):
+        raise ValueError()
+    slots = answer['slots']
+    if any(not identifier.fullmatch(k) or not isinstance(v, str) or v not in statuses
+           for k, v in slots.items()):
+        raise ValueError()
+    if any(type(answer.get(k)) is not bool for k in flags):
+        raise ValueError()
+    receipt = {'slots': slots, **{k: answer[k] for k in flags}}
+    blockers = answer.get('blockers', {})
+    if not isinstance(blockers, dict) or any(k not in slots or not isinstance(v, str) or v not in reasons
+                                            for k, v in blockers.items()):
+        raise ValueError()
+    if blockers:
+        receipt['blockers'] = blockers
+except Exception:
+    print('Librarian failed: invalid status receipt; private answer retained.')
+    sys.exit(1)
+print(json.dumps(receipt, sort_keys=True))
+PY
+elif [ "$tag" = me ]; then
     tilde_sed > "$run/tilde.sed"
     {
         printf '### %s\n' "$(date '+%F %T')"

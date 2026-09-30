@@ -62,6 +62,10 @@ additional analyses or choosing a different release requires a new, explicitly s
   `librarian mask retrieve --document DOCUMENT --reply-file PRIVATE_JSON`. Only the requested group is committed.
   The deterministic script owns masking, IDs, binding and revision checks. Never ask a librarian model to invoke
   an unqualified `mask retrieve` or another librarian model inside its own run.
+- Dispatch manuscript operations with `librarian --receipt "<task>"` after any `--add-dir` options. The local
+  wrapper allows only slot IDs/statuses, Boolean verification fields and fixed blocker codes through to the
+  hosted caller. Request its exact JSON receipt format; keep prose, numeric QC bounds and source evidence in
+  the private run. Do not use a free-text final report as the privacy boundary.
 - Keep one active librarian inference task on the shared endpoint. For longer work, use the existing LSF path
   with an explicit time allowance; LSF does not make an open-ended request precise. Split work by input and
   deliverable so a finished group is saved before the next starts.
