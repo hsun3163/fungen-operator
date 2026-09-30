@@ -44,7 +44,7 @@ elif [ "$1" = --receipt ]; then
 fi
 
 task=$*
-if [ "$1" = --slots ]; then
+if [ "$1" = --slots ] && [ "$tag" = agent ]; then
     tag=slots
     aud="the local masking script, which keeps the response private; return the requested JSON only"
     task=$(cat)

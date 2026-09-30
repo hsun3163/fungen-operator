@@ -82,6 +82,14 @@ def test_invalid_receipt_fails_without_leaking_answer(tmp_path, answer):
     assert p.stderr == '' and '0.123456' not in p.stdout and 'FABLE1' not in p.stdout
 
 
+def test_receipt_mode_cannot_be_overridden_by_option_like_task(tmp_path):
+    p = run(tmp_path, '--receipt', '--slots', STUB_ANSWER='{"value":"FABLE1"}')
+    assert p.returncode == 1
+    assert p.stdout == 'Librarian failed: invalid status receipt; private answer retained.\n'
+    assert 'FABLE1' not in p.stdout + p.stderr
+    assert '-receipt-' in runs(tmp_path)[0].name
+
+
 def test_me_mode_writes_latest_and_prints_done(tmp_path):
     latest = tmp_path / "home" / "latest.md"
     run(tmp_path, "--me", "first")
