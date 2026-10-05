@@ -48,7 +48,9 @@ I do not know in advance what the elegant system looks like. Like the true model
 
 ## Reduce the uncertainty that moves conclusions
 
-Not all certainty is worth having. Pinning file hashes and asserting every intermediate removes uncertainty about sameness: is this the same file, the same state as last time? Sameness is not correctness. A changed input can still give a right result and an unchanged one a wrong result, so the outcome stays as uncertain as before, and the pins break as soon as the source evolves.
+Not all certainty is worth having. Pinning file hashes and asserting every intermediate removes uncertainty about sameness: the same bytes, the same state as last time. That is sameness of artifacts, not correspondence to the physical world the analysis is about. A changed input can still give a right result and an unchanged one a wrong result, and the pins break as soon as the source evolves.
+
+Agents write such pins because they cannot trust the process that produced their inputs. The remedy is not more verification but a process worth trusting: recorded, replayable, and bounded. Then checks are free to be about the world.
 
 A check is worth writing when the uncertainty it removes could move the conclusion: a practically significant effect, not merely a detectable one. That is the same test as for a scientific choice. Such checks state what an operation means:
 
