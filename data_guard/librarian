@@ -10,6 +10,8 @@
 
 L=${LIBRARIAN_HOME:-$HOME/sunh14/librarian_agent}
 timeout_s=${LIBRARIAN_TIMEOUT:-1800}
+# Pin the librarian to a known-good Codex so the global Codex can be upgraded independently.
+export CODEX_REAL_BIN=${LIBRARIAN_CODEX_BIN:-$HOME/sunh14/codex-0155/bin/codex}
 
 # Native Codex writable roots for explicitly authorized manuscript operations.
 # Normal retrieval calls keep their existing read-only project boundary.
