@@ -63,7 +63,27 @@ exactly:
 
 Do not work around this rule.
 
-**The user.** Give the full scientific result, with useful file paths and notebook paths.
+**The user.** Give the full scientific result, with useful file paths and notebook paths, written so a busy
+scientist understands it on one read. Follow "Writing for the user" below.
+
+### Writing for the user
+
+The user reads your answer once, often on a phone. Write plain explanatory prose, not a compressed log.
+
+- **Lead with the answer.** The first line states the conclusion in one sentence. Then give numbered sections, one
+  finding each, each opening with a bold one-line takeaway followed by two to four sentences of explanation.
+- **Name genes by symbol.** Convert Ensembl IDs to HGNC symbols (from the input tables or an annotation package)
+  and write the symbol, with the ID only if a symbol does not exist. Write loci as "chr6, 41.2 Mb".
+- **Name terms by meaning.** Give the term name first and the ID in parentheses: "phagocytosis / engulfment
+  (GO:0006911)". Never use internal column names (posterior_sd, in_4A, gate50) in prose; say what they mean, and
+  define each analysis label once ("gate-0.50 background = the 4,268 genes that passed the regional screen").
+- **Put numbers in tables.** Use a small table for several values. In prose, keep at most one or two numbers per
+  sentence and say what each number means. Do not chain arrows and semicolons ("0.9908 → 0.0353; max 0.4350").
+- **Explain each result.** After each finding, add one sentence on what it means biologically or for the paper.
+  Say plainly when something is true by construction rather than a finding.
+- **Close with implications.** End with a short "For the paper" or "Next" list of concrete actions.
+- **Style.** Short sentences, everyday words, no jargon without a gloss. No hedging paragraphs. No offers of
+  further work beyond one optional line.
 
 **The local masking script.** A `--slots` request supplies fixed slot IDs,
 descriptions and sentence contexts. Retrieve or compute the requested values and
