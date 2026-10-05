@@ -32,11 +32,13 @@ conversation on a healthy scribe, reads both answers and retained scripts, and r
 Agreement between two workers is useful corroboration, not proof of scientific correctness.
 
 **Where agent calls run.** Run `scribes` and librarian/scribe Codex calls from the login/session host, or inside
-an LSF job placed with `-m "air_cpu dwc_cpu"`. Codex's sandbox (bwrap) needs unprivileged user namespaces. The
+an LSF job placed with `-R "$(data_guard/codex_lsf_select)"`. Codex's sandbox (bwrap) needs unprivileged user namespaces. The
 `ondemand` host group (`lh06c*` nodes, reachable from the premium queue) sets `/proc/sys/user/max_user_namespaces`
 to 0, so bwrap fails there with `Creating new namespace failed: nesting depth or /proc/sys/user/max_*_namespaces
-exceeded (ENOSPC)`, which Codex reports as "No space left on device". The `air_cpu` and `dwc_cpu` groups have
-namespaces enabled (verified 2026-10-05 on lh05g09, lh05g12, lh05g22, lh06g10, lh06g14).
+exceeded (ENOSPC)`, which Codex reports as "No space left on device". Host groups such as
+`air_cpu` and `dwc_cpu` also contain `lh06c` hosts, so restrict by host instead: `data_guard/codex_lsf_select`
+prints a select clause excluding every `ondemand` host (verified 2026-10-05: lh05g09, lh05g12, lh05g22, lh06g10,
+lh06g14, lh06g18, lh06g19 have namespaces; lh06c13, lh06c17, lh06c31 do not).
 
 ## Isolation and enforcement
 
@@ -219,7 +221,7 @@ then call `up N`. Failed/expired jobs are not counted as active. Queue waits may
 | Symptom | Check and fix |
 |---|---|
 | Global Codex upgrade breaks sandbox | Verify `CODEX_REAL_BIN` in wrapper and pinned `--version`; use 0.155.1 via `LIBRARIAN_CODEX_BIN`, preserve the backend. |
-| LSF-node bwrap namespace/no-space error (ENOSPC) | The job landed on an `ondemand` node (`lh06c*`). Check `cat /proc/sys/user/max_user_namespaces` in the job (0 = disabled). Resubmit with `-m "air_cpu dwc_cpu"`, or run the agent call from the session host. |
+| LSF-node bwrap namespace/no-space error (ENOSPC) | The job landed on an `ondemand` node (`lh06c*`). Check `cat /proc/sys/user/max_user_namespaces` in the job (0 = disabled). Resubmit with `-R "$(data_guard/codex_lsf_select)"`, or run the agent call from the session host. |
 | Wrapper formerly said Done with failed commands | New log check fails closed; read the named synthetic log and successful `command_execution` events. |
 | Scribe local port busy | Inspect `ss -ltnp` for 11440+id on this session host. Check the common helper's tunnel diagnostics. Use a free scribe id; leave 11435 untouched. |
 | Remote port busy | Inspect the scribe job log and 8890+id listener on its node; server refuses to adopt an existing process. Use a distinct id or intentionally stop that scribe. |

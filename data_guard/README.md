@@ -56,7 +56,7 @@ Default free-text operational replies are not a reliable boundary for numeric QC
 For extra local-model workers on separate GPUs, see [SCRIBES.md](SCRIBES.md): setup from scratch,
 `scribes up/status/test/down`, isolated routing with `librarian --scribe`, independent A/B verification with
 `--scribe --check`, sizing, relaunch and debugging. The librarian backend stays fixed. Agent sessions run on
-the login/session host or in LSF jobs placed with `-m "air_cpu dwc_cpu"` (see SCRIBES.md, debugging). The wrapper serializes librarian calls.
+the login/session host or in LSF jobs placed with `-R "$(data_guard/codex_lsf_select)"` (see SCRIBES.md, debugging). The wrapper serializes librarian calls.
 
 ## Files
 

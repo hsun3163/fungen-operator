@@ -15,5 +15,5 @@ Use the [scribe setup and debugging guide](SCRIBES.md) for extra bounded local-m
 `--scribe --check --me` computes a table in two independent parallel sessions and compares normalized tables,
 with a third reviewer on mismatch or when no table is defined. Keep scientific answers in private files.
 At most one call may use the librarian GPU at a time; the wrapper enforces that lock. Run agent sessions
-from the login/session host, or in LSF jobs placed with `-m "air_cpu dwc_cpu"` (the `lh06c*` ondemand nodes lack
+from the login/session host, or in LSF jobs placed with `-R "$(data_guard/codex_lsf_select)"` (the `lh06c*` ondemand nodes lack
 user namespaces, which Codex's sandbox needs).

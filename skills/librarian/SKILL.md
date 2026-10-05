@@ -65,7 +65,7 @@ No healthy scribe is a failure; callers may set one up through `scribes up N` an
 Scribe calls always use scribe endpoints, never the librarian endpoint.
 
 Run librarian and scribe **agent calls** from the login/session host, or in an LSF job with
-`-m "air_cpu dwc_cpu"`: the `ondemand` nodes (`lh06c*`) disable user namespaces, so Codex's sandbox fails there. See [SCRIBES.md](../../data_guard/SCRIBES.md) for setup,
+`-R "$(data_guard/codex_lsf_select)"`: the `ondemand` nodes (`lh06c*`) disable user namespaces, so Codex's sandbox fails there. See [SCRIBES.md](../../data_guard/SCRIBES.md) for setup,
 lifecycle, explicit endpoint isolation, normalization, resource sizing, relaunch and debugging.
 
 ## LSF
