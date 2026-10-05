@@ -46,11 +46,11 @@ The barrier also locates uncertainty. A step that silently depends on looking ca
 
 I do not know in advance what the elegant system looks like. Like the true model in model selection, elegance is what the iteration approaches, not what grades it.
 
-## Reduce the uncertainty that matters
+## Reduce the uncertainty that moves conclusions
 
-Not all certainty is worth having. Pinning file hashes and asserting every intermediate removes uncertainty, but about nuisance parameters, not the quantity of interest. The scientific question stays exactly as uncertain as before, and the pins break as soon as the source evolves.
+Not all certainty is worth having. Pinning file hashes and asserting every intermediate removes uncertainty about sameness: is this the same file, the same state as last time? Sameness is not correctness. A changed input can still give a right result and an unchanged one a wrong result, so the outcome stays as uncertain as before, and the pins break as soon as the source evolves.
 
-A check is worth writing when it reduces uncertainty about the conclusion. That is the same test as for a scientific choice: could the alternative move the result? Such checks state what an operation means:
+A check is worth writing when the uncertainty it removes could move the conclusion: a practically significant effect, not merely a detectable one. That is the same test as for a scientific choice. Such checks state what an operation means:
 
 - A join is one-to-one.
 - Allele harmonization preserves |z| and flips the sign exactly when alleles swap.
