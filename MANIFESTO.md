@@ -6,81 +6,87 @@ This is the working philosophy behind fungen-operator, the reliability layer tha
 
 ## Core thesis
 
-The point of an AI agent is to make itself unnecessary.
+The world is uncertain. To build certainty out of it, I try to make everything certain. Where that fails, I have found a place that deserves uncertainty. Among the many ways to be certain, I choose the elegant one.
 
-I use AI to resolve ambiguity and discover structure. The resulting understanding becomes explicit, composable operations with intrinsic checks. Repeatable work moves to deterministic execution, and mature behavior consolidates into static code.
+An LLM is the uncertainty term itself: a distribution over what to do next. An agent puts shape into that uncertainty, and crystallization moves the shaped part out into deterministic code. What remains is the uncertainty that belongs.
 
-AI stays at the frontier, where judgment is still genuinely required. Intelligence is not eliminated. Agent behavior that has become understood simply stops being agentic.
+## A model-fitting view
 
-## The construction barrier
+The clearest way I know to say this is statistical. Treat a workflow as a model, y = f(x) + ε.
 
-During construction, the agent never inspects the output it is building. This is a hard rule, not a preference.
+A raw LLM is ε in its widest form: even when it runs deterministically, you can't know what it will do without running it. Wrapping it in an agent, with tools, a contract, and bounded moves, gives that term a stated distribution. Each crystallized step moves structure from ε into f, so the residual left to the model shrinks.
 
-The common loop is intent → attempt → inspect → critique → modify → repeat. It works, but it makes the builder a feedback controller: each result is shaped by reactions to earlier results. In scientific analysis, that is the garden of forking paths.
+| Model fitting | Agentic work |
+| --- | --- |
+| Fitted structure, f(x) | Crystallized, deterministic code |
+| Residual, ε | Where the agent works |
+| Residuals with structure left in them | Keep crystallizing: there is still pattern to capture |
+| Residuals that look like noise | Genuine uncertainty, left to the agent under a stated contract |
+| Overfitting | Certainty about the wrong things, brittle to new data |
+| Regularization | Elegance: certainty has to earn its keep |
+| Well-behaved errors | Error tolerance: ε is never zero, only bounded and visible |
 
-The construction path I want is specification → explicit operations → executable checks → rendered result. Inspection belongs to post-review: interpretation, surprising findings, aesthetics, and whether a new analysis is warranted. A change motivated by review becomes a new explicit request, never an implicit tweak.
+The sections below unpack those rows.
 
-The rule is strict because only a closed channel can be audited. If the agent can see the output, no one can tell whether what it saw shaped what it did. So the barrier is enforced by the environment, with construction given no access to rendered output, not by instructions the agent could ignore.
+## Fit the structure
 
-The strictness is also what does the work. It acts as selection pressure: a process that silently depends on looking cannot survive it. Every visual dependency is forced into the spec (fixed canvas, sizes, label repulsion), into a computed check (text bounding boxes), or surfaces at review as a visible gap.
-
-This is Darwinian, not Lamarckian. Inspect-and-tweak lets traits acquired during one run get baked into the artifact. The barrier works like the Weismann barrier: the spec is the germline, the rendered artifact is the soma, and nothing in the soma writes back. Variation happens in the spec, selection happens at review, and only explicit requests are inherited.
-
-This is not epistemic blinding. The agent may know the hypothesis and the expected story; what it may not do is steer construction by watching the result.
-
-## Explicit operations
-
-Complex analyses should be compositions of small, explicit, meaningful transformations. The tidyverse is my reference point. What matters is not the `%>%` operator or R itself, but the shape:
+Complex analyses should be compositions of small, explicit, meaningful transformations. The tidyverse is my reference point for the shape:
 
 ```
 data → filter → join → transform → group → summarize → plot
-data + mappings + transformations + layers + scales → figure
 ```
 
-The code itself shows how the result was constructed. Modularity that hides consequential choices inside a helper, leaving a thin notebook that calls `make_context_comparison(data)`, reduces transparency rather than adding it.
+Abstract implementation mechanics; keep scientific decisions explicit. A choice is scientific if a plausible alternative could move the conclusion.
 
-The rule: abstract implementation mechanics; keep scientific decisions explicit. The unit of decomposition is the smallest operation with understandable scientific or computational meaning.
-
-The test for what counts as a decision: a choice is scientific if a plausible alternative could move the conclusion. NA handling, join type, and allele orientation look like mechanics and often are not.
-
-## Intrinsic checks
-
-The alternative to visual trial-and-error is not skipping validation. It is validation built into execution as contracts, properties, and invariants.
-
-- A relabeling preserves observations, identifiers, and values.
-- A join asserts its expected cardinality.
-- Allele harmonization preserves |z| and flips the sign exactly when alleles swap.
-- A transformation is tested on synthetic data with known behavior.
-
-These checks ask whether an operation did what its specification says, not whether the result looks as expected. Passing them does not prove the science right. It narrows the ways the implementation can be wrong.
-
-Checks also mark the frontier. Like guards in a JIT compiler, a check that fails on new data sends that path back to the agent.
-
-## Crystallization
-
-The underlying preference is forward causality: declared choices → deterministic execution → result. Nondeterminism is pushed to explicit decision points, and everything downstream is as deterministic as practical. This does not rule out stochastic models or human judgment; it confines them to declared places.
-
-A task matures along one path:
+Understanding moves along one path:
 
 ```
 unknown → agentic → understood → specified → deterministic → static
 ```
 
-The agent works like a JIT compiler. It interprets what is still ambiguous, compiles the paths that run hot into static code, and moves on. A mature workflow contains less agentic computation, not more.
+An agent always tries to move its step along that path. When it can't, the failure is information: that step deserves uncertainty, and the agent keeps it.
 
-Crystallization needs an entry criterion: the agent keeps making the same choice across inputs, and the rule can be stated. It also needs an exit: when a guard fails, the path returns to the frontier.
+The path also runs backward. A one-click pipeline is fixed against one state of the world, and keeping it working as the source evolves takes human effort. When that effort costs more than it returns, I let an agent absorb the drift instead: the science stays fixed, and the operation around it flexes.
 
-Determinism makes errors reproducible, not correct. Checks, not determinism alone, are what make crystallized code trustworthy.
+## Don't fit to the outcome
 
-## Swarms
+During construction, the agent does not inspect the output it is building and tweak it. Inspection belongs to review, and a change motivated by review becomes a new explicit request.
 
-Twenty agents continuously inspecting and revising each other's output form a large stochastic feedback system that is hard to reason about. Mutual revision is the swarm version of inspect-and-tweak.
+Tuning a process by watching its result is fitting to the outcome; in scientific analysis, it is the garden of forking paths. The barrier is enforced by the environment, not by instructions, because only a closed channel can be audited.
 
-A better swarm attacks explicitly decomposed problems with understandable inputs and outputs. Agents may independently produce or verify the same result, but never edit each other's work; agreement between them is a check.
+This hard rule is also what locates uncertainty. A step that silently depends on looking cannot survive it, so its dependencies are forced into the spec, into a check, or into view as a gap.
 
-The goal is not 20 agents doing everything forever. It is 20 agents converting the current frontier into reliable, composable machinery, then leaving those paths.
+The agent may still know the hypothesis and the expected story. What it may not do is steer construction by watching the result.
+
+## Choose elegant certainty
+
+There are countless ways to be certain and only a few worth keeping. Pinning file hashes and asserting every intermediate is certainty about incidental things. Like an overfit model, it holds for the current state of the world and breaks when the source evolves.
+
+A good check states what an operation means:
+
+- A join is one-to-one.
+- Allele harmonization preserves |z| and flips the sign exactly when alleles swap.
+- A relabeling preserves observations, identifiers, and values.
+
+A check never guards the agent against its own uncertainty. If a human would not write it by hand, it does not belong.
+
+## Tolerate error
+
+Agents will err, and so will people. Aviation does not demand infallible pilots; it builds systems that catch an inevitable error before it matters. I design for errors that are:
+
+- detectable, through checks that state meaning;
+- contained, by bounded moves that cannot change the science;
+- recoverable, through retained history and replay.
+
+Error is tolerated; hidden error is not. Each failure becomes a change to the system, not a reprimand to the agent.
+
+## Who holds the freedom
+
+Every free choice in a workflow is a degree of freedom. Scientific freedom stays with a human, at declared decision points. Operational freedom can go to the agent, within a contract.
+
+Swarms follow the same rule. Agents may independently produce or verify a result, but never revise each other's work. Agreement between them is a check; mutual revision is just a larger feedback loop.
 
 ## Where this shows up
 
-- **Operator contract (fungen-operator).** The agent consumes the canonical workflow rather than developing it. State-changing actions are fixed-skeleton notebook cells with bounded slots, and a scientific parameter changes only with an explicit human yes. The operator notebook is both the recipe and the history.
-- **Data librarian.** A privileged local model reads protected results; hosted agents work on placeholders and semantic releases. It is the construction barrier enforced by the environment: the builder never sees the result directly.
+- **fungen-operator.** The FunGen-xQTL protocol is the source of truth, and for a while one click ran the whole analysis. As the protocol evolved, maintaining that one-click path stopped being worth the effort, so agents took over its operation. fungen-operator bounds them: state-changing actions are fixed notebook cells with bounded slots, a scientific parameter changes only with an explicit human yes, and the notebook is both the recipe and the history.
+- **Data librarian.** A privileged local model reads protected results, and hosted agents work on placeholders. The builder never sees the result directly: the construction barrier, enforced by the environment.

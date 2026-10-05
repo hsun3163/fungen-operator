@@ -8,7 +8,7 @@ It is not a new workflow engine and not an autonomous scientist. The project alr
 
 That is the guiding principle for the replacement.
 
-The broader working philosophy behind this project is in [MANIFESTO.md](MANIFESTO.md): agents resolve ambiguity, then crystallize what they learn into deterministic code.
+The broader working philosophy behind this project is in [MANIFESTO.md](MANIFESTO.md): agents try to make everything certain, and uncertainty stays only where it belongs.
 
 ## Current status
 
