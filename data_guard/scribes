@@ -1,0 +1,111 @@
+#!/bin/bash
+# Scribe lifecycle. Invoke from the login/session host, outside a Codex sandbox.
+set -euo pipefail
+here=$(dirname "$(readlink -f "$0")")
+L=${LIBRARIAN_HOME:-$HOME/sunh14/librarian_agent}
+root=$L/scribes
+fail() { echo "Scribes failed: $*" >&2; exit 1; }
+valid_id() { [[ $1 =~ ^[1-9][0-9]*$ ]] && (( $1 <= 100 )) || fail 'id must be an integer 1..100; librarian jobs are forbidden'; }
+model_for() {
+    python3 "$here/scribe_support.py" state "$HOME/.codex/ollama-scribe-$1.env" "$1"
+}
+endpoint() {
+    local id=$1 model
+    valid_id "$id"
+    model=$(model_for "$id")
+    # Every launcher input is explicit, even when an inherited environment pins the librarian.
+    export MINERVA_OLLAMA_STATE_FILE="$HOME/.codex/ollama-scribe-${id}.env"
+    export MINERVA_OLLAMA_JOB_NAME="codex-ollama-scribe-${id}"
+    export MINERVA_OLLAMA_REMOTE_PORT=$((8890 + id))
+    export MINERVA_OLLAMA_LOCAL_PORT=$((11440 + id))
+    export MINERVA_OLLAMA_DEFAULT_MODEL="$model"
+    unset OLLAMA_HOST CODEX_OSS_BASE_URL CODEX_OSS_PORT CODEX_OLLAMA_MODEL
+    source "$HOME/local/scripts/minerva_ollama_common.sh"
+    minerva_ollama_ensure_connection
+    curl -sf --noproxy '*' --max-time 5 "$OLLAMA_HOST/api/ps" |
+        python3 "$here/scribe_support.py" health "$model" >/dev/null
+    python3 - "$id" "$model" "$OLLAMA_HOST" <<'PY'
+import json,sys
+print(json.dumps(dict(id=int(sys.argv[1]), model=sys.argv[2], host=sys.argv[3])))
+PY
+}
+# Match returned job names as well as requesting a name: no wildcard deletion.
+jobs() {
+    local output rc=0
+    output=$(bjobs -u "$USER" -J "$1" -o 'jobid stat job_name exec_host' -noheader 2>&1) || rc=$?
+    if (( rc != 0 )); then
+        [[ $output == *'No unfinished job found'* || $output == *'No job found'* ]] && return 0
+        fail "scheduler query failed: $output"
+    fi
+    printf '%s\n' "$output"
+}
+cmd=${1:-help}; shift || true
+case $cmd in
+up)
+    [[ $# == 1 ]] || fail 'usage: scribes up N'
+    valid_id "$1"
+    gpu=${SCRIBE_GPU_MODEL:-NVIDIAH10080GBHBM3}
+    case $gpu in NVIDIAH10080GBHBM3|NVIDIAA100_SXM4_80GB) ;; *) fail 'GPU must be NVIDIAH10080GBHBM3 or NVIDIAA100_SXM4_80GB' ;; esac
+    wall=${SCRIBE_WALLTIME:-04:00}
+    [[ $wall =~ ^[0-9]+:[0-5][0-9]$ ]] || fail 'walltime must be HH:MM'
+    parallel=${SCRIBE_PARALLEL:-3}
+    [[ $parallel =~ ^[1-9][0-9]*$ ]] && (( parallel <= 8 )) || fail 'parallel must be 1..8'
+    mkdir -p "$root"
+    exec 8>"$root/lifecycle.lock"; flock 8
+    for ((id=1; id<=$1; id++)); do
+        name=codex-ollama-scribe-$id
+        active=$(jobs "$name")
+        if awk -v name="$name" '$3==name && $2 ~ /^(RUN|PEND|PSUSP|USUSP|SSUSP|WAIT)$/ {found=1} END {exit !found}' <<< "$active"; then
+            echo "Scribe $id already active"; continue
+        fi
+        export SCRIBE_ID=$id SCRIBE_MODEL=${SCRIBE_MODEL:-qwen3.8:27b-262k} SCRIBE_PARALLEL=$parallel
+        bsub -J "$name" -W "$wall" -gpu "num=1:gmodel=$gpu" -oo "$root/%J.log" -env all < "$here/scribe_server.lsf"
+    done
+    ;;
+status)
+    printf 'JOB\tSTATE\tNAME\tNODE\tREMOTE/LOCAL\tMODEL\tVRAM_GB\tHEALTH\n'
+    active=$(jobs 'codex-ollama-scribe-*')
+    while read -r job stat name node; do
+        [[ $name =~ ^codex-ollama-scribe-([1-9][0-9]*)$ ]] || continue
+        id=${BASH_REMATCH[1]}; valid_id "$id"
+        model=$(model_for "$id" 2>/dev/null || echo unknown)
+        health=not-ready; vram=-
+        if [[ $stat == RUN ]] && ep=$(endpoint "$id" 2>/dev/null); then
+            host=$(python3 -c 'import json,sys; print(json.load(sys.stdin)["host"])' <<< "$ep")
+            vram=$(curl -sf --noproxy '*' --max-time 5 "$host/api/ps" | python3 "$here/scribe_support.py" health "$model")
+            health=healthy
+        fi
+        printf '%s\t%s\t%s\t%s\t%s/%s\t%s\t%s\t%s\n' "$job" "$stat" "$name" "$node" "$((8890+id))" "$((11440+id))" "$model" "$vram" "$health"
+    done <<< "$active"
+    ;;
+down)
+    [[ $# -le 1 ]] || fail 'usage: scribes down [id]'
+    if [[ $# == 1 ]]; then valid_id "$1"; pattern=codex-ollama-scribe-$1; else pattern='codex-ollama-scribe-*'; fi
+    mkdir -p "$root"; exec 8>"$root/lifecycle.lock"; flock 8
+    active=$(jobs "$pattern")
+    [[ -z $active ]] && exit 0
+    while read -r job stat name node; do
+        [[ $name =~ ^codex-ollama-scribe-([1-9][0-9]*)$ ]] || fail "refusing non-scribe job $name"
+        id=${BASH_REMATCH[1]}; valid_id "$id"
+        [[ $# == 0 || $name == "$pattern" ]] || fail "unexpected job name $name"
+        [[ $job =~ ^[0-9]+$ ]] || fail 'invalid scheduler job id'
+        # bkill is restricted to IDs whose exact live name was checked above.
+        bkill "$job"
+    done <<< "$active"
+    ;;
+test)
+    [[ $# -le 1 ]] || fail 'usage: scribes test [id]'
+    id=${1:-1}; valid_id "$id"; endpoint "$id" >/dev/null
+    mkdir -p "$root"
+    printf 'key\tvalue\nb\t2\na\t1\n' > "$root/synthetic.tsv"
+    run=$root/test-$(date +%Y%m%d-%H%M%S)-$$
+    LIBRARIAN_RUN_DIR=$run LIBRARIAN_SCRIBE_ID=$id "$here/librarian" --scribe "Synthetic probe only. Read exactly $root/synthetic.tsv (under 1 KiB); use a command to sort by key, write result.tsv in your run directory with key,value columns and report the two rows. Do not read other inputs. If missing, stop. Audience: operator; these are invented values. Completion: result.tsv and successful command execution."
+    verdict=$(python3 "$here/scribe_support.py" compare "$root/synthetic.tsv" "$run/A/result.tsv")
+    [[ $verdict == match ]] || fail "synthetic table $verdict; inspect $run/A/log"
+    echo "Synthetic end-to-end probe PASS. Log: $run/A/log"
+    ;;
+endpoint)
+    [[ $# == 1 ]] || fail 'endpoint needs one id'; endpoint "$1"
+    ;;
+*) echo 'usage: scribes up N | status | down [id] | test [id]'; exit 2 ;;
+esac

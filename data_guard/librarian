@@ -1,5 +1,5 @@
 #!/bin/bash
-# librarian [--me | --receipt] "<task>"
+# librarian [--scribe [--check]] [--me | --receipt] "<task>"
 #
 # default: final librarian message -> stdout
 # --me:    final librarian message -> latest.md; caller receives only "Done"
@@ -8,6 +8,8 @@
 # The model endpoint comes from the `codex --oss` launcher: set OLLAMA_HOST to
 # pin it, otherwise the launcher finds the Ollama LSF job and tunnels to it.
 
+script=$(readlink -f "$0")
+here=$(dirname "$script")
 L=${LIBRARIAN_HOME:-$HOME/sunh14/librarian_agent}
 timeout_s=${LIBRARIAN_TIMEOUT:-1800}
 # Pin the librarian to a known-good Codex so the global Codex can be upgraded independently.
@@ -35,14 +37,24 @@ fi
 tag=agent
 aud="the coding agent"
 
-if [ "$1" = --me ]; then
-    tag=me
-    aud="the user"
+scribe=0
+check=0
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --scribe) scribe=1 ;;
+        --check) check=1 ;;
+        --internal) ;; # private child run; same sandbox/privacy contract
+        --me) tag=me; aud="the user" ;;
+        --receipt)
+            tag=receipt
+            aud='the coding agent through a strict local status filter. Return only a JSON object with slots (a map of placeholder IDs to resolved, pending, or needs-human), doc_verified, mask_verified, dictionary_synced, and preserved (four JSON booleans). Optionally include blockers (a map of placeholder IDs to missing-input, source-mismatch, revision-conflict, definition-needed, verification-failed, or unresolved). No Markdown or other prose. Keep all result values, including numeric QC bounds, in your private evidence'
+            ;;
+        *) break ;;
+    esac
     shift
-elif [ "$1" = --receipt ]; then
-    tag=receipt
-    aud='the coding agent through a strict local status filter. Return only a JSON object with slots (a map of placeholder IDs to resolved, pending, or needs-human), doc_verified, mask_verified, dictionary_synced, and preserved (four JSON booleans). Optionally include blockers (a map of placeholder IDs to missing-input, source-mismatch, revision-conflict, definition-needed, verification-failed, or unresolved). No Markdown or other prose. Keep all result values, including numeric QC bounds, in your private evidence'
-    shift
+done
+if [ "$check" = 1 ] && [ "$scribe" != 1 ]; then
+    echo 'Librarian failed: --check requires --scribe'; exit 2
 fi
 
 task=$*
@@ -53,15 +65,35 @@ if [ "$1" = --slots ] && [ "$tag" = agent ]; then
 fi
 
 if [ -z "$task" ]; then
-    echo 'usage: librarian [--me | --receipt] "<task>" | librarian mask <command>'
+    echo 'usage: librarian [--scribe [--check]] [--me | --receipt] "<task>" | librarian mask <command>'
     exit 2
 fi
 
 id=$(date +%Y%m%d-%H%M%S)-$tag-$$
-run=$L/runs/$id
+run=${LIBRARIAN_RUN_DIR:-$L/runs/$id}
+if [ -n "${LIBRARIAN_RUN_DIR:-}" ]; then
+    id=$(basename "$run")
+    if [ "${LIBRARIAN_NO_PUBLISH:-0}" = 1 ]; then id=$(basename "$(dirname "$run")")-$id; fi
+fi
 
 mkdir -p "$run" || { echo "Librarian failed: cannot create $run"; exit 1; }
 printf '%s\n' "$task" > "$run/task"
+
+# Hold this lock for the whole librarian session, including resume. Scribes never take it.
+if [ "$scribe" = 0 ] && [ "${LIBRARIAN_SCRIBE_SESSION:-0}" != 1 ]; then
+    exec 9>"$L/librarian.lock"
+    flock 9
+fi
+
+if [ "$scribe" = 1 ]; then
+    export LIBRARIAN_SCRIBE_ADD_DIRS
+    LIBRARIAN_SCRIBE_ADD_DIRS=$(python3 -c 'import json,sys; print(json.dumps(sys.argv[1:]))' "${codex_dirs[@]}")
+    python3 "$here/scribe_support.py" route "$run" "$check" "$tag" >> "$run/log" 2>&1
+    rc=$?
+    if [ "$rc" != 0 ]; then
+        echo "Librarian failed: scribe routing or session failed. Log: $run/log"; exit 1
+    fi
+else
 
 # Jupyter writes to its config and runtime dirs, which the sandbox makes read-only.
 export JUPYTER_CONFIG_DIR="$run/.jupyter"
@@ -72,12 +104,12 @@ export IPYTHONDIR="$run/.jupyter/ipython"
 # otherwise wait on a caller's open pipe.
 timeout -k 30 "$timeout_s" \
     env CODEX_HOME="$L/codex" \
-    codex "${codex_dirs[@]}" exec --oss \
+    codex "${codex_dirs[@]}" exec --oss --json \
         --skip-git-repo-check \
         -s workspace-write \
         -C "$run" \
         -o "$run/answer.md" \
-        "Your answer goes to $aud. Your run directory is $run. Task: $task" \
+        "Your answer goes to $aud. Your run directory is $run. Before answering, execute pwd in this run directory to verify commands work. Task: $task" \
         < /dev/null > "$run/log" 2>&1
 
 rc=$?
@@ -85,21 +117,31 @@ rc=$?
 # With reasoning on, Ollama can return Qwen's reply after a tool call as
 # reasoning, so no final message is recorded. Resume the same session with
 # reasoning off only to write the final message.
-sid=$(sed -n 's/^session id: //p' "$run/log" | head -n 1)
+# Detect execution failures even when Codex returns rc=0 and writes a plausible answer.
+reason=$(python3 "$here/scribe_support.py" log "$run/log")
+if [ $? != 0 ]; then
+    echo "Librarian failed: $reason. Log: $run/log"; exit 1
+fi
+sid=$(python3 "$here/scribe_support.py" session "$run/log")
 if [ $rc -eq 0 ] && [ ! -s "$run/answer.md" ] && [ -n "$sid" ]; then
     timeout -k 30 "$timeout_s" \
         env CODEX_HOME="$L/codex" \
-        codex "${codex_dirs[@]}" exec --oss -c 'model_reasoning_effort="none"' \
+        codex "${codex_dirs[@]}" exec --oss --json -s workspace-write -c 'model_reasoning_effort="none"' \
             resume --skip-git-repo-check \
             -o "$run/answer.md" \
             "$sid" \
             "Write your final answer to the task now, from the work above. Your answer goes to $aud. Output only the answer." \
             < /dev/null >> "$run/log" 2>&1
     rc=$?
+    reason=$(python3 "$here/scribe_support.py" log "$run/log")
+    if [ $? != 0 ]; then
+        echo "Librarian failed: $reason. Log: $run/log"; exit 1
+    fi
 fi
+fi # direct backend versus scribe routing
 
 if [ $rc -eq 124 ] || [ $rc -eq 137 ]; then
-    echo "Librarian timed out after ${timeout_s}s. Log: $run/log"
+    echo "Librarian failed: timed out after ${timeout_s}s. Log: $run/log"
     exit 1
 fi
 
@@ -149,6 +191,17 @@ link_paths() {
         }'
 }
 
+if [ "${LIBRARIAN_NO_PUBLISH:-0}" = 1 ]; then
+    mkdir -p "$L/answers"
+    tilde_sed > "$run/tilde.sed"
+    sed -f "$run/tilde.sed" "$run/answer.md" | link_paths > "$L/answers/$id.md" || exit 1
+    if [ "$tag" != receipt ] && [ "$tag" != slots ]; then
+        exec 8>"$L/answers.lock"; flock 8
+        { printf '### %s (independent session; preliminary)\n' "$id"; cat "$L/answers/$id.md"; printf '\n'; } >> "$L/latest.md" || exit 1
+    fi
+    exit 0
+fi
+
 if [ "$tag" = receipt ]; then
     # Filter on Minerva before any answer reaches a hosted caller. Unknown
     # fields stay private; malformed allowed fields produce no partial receipt.
@@ -186,6 +239,10 @@ except Exception:
 print(json.dumps(receipt, sort_keys=True))
 PY
 elif [ "$tag" = me ]; then
+    mkdir -p "$L/answers"
+    # Serialize latest.md and optional private repo sync for concurrent scribe callers.
+    exec 8>"$L/answers.lock"
+    flock 8
     tilde_sed > "$run/tilde.sed"
     {
         printf '### %s\n' "$(date '+%F %T')"
@@ -196,8 +253,13 @@ elif [ "$tag" = me ]; then
         fi
 
         cat "$run/answer.md"
-    } | sed -f "$run/tilde.sed" | link_paths > "$L/latest.md.tmp" &&
-        mv "$L/latest.md.tmp" "$L/latest.md"
+    } | sed -f "$run/tilde.sed" | link_paths > "$L/answers/$id.md" || exit 1
+    if [ "$scribe" = 1 ]; then
+        cat "$L/answers/$id.md" >> "$L/latest.md" || exit 1
+        printf '\n' >> "$L/latest.md" || exit 1
+    else
+        cp "$L/answers/$id.md" "$L/latest.md.tmp" && mv "$L/latest.md.tmp" "$L/latest.md" || exit 1
+    fi
 
     # Publish to the user's private answers repo, if cloned: README.md is the
     # latest answer, answers/<run id>.md keeps each one. Git output goes to the
@@ -210,7 +272,7 @@ elif [ "$tag" = me ]; then
             timeout 120 git -C "$repo" pull -q --rebase &&
                 mkdir -p "$repo/answers" &&
                 cp "$L/latest.md" "$repo/README.md" &&
-                cp "$L/latest.md" "$repo/answers/$id.md" &&
+                cp "$L/answers/$id.md" "$repo/answers/$id.md" &&
                 git -C "$repo" add README.md "answers/$id.md" &&
                 git -C "$repo" commit -q -m "Answer $id" &&
                 timeout 120 git -C "$repo" push -q
@@ -219,5 +281,11 @@ elif [ "$tag" = me ]; then
 
     echo "Done. The answer is in the user's latest.md.$sync"
 else
+    if [ "$scribe" = 1 ]; then
+        mkdir -p "$L/answers"
+        exec 8>"$L/answers.lock"; flock 8
+        cp "$run/answer.md" "$L/answers/$id.md" || exit 1
+        { printf '### %s\n' "$id"; cat "$L/answers/$id.md"; printf '\n'; } >> "$L/latest.md" || exit 1
+    fi
     cat "$run/answer.md"
 fi

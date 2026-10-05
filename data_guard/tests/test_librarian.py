@@ -10,6 +10,8 @@ LIBRARIAN = Path(__file__).resolve().parents[1] / "librarian"
 STUB = """#!/bin/sh
 echo "NOISY tool output: secret-row-42"
 echo "NOISY stderr" >&2
+[ -z "$STUB_NO_COMMAND" ] && echo '{"type":"item.completed","item":{"type":"command_execution","exit_code":0}}'
+[ -n "$STUB_LOG_ERROR" ] && echo "$STUB_LOG_ERROR"
 [ -n "$STUB_ARGS" ] && printf '%s\\n' "$@" > "$STUB_ARGS"
 while [ $# -gt 0 ]; do
     [ "$1" = -o ] && out=$2
@@ -185,3 +187,17 @@ def test_explicit_write_roots_preserve_shell_metacharacters(tmp_path):
     p = run(tmp_path, '--add-dir', str(root), '--add-dir', str(tmp_path), 'synthetic sync', STUB_ARGS=str(args))
     assert p.returncode == 0
     assert args.read_text().splitlines()[:4] == ['--add-dir', str(root), '--add-dir', str(tmp_path)]
+
+
+@pytest.mark.parametrize('error', ['Failed to create unified exec process', "bwrap: Can't mkdir /synthetic", 'sandbox failed'])
+def test_failed_commands_never_print_done_even_with_answer(tmp_path, error):
+    p = run(tmp_path, '--me', 'synthetic task', STUB_LOG_ERROR=error)
+    assert p.returncode != 0 and p.stdout.startswith('Librarian failed:')
+    assert 'Done' not in p.stdout
+    assert not (tmp_path / 'home/latest.md').exists()
+
+
+def test_no_command_never_releases_plausible_answer(tmp_path):
+    p=run(tmp_path, '--me', 'synthetic task', STUB_NO_COMMAND='1')
+    assert p.returncode != 0 and 'no command succeeded' in p.stdout
+    assert not (tmp_path / 'home/latest.md').exists()

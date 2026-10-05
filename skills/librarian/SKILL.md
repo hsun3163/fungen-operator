@@ -51,6 +51,23 @@ To have the librarian run code you wrote, give it the script path and say what t
 A call can take minutes. A failure prints one line naming what failed and the run log; report it to the user
 rather than reading the log or falling back to reading the data yourself.
 
+## Scribes and concurrency
+
+At most **one librarian call at a time**: its GPU serves one active call. The wrapper holds a lock across
+execution and resume; use that wrapper rather than starting raw Codex calls on the librarian endpoint.
+
+Use `librarian --scribe "<bounded operational task>"` to move a small lookup to an extra local-model worker
+on its own GPU. Use `librarian --scribe --me "<bounded scientific task>"` for user-facing results and
+`librarian --scribe --check --me "<task defining a result table>"` for two independent parallel computations.
+On mismatch, invalid tables or no defined table, a fresh reviewer reads both private answers and scripts.
+Scribes follow the same named-input, read-only source-data, 1 GiB and audience rules as the librarian.
+No healthy scribe is a failure; callers may set one up through `scribes up N` and test it when ready.
+Scribe calls always use scribe endpoints, never the librarian endpoint.
+
+Run librarian and scribe **agent calls** from the login/session host, or in an LSF job with
+`-m "air_cpu dwc_cpu"`: the `ondemand` nodes (`lh06c*`) disable user namespaces, so Codex's sandbox fails there. See [SCRIBES.md](../../data_guard/SCRIBES.md) for setup,
+lifecycle, explicit endpoint isolation, normalization, resource sizing, relaunch and debugging.
+
 ## LSF
 
 Keep heavy jobs away from the librarian: anything expected to read more than 1 GiB or need more than 1 GiB of

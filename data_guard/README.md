@@ -51,11 +51,21 @@ Default free-text operational replies are not a reliable boundary for numeric QC
 | computation | <= 1 GiB interactive read -> librarian; > 1 GiB -> frontier writes it, submits via LSF |
 | mutation | protected data read-only; librarian writes only its run directory (and `/tmp`) |
 
+## Scribes
+
+For extra local-model workers on separate GPUs, see [SCRIBES.md](SCRIBES.md): setup from scratch,
+`scribes up/status/test/down`, isolated routing with `librarian --scribe`, independent A/B verification with
+`--scribe --check`, sizing, relaunch and debugging. The librarian backend stays fixed. Agent sessions run on
+the login/session host or in LSF jobs placed with `-m "air_cpu dwc_cpu"` (see SCRIBES.md, debugging). The wrapper serializes librarian calls.
+
 ## Files
 
 | File | Role |
 |---|---|
-| `librarian` | the wrapper (`librarian [--me] "<task>"`) |
+| `librarian` | wrapper (`librarian [--scribe [--check]] [--me] "<task>"`) |
+| `scribes`, `scribe_server.lsf`, `scribe_support.py` | scribe lifecycle, GPU server and local checks/routing |
+| `minerva_codex`, `minerva_ollama_common.sh`, `ollama-models.json` | existing Minerva launcher/helper, retained for fresh setup |
+| `SCRIBES.md` | complete setup, isolation, use and debugging guide |
 | `AGENTS.md` | librarian instructions; linked into the librarian's `CODEX_HOME` |
 | `config.toml` | librarian Codex config template |
 | `../skills/librarian/` | frontier skill: how hosted agents use the librarian |
@@ -136,8 +146,9 @@ call. There is no other audit system.
 1. Read the one-line error (timeout, `codex exec` exit code, or no answer).
 2. Open the run log it names.
 3. Check the Qwen node: `bjobs -J codex-ollama-flash-next`, `curl -s --noproxy '*' http://127.0.0.1:11435/api/tags`.
-4. Check `$LIBRARIAN_HOME/codex/config.toml` (`codex exec --oss --strict-config ...` validates it).
-5. Check timeout (`LIBRARIAN_TIMEOUT`) and sandbox errors in the log.
+4. A run with no successful command or any bwrap/sandbox execution error now fails even if Codex wrote an answer.
+5. Check `$LIBRARIAN_HOME/codex/config.toml` (`codex exec --oss --strict-config ...` validates it).
+6. Check timeout (`LIBRARIAN_TIMEOUT`) and sandbox errors in the log.
 
 ## Review notebooks
 

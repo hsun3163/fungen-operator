@@ -1,0 +1,193 @@
+#!/bin/bash
+set -euo pipefail
+
+real_codex="${CODEX_REAL_BIN:-$HOME/.npm-global/bin/codex}"
+common_sh="$HOME/local/scripts/minerva_ollama_common.sh"
+use_oss=0
+has_model=0
+requested_model=""
+has_local_provider=0
+has_apps_override=0
+skip_setup=0
+normalized_args=()
+injected_args=()
+final_args=()
+known_commands=(exec review login logout mcp mcp-server app-server completion sandbox debug apply resume fork cloud features help)
+command_index=-1
+
+if [[ ! -x "$real_codex" ]]; then
+  echo "Real codex binary not found at $real_codex" >&2
+  exit 1
+fi
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -oss)
+      normalized_args+=(--oss)
+      use_oss=1
+      shift
+      ;;
+    --oss)
+      normalized_args+=(--oss)
+      use_oss=1
+      shift
+      ;;
+    -c|--config|--enable|--disable)
+      option="$1"
+      normalized_args+=("$1")
+      shift
+      if [[ $# -eq 0 ]]; then
+        echo "Missing value for $option" >&2
+        exit 2
+      fi
+      normalized_args+=("$1")
+      if [[ "$option" == "-c" || "$option" == "--config" ]]; then
+        if [[ "$1" =~ ^[[:space:]]*features\.apps[[:space:]]*= ]]; then
+          has_apps_override=1
+        fi
+      elif [[ ",$1," == *,apps,* ]]; then
+        has_apps_override=1
+      fi
+      shift
+      ;;
+    --config=*|-c?*)
+      normalized_args+=("$1")
+      value="${1#--config=}"
+      if [[ "$1" == -c* ]]; then
+        value="${1#-c}"
+      fi
+      if [[ "$value" =~ ^[[:space:]]*features\.apps[[:space:]]*= ]]; then
+        has_apps_override=1
+      fi
+      shift
+      ;;
+    --enable=*|--disable=*)
+      normalized_args+=("$1")
+      if [[ ",${1#*=}," == *,apps,* ]]; then
+        has_apps_override=1
+      fi
+      shift
+      ;;
+    -m|--model)
+      normalized_args+=("$1")
+      has_model=1
+      shift
+      if [[ $# -eq 0 ]]; then
+        echo "Missing value for --model" >&2
+        exit 2
+      fi
+      normalized_args+=("$1")
+      requested_model="$1"
+      shift
+      ;;
+    --model=*)
+      normalized_args+=("$1")
+      requested_model="${1#*=}"
+      has_model=1
+      shift
+      ;;
+    --local-provider)
+      normalized_args+=("$1")
+      has_local_provider=1
+      shift
+      if [[ $# -eq 0 ]]; then
+        echo "Missing value for --local-provider" >&2
+        exit 2
+      fi
+      normalized_args+=("$1")
+      shift
+      ;;
+    --local-provider=*)
+      normalized_args+=("$1")
+      has_local_provider=1
+      shift
+      ;;
+    -h|--help|help|-V|--version)
+      normalized_args+=("$1")
+      skip_setup=1
+      shift
+      ;;
+    *)
+      normalized_args+=("$1")
+      shift
+      ;;
+  esac
+done
+
+for ((i = 0; i < ${#normalized_args[@]}; i++)); do
+  token="${normalized_args[i]}"
+  case "$token" in
+    --)
+      break
+      ;;
+    -c|--config|--enable|--disable|--remote|--remote-auth-token-env|-i|--image|-m|--model|--local-provider|-p|--profile|-s|--sandbox|-a|--ask-for-approval|-C|--cd|--add-dir)
+      i=$((i + 1))
+      continue
+      ;;
+    --config=*|--enable=*|--disable=*|--remote=*|--remote-auth-token-env=*|--image=*|--model=*|--local-provider=*|--profile=*|--sandbox=*|--ask-for-approval=*|--cd=*|--add-dir=*)
+      continue
+      ;;
+    -*)
+      continue
+      ;;
+    *)
+      for known_command in "${known_commands[@]}"; do
+        if [[ "$token" == "$known_command" ]]; then
+          command_index="$i"
+        fi
+      done
+      break
+      ;;
+  esac
+done
+
+if (( use_oss )) && (( ! skip_setup )); then
+  if [[ ! -f "$common_sh" ]]; then
+    echo "Missing Minerva Ollama helper at $common_sh" >&2
+    exit 1
+  fi
+
+  # shellcheck source=/dev/null
+  source "$common_sh"
+  minerva_ollama_ensure_connection
+
+  # Codex uses its OSS provider URL, while Ollama's CLI uses OLLAMA_HOST.
+  if [[ -z "${CODEX_OSS_BASE_URL:-}" && -z "${CODEX_OSS_PORT:-}" ]]; then
+    ollama_base_url="${OLLAMA_HOST%/}"
+    if [[ "$ollama_base_url" != http://* && "$ollama_base_url" != https://* ]]; then
+      ollama_base_url="http://$ollama_base_url"
+    fi
+    export CODEX_OSS_BASE_URL="${ollama_base_url%/v1}/v1"
+  fi
+
+  # Keep the local model prompt lean; explicit CLI feature choices take priority.
+  if (( ! has_apps_override )); then
+    injected_args+=(-c features.apps=false)
+  fi
+
+  if (( ! has_local_provider )); then
+    injected_args+=(--local-provider ollama)
+  fi
+  if (( ! has_model )); then
+    requested_model="$(minerva_ollama_default_model)"
+    injected_args+=(--model "$requested_model")
+  fi
+  if [[ "$requested_model" == "qwen3.8:27b" || "$requested_model" == "qwen3.8:27b-262k" || "$requested_model" == "qwen3.8-flash-next:125b-mlx" || "$requested_model" == "qwen3.8-flash-next:125b-a6b-q4_K_M" ]]; then
+    injected_args+=(-c "model_catalog_json=\"$HOME/.codex/ollama-models.json\"")
+  fi
+fi
+
+if (( command_index >= 0 )) && (( ${#injected_args[@]} > 0 )); then
+  for ((i = 0; i < command_index; i++)); do
+    final_args+=("${normalized_args[i]}")
+  done
+  final_args+=("${normalized_args[command_index]}")
+  final_args+=("${injected_args[@]}")
+  for ((i = command_index + 1; i < ${#normalized_args[@]}; i++)); do
+    final_args+=("${normalized_args[i]}")
+  done
+else
+  final_args=("${injected_args[@]}" "${normalized_args[@]}")
+fi
+
+exec "$real_codex" "${final_args[@]}"
