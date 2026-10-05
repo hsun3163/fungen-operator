@@ -6,29 +6,17 @@ This is the working philosophy behind fungen-operator, the reliability layer tha
 
 ## Core thesis
 
-The world is uncertain. To build certainty out of it, I try to make everything certain. Where that fails, I have found a place that deserves uncertainty. Among the many ways to be certain, I choose the elegant one.
+The world is uncertain, and analysis needs certainty. So I try to make every step certain. Where that fails, I have found a place where uncertainty belongs, and I route it through a single channel: the LLM.
 
-An LLM is the uncertainty term itself: a distribution over what to do next. An agent puts shape into that uncertainty, and crystallization moves the shaped part out into deterministic code. What remains is the uncertainty that belongs.
+## The model
 
-## A model-fitting view
+The argument is easiest to state statistically. Think of any workflow as y = f(x) + ε, with x the input and y the outcome. This is a general argument, not a literal regression.
 
-The clearest way I know to say this is statistical. Treat a workflow as a model, y = f(x) + ε.
+f is the explicit structure: code whose behavior can be read and replayed. ε is everything f does not yet explain. That is not a property of the world; it is what the model has not captured.
 
-A raw LLM is ε in its widest form: even when it runs deterministically, you can't know what it will do without running it. Wrapping it in an agent, with tools, a contract, and bounded moves, gives that term a stated distribution. Each crystallized step moves structure from ε into f, so the residual left to the model shrinks.
+A good model routes all its unexplained variance into one term, so you always know where its ignorance lives. A workflow should do the same, and the LLM is that term. Unlike ε, it can be interrogated: you can ask it why. Agents give it shape, and each step that becomes understood moves out of the LLM and into f.
 
-| Model fitting | Agentic work |
-| --- | --- |
-| Fitted structure, f(x) | Crystallized, deterministic code |
-| Residual, ε | Where the agent works |
-| Residuals with structure left in them | Keep crystallizing: there is still pattern to capture |
-| Residuals that look like noise | Genuine uncertainty, left to the agent under a stated contract |
-| Overfitting | Certainty about the wrong things, brittle to new data |
-| Regularization | Elegance: certainty has to earn its keep |
-| Well-behaved errors | Error tolerance: ε is never zero, only bounded and visible |
-
-The sections below unpack those rows.
-
-## Fit the structure
+## Fit what you can
 
 Complex analyses should be compositions of small, explicit, meaningful transformations. The tidyverse is my reference point for the shape:
 
@@ -44,31 +32,31 @@ Understanding moves along one path:
 unknown → agentic → understood → specified → deterministic → static
 ```
 
-An agent always tries to move its step along that path. When it can't, the failure is information: that step deserves uncertainty, and the agent keeps it.
+An agent always tries to move its step along that path. When it can't, the failure is information: that step deserves uncertainty, and it stays with the LLM.
 
-The path also runs backward. A one-click pipeline is fixed against one state of the world, and keeping it working as the source evolves takes human effort. When that effort costs more than it returns, I let an agent absorb the drift instead: the science stays fixed, and the operation around it flexes.
+## Select iteratively
 
-## Don't fit to the outcome
+This is model selection, repeated. Construction fits a candidate. Review evaluates it: interpretation, surprising findings, aesthetics, whether a new analysis is warranted. A change motivated by review becomes the next candidate, as an explicit request.
 
-During construction, the agent does not inspect the output it is building and tweak it. Inspection belongs to review, and a change motivated by review becomes a new explicit request.
-
-Tuning a process by watching its result is fitting to the outcome; in scientific analysis, it is the garden of forking paths. The barrier is enforced by the environment, not by instructions, because only a closed channel can be audited.
-
-This hard rule is also what locates uncertainty. A step that silently depends on looking cannot survive it, so its dependencies are forced into the spec, into a check, or into view as a gap.
+Review never leaks into the fit. During construction, the agent does not inspect the output it is building and tweak it; that would be tuning on the evaluation, which in scientific analysis is the garden of forking paths. The barrier is enforced by the environment, not by instructions, because only a closed channel can be audited.
 
 The agent may still know the hypothesis and the expected story. What it may not do is steer construction by watching the result.
 
-## Choose elegant certainty
+The barrier also locates uncertainty. A step that silently depends on looking cannot survive it, so its dependencies are forced into the spec, into a check, or into view as a gap.
 
-There are countless ways to be certain and only a few worth keeping. Pinning file hashes and asserting every intermediate is certainty about incidental things. Like an overfit model, it holds for the current state of the world and breaks when the source evolves.
+I do not know in advance what the elegant system looks like. Like the true model in model selection, elegance is what the iteration approaches, not what grades it.
 
-A good check states what an operation means:
+## Reduce the uncertainty that matters
+
+Not all certainty is worth having. Pinning file hashes and asserting every intermediate removes uncertainty, but about nuisance parameters, not the quantity of interest. The scientific question stays exactly as uncertain as before, and the pins break as soon as the source evolves.
+
+A check is worth writing when it reduces uncertainty about the conclusion. That is the same test as for a scientific choice: could the alternative move the result? Such checks state what an operation means:
 
 - A join is one-to-one.
 - Allele harmonization preserves |z| and flips the sign exactly when alleles swap.
 - A relabeling preserves observations, identifiers, and values.
 
-A check never guards the agent against its own uncertainty. If a human would not write it by hand, it does not belong.
+The same test applies to whole pipelines. A one-click path that stays alive only through constant maintenance is certainty spent on the operation, not the science. When keeping it costs more than it returns, I hand its operation back to an agent: the science stays fixed, and the operation around it flexes.
 
 ## Tolerate error
 
@@ -84,9 +72,7 @@ Error is tolerated; hidden error is not. Each failure becomes a change to the sy
 
 Every free choice in a workflow is a degree of freedom. Scientific freedom stays with a human, at declared decision points. Operational freedom can go to the agent, within a contract.
 
-Swarms follow the same rule. Agents may independently produce or verify a result, but never revise each other's work. Agreement between them is a check; mutual revision is just a larger feedback loop.
-
 ## Where this shows up
 
 - **fungen-operator.** The FunGen-xQTL protocol is the source of truth, and for a while one click ran the whole analysis. As the protocol evolved, maintaining that one-click path stopped being worth the effort, so agents took over its operation. fungen-operator bounds them: state-changing actions are fixed notebook cells with bounded slots, a scientific parameter changes only with an explicit human yes, and the notebook is both the recipe and the history.
-- **Data librarian.** A privileged local model reads protected results, and hosted agents work on placeholders. The builder never sees the result directly: the construction barrier, enforced by the environment.
+- **Data librarian.** A privileged local model reads protected results, and hosted agents work on placeholders. It uses the same barrier shape, applied to privacy: the builder never sees the protected result directly.
