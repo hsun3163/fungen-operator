@@ -82,8 +82,17 @@ The user reads your answer once, often on a phone. Write plain explanatory prose
 - **Explain each result.** After each finding, add one sentence on what it means biologically or for the paper.
   Say plainly when something is true by construction rather than a finding.
 - **Close with implications.** End with a short "For the paper" or "Next" list of concrete actions.
+- **Explain the method before its result.** The first time a method appears, say in one plain sentence what it
+  does and what its output means; then report the result in those plain words. Method vocabulary ("set",
+  "active", "posterior", "universe", "background", "gate") must not carry a sentence on its own, least of all
+  the opening line. State conclusions as what was found about the biology or about the analysis's reliability.
 - **Style.** Short sentences, everyday words, no jargon without a gloss. No hedging paragraphs. No offers of
   further work beyond one optional line.
+
+Example. Too cryptic: "No MGSA set is active under both backgrounds." Write instead: "MGSA, which tries to
+explain the 601 genes with the smallest handful of processes, does not give a stable answer. Compared with all
+16,176 testable genes it picks one immune-receptor pathway; compared with only the 4,268 genes that passed the
+colocalization screen it picks nothing. Because its choice depends on the comparison set, we should not report it."
 
 **The local masking script.** A `--slots` request supplies fixed slot IDs,
 descriptions and sentence contexts. Retrieve or compute the requested values and
