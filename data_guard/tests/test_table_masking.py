@@ -1,6 +1,7 @@
 """Synthetic release controls through the real masking/broker path."""
 import base64
 import json
+import re
 from pathlib import Path
 import sys
 import copy
@@ -344,7 +345,7 @@ def test_native_local_agent_unresolved_retries_then_escalates(case,tmp_path):
 
 
 def test_local_agent_incomplete_contract_escalates_without_private_retry(case,tmp_path,monkeypatch):
-    _,_,_,policy=case;policy=dict(policy,max_attempts=2,review_backend=9)
+    _,_,_,policy=case;policy=dict(policy,max_attempts=2,review_backend=9,pushback=dict(attempts=99))
     calls=[]
     class Agent:
         metrics=[]
@@ -380,7 +381,7 @@ def test_local_agent_can_repair_table_after_final_unresolved(case,tmp_path,monke
 
 
 def test_local_execution_errors_escalate_with_public_type_only(case,tmp_path,monkeypatch):
-    _,_,_,policy=case;policy=dict(policy,max_attempts=2,review_backend=9)
+    _,_,_,policy=case;policy=dict(policy,max_attempts=2,review_backend=9,pushback=dict(attempts=99))
     calls=[]
     class Agent:
         metrics=[]
@@ -600,7 +601,7 @@ def test_local_agent_helpers_catch_misnamed_columns_and_headers():
 
 
 def test_local_agent_retries_on_renamed_header_and_unknown_column(case,tmp_path,monkeypatch):
-    _,_,_,policy=case;policy=dict(policy,max_attempts=3,review_backend=9)
+    _,_,_,policy=case;policy=dict(policy,max_attempts=3,review_backend=9,pushback=dict(attempts=3))
     codes=iter(["r.get('not_a_column')","pass","pass"]);tables=iter([b'gene\tn\nA\t3\n',b'gene\tcount\nA\t3\n']);prompts=[]
     class Agent:
         metrics=[]
@@ -612,3 +613,42 @@ def test_local_agent_retries_on_renamed_header_and_unknown_column(case,tmp_path,
     rd=tmp_path/'agent';rd.mkdir()
     b.local_question(dict(action='question',question='Count rows per gene. Return columns gene,count.',inputs={'table':'toy'}),policy,Agent(),rd)
     assert 'unknown-input-columns' in prompts[1] and 'requested-header-mismatch' in prompts[2]
+
+
+BAD_WORDS=r"\b(not|no|never|cannot|can't|don't|won't|unable|refuse|reject|deny|withheld|forbidden|prohibited|complex|too)\b"
+
+
+def test_request_size_counts_words_and_clause_marks():
+    assert b.request_size('Count rows.')==(2,1)
+    assert b.request_size('Return a,b; then (c): done. Next?')==(6,6)
+
+
+def test_large_request_is_handed_back_before_any_model_call(case,tmp_path):
+    _,_,_,policy=case
+    class Agent:
+        metrics=[]
+        def call(self,*a,**k):raise AssertionError('model called')
+    question=' '.join(['Count rows,']*60)
+    rd=tmp_path/'agent';rd.mkdir()
+    with pytest.raises(b.Pushback) as info:b.local_question(dict(action='question',question=question,inputs={'table':'toy'}),policy,Agent(),rd)
+    text=str(info.value)
+    assert text=='This request has 60 clauses in 120 words and names 1 table. Send it as a script, or ask one part at a time.'
+    assert not re.search(BAD_WORDS,text,re.I)
+
+
+def test_two_failed_attempts_hand_the_request_back_as_a_completed_reply(case,monkeypatch):
+    rp,_,_,policy=case;policy=dict(policy,max_attempts=5,review_backend=9)
+    request=Path(rp).parent/'question.json'
+    request.write_text(json.dumps(dict(action='question',question='Count rows per gene. Return columns gene,count.',inputs={'table':'toy'})))
+    backends=[]
+    class Agent:
+        metrics=[]
+        def call(self,role,prompt,rd,backend,schema):
+            backends.append(backend)
+            return b.validate_constrained(dict(action='run_python',input_id='toy',column='',n=1,code='pass'),schema)
+    monkeypatch.setattr(b,'execute',lambda *a,**k:(b'gene\tn\nA\t3\n',[]))
+    receipt=b.mask_run(str(request),policy,Agent())
+    out=(Path(policy['private_root'])/receipt['run_id']/'answer.md').read_text()
+    assert receipt['status']=='completed' and receipt['pushback'] is True and 'google' not in receipt
+    assert out=='2 attempts at this request ended with an incomplete table. Send it as a script, or ask one part at a time.\n'
+    assert not re.search(BAD_WORDS,out,re.I) and 9 not in backends and 'main' not in backends

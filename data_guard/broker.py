@@ -391,7 +391,7 @@ def policy_file(path):
     p = read_json(path)
     exact(p, ('version', 'private_root', 'script_roots', 'inputs', 'runtimes', 'scribes',
               'max_attempts', 'agent_timeout_seconds', 'execution_timeout_seconds',
-              'max_input_bytes', 'max_output_bytes') + tuple(k for k in ('reviewer_scribe', 'reply_format', 'execution_mode', 'gene_vocabulary', 'gene_columns', 'protected_columns', 'review_backend', 'lock_root', 'google_config', 'google_lock', 'google_folder', 'google_title', 'scribe_backends', 'optional_second_look', 'column_labels', 'column_kinds', 'bins', 'threshold_cap', 'review_model', 'main_state', 'main_lock', 'reason_labels', 'shown_headings') if k in p), 'policy-fields')
+              'max_input_bytes', 'max_output_bytes') + tuple(k for k in ('reviewer_scribe', 'reply_format', 'execution_mode', 'gene_vocabulary', 'gene_columns', 'protected_columns', 'review_backend', 'lock_root', 'google_config', 'google_lock', 'google_folder', 'google_title', 'scribe_backends', 'optional_second_look', 'column_labels', 'column_kinds', 'bins', 'threshold_cap', 'review_model', 'main_state', 'main_lock', 'reason_labels', 'shown_headings', 'pushback') if k in p), 'policy-fields')
     require(reply_format(p) in ('lines', 'json'), 'reply-format')
     require(type(p['version']) is int and p['version'] == 1, 'policy-version')
     require(Path(p['private_root']).is_absolute(), 'private-root')
@@ -954,6 +954,11 @@ def mask_run(request_path, policy, agents=None, executor=execute, audience='the 
         save(rd/'answer.md',released)
         receipt['masking_reasons']=[dict(item=d['item'],reason=d['reason']) for d in decisions if d['decision']=='keep masked']
         receipt['status']='completed'
+    except Pushback as exc:
+        # The request goes back to its sender with a generated sentence; nothing was released.
+        save(rd/'answer.md',(str(exc)+'\n').encode())
+        receipt.update(status='completed',pushback=True); receipt.pop('reason',None)
+        audit['events'].append(dict(reason='pushback',message=str(exc)))
     except Exception as exc:
         # Hosted error path contains only a fixed code; traceback and logs stay private.
         audit['events'].append(dict(reason=str(exc) if isinstance(exc,Rejected) else type(exc).__name__))
@@ -1030,6 +1035,19 @@ def unmask_request(request,policy,agents,rd,audience):
         return receipt
 
 
+class Pushback(Exception):
+    """A no-script request the local agent hands back; the message is the reply to the requester."""
+
+
+PUSHBACK = read_json(Path(__file__).with_name('standin_policy.json')).get('pushback', dict(words=180, marks=40, attempts=2))
+
+
+def request_size(question):
+    """Words and clause marks (commas, semicolons, colons, opening parentheses, sentence ends) in a request."""
+    marks = sum(question.count(c) for c in ',;:(') + len(re.findall(r'[.?!](?:\s|$)', question))
+    return len(question.split()), marks
+
+
 def unknown_columns(code, columns):
     """Column names a snippet reads with .get() that no named input has and the snippet never creates.
     A defensive .get() on a misspelt column returns None silently; the agent is told instead."""
@@ -1063,6 +1081,17 @@ def local_question(request,policy,agents,rd):
     schema=object_schema(dict(action=dict(type='string',enum=['list_columns','row_count','distinct','first_rows','run_python','unresolved']),
         input_id=dict(type='string',enum=list(request['inputs'].values())),column=dict(type='string'),n=dict(type='integer',minimum=1,maximum=10),code=dict(type='string',maxLength=32768)))
     facts=[]; last=None; unresolved=0; incomplete=0; escalated=False
+    limits=dict(PUSHBACK,**policy.get('pushback',{})); failed=0
+    words,marks=request_size(request['question']); tables=len(set(request['inputs'].values()))
+    advice=' Send it as a script, or ask one part at a time.'
+    if words>limits['words'] or marks>limits['marks']:
+        raise Pushback('This request has '+str(marks)+' clauses in '+str(words)+' words and names '+str(tables)+(' table.' if tables==1 else ' tables.')+advice)
+    def failed_check():
+        # Effort test: code checks failed on this many computed attempts.
+        nonlocal failed
+        failed+=1
+        if failed>=limits['attempts']:
+            raise Pushback(str(failed)+' attempts at this request ended with an incomplete table.'+advice)
     checklist=[part.strip() for part in re.split(r'(?=\bQ\d+\b)|(?=\(\d+\))|(?=\b(?:First|Then|Finally)\b)|(?<=;)\s+',request['question']) if part.strip()]
     for role,ident in request['inputs'].items():
         raw=table_content(policy['inputs'][ident],policy['max_input_bytes'])
@@ -1132,7 +1161,7 @@ def local_question(request,policy,agents,rd):
             if missing:
                 unresolved+=1
                 if unresolved>=policy['max_attempts']: escalated=True
-                facts.append(dict(error='unknown-input-columns',names=missing,valid_columns={f['role']:f['columns'] for f in facts if 'role' in f},instruction='These names are not columns of any named input. Use exact column names from valid_columns and run_python again.')); continue
+                facts.append(dict(error='unknown-input-columns',names=missing,valid_columns={f['role']:f['columns'] for f in facts if 'role' in f},instruction='These names are not columns of any named input. Use exact column names from valid_columns and run_python again.')); failed_check(); continue
             path=rd/f'agent-script-{turn}.py'; save(path,value['code'].encode())
             snapshot=directory(rd/f'agent-snapshot-{turn}'); directory(snapshot/'inputs'); save(snapshot/'analysis',value['code'].encode())
             for ident in request['inputs'].values(): save(snapshot/'inputs'/ident,table_content(policy['inputs'][ident],policy['max_input_bytes']))
@@ -1144,7 +1173,7 @@ def local_question(request,policy,agents,rd):
                 unresolved+=1
                 if unresolved>=policy['max_attempts']: escalated=True
                 diagnostic=read_json(rd/f'agent-execution-{turn}'/'execution_error.json') if (rd/f'agent-execution-{turn}'/'execution_error.json').exists() else {}
-                facts.append(dict(error=type(exc).__name__,script_error=diagnostic,valid_columns={f['role']:f['columns'] for f in facts if 'role' in f},native_format='p["inputs"][role]',instruction='Repair code and use run_python again')); continue
+                facts.append(dict(error=type(exc).__name__,script_error=diagnostic,valid_columns={f['role']:f['columns'] for f in facts if 'role' in f},native_format='p["inputs"][role]',instruction='Repair code and use run_python again')); failed_check(); continue
             cols=next(csv.reader(io.StringIO(raw.decode()),delimiter='\t')); temp['output']['columns']=cols
             # Ordered item IDs are public request metadata, not scientific answers.
             contract=re.search(r'items\s+([A-Za-z]+)(\d+)\s+through\s+\1(\d+)\s+in order',request['question'])
@@ -1157,12 +1186,12 @@ def local_question(request,policy,agents,rd):
                     incomplete+=1
                     if incomplete>=policy['max_attempts']: escalated=True
                     facts.append(dict(error='requested-items-incomplete',required_items=required,instruction='Compute all ordered requested items before choosing answer. Reuse named input readers and write the complete table.'))
-                    continue
+                    failed_check(); continue
             wanted=requested_header(request['question'])
             if wanted and cols!=wanted:
                 incomplete+=1
                 if incomplete>=policy['max_attempts']: escalated=True
-                facts.append(dict(error='requested-header-mismatch',required_header=wanted,returned_header=cols,instruction='Write exactly the requested column names, in that order, as the header row.')); continue
+                facts.append(dict(error='requested-header-mismatch',required_header=wanted,returned_header=cols,instruction='Write exactly the requested column names, in that order, as the header row.')); failed_check(); continue
             label_contract=re.search(r'(?:metrics|categories)\s+([A-Za-z0-9_, ]+?)\s+in (?:that )?order',request['question'])
             explicit_order=re.search(r'in this order:\s*([A-Za-z0-9_,; ]+)',request['question'])
             numbered_metrics=re.findall(r'\(\d+\)\s+([A-Za-z][A-Za-z0-9_]*)\s*:',request['question'])
@@ -1173,7 +1202,7 @@ def local_question(request,policy,agents,rd):
                     incomplete+=1
                     if incomplete>=policy['max_attempts']: escalated=True
                     facts.append(dict(error='requested-labels-incomplete',required_labels=labels,instruction='Compute every requested metric/category in exact order with its exact label.'))
-                    continue
+                    failed_check(); continue
             # Final broker run executes the retained snippet through its same native path.
             unresolved=0;last=temp; facts.append(dict(table=raw.decode()[:4096]+('\n[PREVIEW TRUNCATED: complete table retained privately; '+str(len(raw))+' bytes, '+str(len(list(csv.reader(io.StringIO(raw.decode()),delimiter=chr(9))))-1)+' data rows]' if len(raw.decode())>4096 else '')))
     raise Rejected('agent-turn-limit')

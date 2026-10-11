@@ -20,5 +20,10 @@
     ]
   },
   "threshold_cap": 3,
-  "review_model": "laguna-s-2.1:q8_0-256k-t2"
+  "review_model": "laguna-s-2.1:q8_0-256k-t2",
+  "pushback": {
+    "words": 180,
+    "marks": 40,
+    "attempts": 2
+  }
 }
