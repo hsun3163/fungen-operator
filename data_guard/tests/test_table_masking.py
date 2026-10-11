@@ -246,7 +246,7 @@ def test_direct_call_has_no_tools_or_reload_options(tmp_path,monkeypatch):
     reply=agents.call('librarian','Synthetic code integrity',tmp_path/'call',4,schema)
     assert reply['code']=="d={'quoted':\"text\"}" and 'tools' not in seen[0]
     # Only word-choice options are sent; nothing that would make the server reload the model.
-    assert seen[0]['options']==dict(temperature=0.2,seed=11,num_predict=6000)
+    assert seen[0]['options']==dict(temperature=0.2,seed=11,num_predict=3000) and 'think' not in seen[0]
     assert agents.metrics[0]['model_seconds']==1
 
 
@@ -683,15 +683,17 @@ def test_cut_off_or_empty_reply_is_asked_again_with_the_next_seed(tmp_path,monke
     import urllib.request, io
     seen=[]
     monkeypatch.setattr(b.subprocess,'run',lambda *a,**k:SimpleNamespace(returncode=0,stdout=json.dumps(dict(id=4,model='synthetic-model',host='http://127.0.0.1:11444')).encode()))
+    thinks=[]
     replies=iter([dict(message=dict(content=''),done_reason='length'),dict(message=dict(content='not json'),done_reason='stop'),
                   dict(message=dict(content=json.dumps(dict(status='ok'))),done_reason='stop',total_duration=1000000000)])
     class Opener:
         def open(self,request,timeout):
-            seen.append(json.loads(request.data)['options']['seed']);return io.BytesIO(json.dumps(next(replies)).encode())
+            body=json.loads(request.data);seen.append(body['options']['seed']);thinks.append(body.get('think'));return io.BytesIO(json.dumps(next(replies)).encode())
     monkeypatch.setattr(urllib.request,'build_opener',lambda *a:Opener())
     agents=b.DirectAgents(dict(lock_root=str(tmp_path/'locks'),agent_timeout_seconds=10))
     reply=agents.call('librarian','Synthetic',tmp_path/'call',4,b.object_schema(dict(status=dict(type='string',enum=['ok','unresolved']))))
     assert reply=={'status':'ok'} and seen==[11,12,14] and len(agents.metrics[0]['repeats'])==2
+    assert thinks==[None,False,False]
 
 
 def test_row_order_is_part_of_the_answer_when_two_tries_are_compared():
@@ -763,3 +765,28 @@ def test_restated_prelude_is_set_aside_before_the_shape_check():
     body=b.chain_body(code)
     assert 'import' not in body and b.chain_problems(body,{'table'},4)==[]
     assert b.chain_body('def f(:')=='def f(:'
+
+
+def test_chain_try_returns_its_table_without_asking_the_model_to_confirm(case,tmp_path,monkeypatch):
+    _,_,_,policy=case;policy=dict(policy,local_mode='chain',review_backend=9,pushback=dict(tries=1));calls=[]
+    class Agent:
+        metrics=[]
+        def call(self,role,prompt,rd,backend,schema):
+            calls.append((role,backend))
+            return b.validate_constrained(dict(action='run_python',input_id='toy',column='',n=1,code=GOOD_CHAIN),schema)
+    monkeypatch.setattr(b,'execute',lambda *a,**k:(b'group\tgenes\nA\t2\n',[]))
+    rd=tmp_path/'agent';rd.mkdir()
+    b.local_question(dict(action='question',question='Count genes in group A.',inputs={'table':'toy'}),policy,Agent(),rd)
+    assert calls==[('local-agent',4)]
+
+
+def test_chain_agent_that_gives_up_after_feedback_hands_the_request_back(case,tmp_path):
+    _,_,_,policy=case;policy=dict(policy,local_mode='chain',review_backend=9,pushback=dict(tries=1,attempts=3));replies=iter(['run_python','unresolved']);backends=[]
+    class Agent:
+        metrics=[]
+        def call(self,role,prompt,rd,backend,schema):
+            backends.append(backend);action=next(replies)
+            return b.validate_constrained(dict(action=action,input_id='toy',column='',n=1,code='for r in range(3):\n    pass' if action=='run_python' else ''),schema)
+    rd=tmp_path/'agent';rd.mkdir()
+    with pytest.raises(b.Pushback) as info:b.local_question(dict(action='question',question='Do it.',inputs={'table':'toy'}),policy,Agent(),rd)
+    assert 'short chain' in str(info.value) and backends==[4,4]

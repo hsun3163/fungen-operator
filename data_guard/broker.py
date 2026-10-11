@@ -707,6 +707,8 @@ class DirectAgents:
             repeats = []
             for send in range(3):
                 payload['options'] = dict(payload['options'], seed=payload['options']['seed'] + send)
+                # Runaway replies were hidden reasoning that never reached an answer; a resend asks for the answer directly.
+                if send: payload['think'] = False
                 req = Request(endpoint['host'] + '/api/chat', data=json.dumps(payload).encode(), headers={'Content-Type':'application/json'})
                 with build_opener(ProxyHandler({})).open(req, timeout=self.policy['agent_timeout_seconds']) as response:
                     result = json.load(response)
@@ -1230,7 +1232,8 @@ def local_try(request,policy,agents,rd,seed):
         facts.append(dict(input_id=ident,role=role,columns=header,row_count=len(rows)-1,types=types,category_values=values))
     chain=policy.get('local_mode',LOCAL_MODE)=='chain'; chain_limit=dict(CHAIN,**policy.get('chain',{}))['statements']
     for turn in range(8):
-        if turn>=6: escalated=True
+        if turn>=6 and not chain: escalated=True
+        if chain: escalated=False  # the chain agent hands a request back; it never passes it to the main librarian
         if chain: schema['properties']['code']['maxLength']=2000
         active_schema=schema if last is None else object_schema(dict(action=dict(type='string',enum=['answer','unresolved']),input_id=dict(type='string',enum=list(request['inputs'].values())),column=dict(type='string',const=''),n=dict(type='integer',const=1),code=dict(type='string',const='')))
         state_instruction='Compute a table using run_python.' if last is None else 'The table was computed successfully. Choose answer to return it, or unresolved if it does not answer the question.'
@@ -1275,7 +1278,8 @@ def local_try(request,policy,agents,rd,seed):
             facts.append(dict(error=str(exc),instruction='Return every required schema field with its exact JSON type. n is an integer from 1 to 10, not a decimal or string. Use only the listed input IDs and actions.'))
             continue
         if value['action']=='unresolved':
-            if chain and last is None and not any('error' in f for f in facts):
+            if chain:
+                # The agent says it cannot answer in the chain shape: by Hao's rule the request is too complicated for it.
                 raise Pushback('This request needs more than a short chain of table operations.'+advice)
             unresolved+=1
             if unresolved>=policy['max_attempts']: escalated=True
@@ -1354,7 +1358,11 @@ def local_try(request,policy,agents,rd,seed):
                     facts.append(dict(error='requested-labels-incomplete',required_labels=labels,instruction='Compute every requested metric/category in exact order with its exact label.'))
                     failed_check(); continue
             # Final broker run executes the retained snippet through its same native path.
+            # In chain mode a snippet that passed the shape and result checks is the try's answer; the second try
+            # is its verification, so the model is not asked to second-guess its own table.
+            if chain: return temp,raw
             unresolved=0;last=temp;last_raw=raw; facts.append(dict(table=raw.decode()[:4096]+('\n[PREVIEW TRUNCATED: complete table retained privately; '+str(len(raw))+' bytes, '+str(len(list(csv.reader(io.StringIO(raw.decode()),delimiter=chr(9))))-1)+' data rows]' if len(raw.decode())>4096 else '')))
+    if chain: raise Pushback(str(turn+1)+' turns at this request ended without a table.'+advice)
     raise Rejected('agent-turn-limit')
 
 

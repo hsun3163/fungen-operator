@@ -33,7 +33,7 @@
       11,
       23
     ],
-    "max_tokens": 6000
+    "max_tokens": 3000
   },
   "local_mode": "chain",
   "chain": {
