@@ -330,7 +330,7 @@ def test_noninteger_numeric_text_cannot_be_relabelled_category(value):
 def test_native_local_agent_unresolved_retries_then_escalates(case,tmp_path):
     import os
     if os.environ.get('BROKER_TEST_SANDBOX')!='1':pytest.skip('native sandbox required')
-    _,_,_,policy=case;policy=dict(policy,max_attempts=2,review_backend=9)
+    _,_,_,policy=case;policy=dict(policy,max_attempts=2,review_backend=9,pushback=dict(attempts=99,tries=1))
     code="import csv,json,sys\np=json.load(open(sys.argv[1]))\nrows=list(csv.DictReader(open(p['inputs']['table']),delimiter=chr(9)))\nw=csv.writer(open(sys.argv[2],'w'),delimiter=chr(9),lineterminator=chr(10))\nw.writerow(['count'])\nw.writerow([len(rows)])\n"
     calls=[]
     class Staff:

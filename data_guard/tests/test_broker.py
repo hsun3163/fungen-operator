@@ -253,7 +253,7 @@ def test_native_agent_adapter_pins_local_endpoints_and_serializes_main(case, mon
     folder = case[0].parent
     home = folder / 'native-home'; home.mkdir()
     helpers = folder / 'native'; helpers.mkdir()
-    for filename in ('librarian', 'scribe_support.py'):
+    for filename in ('librarian', 'scribe_support.py', 'live_inventory.py'):
         shutil.copy2(ROOT / filename, helpers / filename)
     endpoints = helpers / 'scribes'
     endpoints.write_text('''#!/bin/sh
@@ -362,7 +362,7 @@ def test_entire_cli_preserves_existing_return_logic(case, mode, format):
     case[1].write_text(json.dumps(case[3]))
     folder = case[0].parent
     helpers = folder / 'native-cli'; helpers.mkdir()
-    for filename in ('librarian', 'broker.py', 'standins.py', 'standin_policy.json', 'scribe_support.py'):
+    for filename in ('librarian', 'broker.py', 'standins.py', 'standin_policy.json', 'scribe_support.py', 'live_inventory.py'):
         shutil.copy2(ROOT / filename, helpers / filename)
     endpoints = helpers / 'scribes'
     endpoints.write_text('''#!/usr/bin/env python3
