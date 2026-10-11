@@ -1030,6 +1030,30 @@ def unmask_request(request,policy,agents,rd,audience):
         return receipt
 
 
+def unknown_columns(code, columns):
+    """Column names a snippet reads with .get() that no named input has and the snippet never creates.
+    A defensive .get() on a misspelt column returns None silently; the agent is told instead."""
+    import ast
+    try: tree = ast.parse(code)
+    except SyntaxError: return []
+    made = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Subscript) and isinstance(node.ctx, ast.Store) and isinstance(node.slice, ast.Constant): made.add(node.slice.value)
+        if isinstance(node, ast.Dict): made.update(k.value for k in node.keys if isinstance(k, ast.Constant))
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == 'dict': made.update(k.arg for k in node.keywords if k.arg)
+    read = [node.args[0].value for node in ast.walk(tree)
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == 'get'
+            and node.args and isinstance(node.args[0], ast.Constant) and isinstance(node.args[0].value, str)]
+    return sorted({name for name in read if name not in columns and name not in made and name not in ('inputs', 'parameters')})
+
+
+def requested_header(question):
+    """Output column names the question states outright, e.g. 'columns a,b' or 'Return a,b,c using'."""
+    found = re.search(r'\bcolumns?:?\s+((?:[A-Za-z_]\w*\s*,\s*)+[A-Za-z_]\w*)', question) or \
+            re.search(r'\bReturn\s+((?:[A-Za-z_]\w*,)+[A-Za-z_]\w*)\b', question)
+    return [x.strip() for x in found[1].split(',')] if found else None
+
+
 def local_question(request,policy,agents,rd):
     """Broker-owned bounded agent loop; transcript private, snippets sandboxed."""
     exact(request,('action','question','inputs'),'question-request')
@@ -1066,7 +1090,9 @@ def local_question(request,policy,agents,rd):
                 '\nsys.argv[1] is the parameter JSON, never the input table. Use readers[role] for every named input required by the question; reader is only a convenience alias for the first. '
                 'The supplied types describe scalar TSV cells: an integer count is copied or converted with int, never counted as comma-separated names. Read and combine all required tables. '
                 'Write TSV to sys.argv[2] using csv.writer(open(sys.argv[2],"w"),delimiter=chr(9),lineterminator=chr(10)); '
-                'Use exact requested metric labels and order; copy scalar count columns using int, never list-length or row count. For numerical mean use statistics.mean of finite float values; median uses statistics.median. writerow(header), then writerows(data). Choose run_python with the entire code string. Only after its result choose answer.')
+                'Use exact requested metric labels and order; copy scalar count columns using int, never list-length or row count. For numerical mean use statistics.mean of finite float values; median uses statistics.median; type-7 or linear quartiles use statistics.quantiles(values,n=4,method="inclusive"). '
+                'Use the exact output column names the question states; never rename one. When an output cell names an input, write its role name (the key in Inputs), never a file path. Read a column as row["name"] with a name from Evidence; never use row.get(). '
+                'writerow(header), then writerows(data). Choose run_python with the entire code string. Only after its result choose answer.')
         if last is not None:
             prompt=('Librarian agent final reply. The native run has produced this table. Choose answer to deliver it when it answers the question; choose unresolved only for a concrete mismatch. '
                     'Confirm every part of the question checklist is computed; a truncated preview does not mean the table is truncated. The fixed n=1 is a reply field, not a limit on count values.\nQuestion: '+request['question']+'\nParts checklist: '+json.dumps(checklist)+'\nComputed table:\n'+facts[-1].get('table',next((f['table'] for f in reversed(facts) if 'table' in f),'')))
@@ -1101,6 +1127,12 @@ def local_question(request,policy,agents,rd):
         elif act=='first_rows': facts.append(dict(rows=rows[:value['n']],preview_truncated=len(rows)>value['n'],total_rows=len(rows),shown_rows=min(value['n'],len(rows))))
         elif act=='run_python':
             require(len(value['code'])<=32768,'agent-code-limit')
+            known={c for f in facts if 'role' in f for c in f['columns']}|set(request['inputs'])
+            missing=unknown_columns(value['code'],known)
+            if missing:
+                unresolved+=1
+                if unresolved>=policy['max_attempts']: escalated=True
+                facts.append(dict(error='unknown-input-columns',names=missing,valid_columns={f['role']:f['columns'] for f in facts if 'role' in f},instruction='These names are not columns of any named input. Use exact column names from valid_columns and run_python again.')); continue
             path=rd/f'agent-script-{turn}.py'; save(path,value['code'].encode())
             snapshot=directory(rd/f'agent-snapshot-{turn}'); directory(snapshot/'inputs'); save(snapshot/'analysis',value['code'].encode())
             for ident in request['inputs'].values(): save(snapshot/'inputs'/ident,table_content(policy['inputs'][ident],policy['max_input_bytes']))
@@ -1111,7 +1143,8 @@ def local_question(request,policy,agents,rd):
             except Exception as exc:
                 unresolved+=1
                 if unresolved>=policy['max_attempts']: escalated=True
-                facts.append(dict(error=type(exc).__name__,native_format='p["inputs"]["table"]',instruction='Repair code and use run_python again')); continue
+                diagnostic=read_json(rd/f'agent-execution-{turn}'/'execution_error.json') if (rd/f'agent-execution-{turn}'/'execution_error.json').exists() else {}
+                facts.append(dict(error=type(exc).__name__,script_error=diagnostic,valid_columns={f['role']:f['columns'] for f in facts if 'role' in f},native_format='p["inputs"][role]',instruction='Repair code and use run_python again')); continue
             cols=next(csv.reader(io.StringIO(raw.decode()),delimiter='\t')); temp['output']['columns']=cols
             # Ordered item IDs are public request metadata, not scientific answers.
             contract=re.search(r'items\s+([A-Za-z]+)(\d+)\s+through\s+\1(\d+)\s+in order',request['question'])
@@ -1125,6 +1158,11 @@ def local_question(request,policy,agents,rd):
                     if incomplete>=policy['max_attempts']: escalated=True
                     facts.append(dict(error='requested-items-incomplete',required_items=required,instruction='Compute all ordered requested items before choosing answer. Reuse named input readers and write the complete table.'))
                     continue
+            wanted=requested_header(request['question'])
+            if wanted and cols!=wanted:
+                incomplete+=1
+                if incomplete>=policy['max_attempts']: escalated=True
+                facts.append(dict(error='requested-header-mismatch',required_header=wanted,returned_header=cols,instruction='Write exactly the requested column names, in that order, as the header row.')); continue
             label_contract=re.search(r'(?:metrics|categories)\s+([A-Za-z0-9_, ]+?)\s+in (?:that )?order',request['question'])
             explicit_order=re.search(r'in this order:\s*([A-Za-z0-9_,; ]+)',request['question'])
             numbered_metrics=re.findall(r'\(\d+\)\s+([A-Za-z][A-Za-z0-9_]*)\s*:',request['question'])

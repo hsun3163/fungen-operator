@@ -589,3 +589,26 @@ def test_whitelisted_headings_show_while_gene_values_stay_masked(case,monkeypatc
     assert (header[0]==heading)==shown
     assert header[1]=='gene_symbol'
     assert 'GENE_A' not in out and out.splitlines()[1].split('\t')[-1]=='1'
+
+
+def test_local_agent_helpers_catch_misnamed_columns_and_headers():
+    assert b.unknown_columns("x=[r for r in reader if r.get('scheme_label')=='a']\nd={'k':1}\nd.get('k');p.get('inputs');r.get('gene_id')",{'gene_id'})==['scheme_label']
+    assert b.unknown_columns("def broken(:",{'gene_id'})==[]
+    assert b.requested_header('Report counts: columns panel_key,count (count copies genes).')==['panel_key','count']
+    assert b.requested_header('Return input,header_present,rectangular,data_present using yes/no.')==['input','header_present','rectangular','data_present']
+    assert b.requested_header('Use gene_id, source_eqtl and source_gwas as identity columns.') is None
+
+
+def test_local_agent_retries_on_renamed_header_and_unknown_column(case,tmp_path,monkeypatch):
+    _,_,_,policy=case;policy=dict(policy,max_attempts=3,review_backend=9)
+    codes=iter(["r.get('not_a_column')","pass","pass"]);tables=iter([b'gene\tn\nA\t3\n',b'gene\tcount\nA\t3\n']);prompts=[]
+    class Agent:
+        metrics=[]
+        def call(self,role,prompt,rd,backend,schema):
+            prompts.append(prompt)
+            action='answer' if 'enum' in schema['properties']['action'] and schema['properties']['action']['enum']==['answer','unresolved'] else 'run_python'
+            return b.validate_constrained(dict(action=action,input_id='toy',column='',n=1,code=next(codes) if action=='run_python' else ''),schema)
+    monkeypatch.setattr(b,'execute',lambda *a,**k:(next(tables),[]))
+    rd=tmp_path/'agent';rd.mkdir()
+    b.local_question(dict(action='question',question='Count rows per gene. Return columns gene,count.',inputs={'table':'toy'}),policy,Agent(),rd)
+    assert 'unknown-input-columns' in prompts[1] and 'requested-header-mismatch' in prompts[2]
