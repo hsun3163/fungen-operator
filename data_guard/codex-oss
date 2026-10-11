@@ -5,7 +5,7 @@
 # CODEX_REAL_BIN selects the Codex binary (the librarian pins its own copy this way).
 set -euo pipefail
 
-real_codex="${CODEX_REAL_BIN:-$HOME/.npm-global/bin/codex}"
+real_codex="${CODEX_REAL_BIN:-$HOME/.codex/packages/standalone/current/bin/codex}"
 common_sh="$HOME/local/scripts/minerva_ollama_common.sh"
 use_oss=1
 saw_oss=0
