@@ -50,9 +50,17 @@ Use `librarian --broker rephrase.json`. Available operations include counts,
 rank, group, same-gene match, decimal comparison, direction, percentile,
 absolute_percentile and bin. Keep supplemental replies beside the original table.
 
-For a simple lookup, use `{"action":"question","question":"Count all rows; return columns row_count.","inputs":{"table":"LIVE_INPUT_ID"}}`.
-Larger or unsuccessful questions return a sentence ending **“Send it as a script,
-or ask one part at a time.”** Follow that instruction with the named inputs.
+For a simple lookup on one table, send a question with no script:
+`{"action":"question","question":"Count all rows; return columns row_count.","inputs":{"table":"LIVE_INPUT_ID"}}`.
+A local model answers it with a short pandas chain (filter, group, count, sort,
+top rows), computed twice; the answer returns when both runs give identical
+output. Keep such a question to one table, one result table and under about
+100 words, and state the output column names you want.
+Every other request returns a sentence ending **“Send it as a script, or ask
+one part at a time.”** That covers a request naming two or more tables, a long
+or multi-part request, one needing loops, branches or several differently built
+sections, and one whose two runs differ. Follow the sentence: write the script
+yourself with the named inputs, or ask a single part.
 
 `librarian --me "<Hao's exact open scientific question>"` keeps its existing
 full-answer path and user delivery. Use the existing wrapper and shared locks;

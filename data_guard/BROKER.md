@@ -17,13 +17,22 @@ selected source column. Linked rephrase requests keep the original table and aud
 The main librarian is the review backend under its existing shared lock and resident
 model check. Routine staff use backend 4; transports close after each request.
 
-Simple no-script questions use the local agent. Requests exceeding 180 words or
-40 clause marks are handed back before inference; two failed computed attempts
-also trigger “Send it as a script, or ask one part at a time.” Two independent tries
-must agree on the table (row order normalized, duplicate rows retained); differing
-tries get the same advice. **Being measured:** two-tries agreement and temperature
-0.2 with fixed seeds 11 and 23, in `runs/temp-bench-*`. Those settings are current
-code decisions under measurement, rather than established reliability claims.
+Simple no-script questions (`action: question`) use the local agent, a Laguna XS scribe. Rules, all enforced by
+code and set in `standin_policy.json`:
+- one table: a request naming two or more tables is handed back before any model call;
+- size: at most 115 words and 24 clause marks (commas, semicolons, colons, opening parentheses, sentence ends);
+- shape: after a fixed prelude that supplies `load()`, the agent writes a pandas chain of at most four statements
+  (load and filter, one chained operation, export, one spare); loops, branches, comprehensions, imports and
+  definitions are outside the shape; `load()` keeps each cell as the text in the file and makes a column numeric
+  only when all its values are numbers;
+- two attempts: a snippet outside the shape, a filter on a value the column never takes, a crashed run or a wrong
+  header is explained to the agent once; after the second failure, or when the agent says it cannot answer in the
+  shape, the request is handed back;
+- two tries with different seeds must produce byte-identical output;
+- temperature 0.2, fixed seeds, a 3000-token reply cap, and a resend with reasoning off when a reply is cut off.
+A hand-back is a completed reply whose text is a generated sentence ending “Send it as a script, or ask one part at
+a time.” The chain agent never passes a request to the main librarian. `local_mode: script` in the policy restores
+the earlier free-form script agent.
 
 The archive qualification report separates completion, correctness and usefulness;
 `real-final-002` recorded zero disclosures and did not pass all targets. Live table

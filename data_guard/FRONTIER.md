@@ -14,7 +14,7 @@ attached facts or submit `action: rephrase` with the original run ID, your quest
 using placeholders and the requested count, rank, group, match, compare, direction,
 percentile, absolute_percentile or bin operation.
 
-A short `action: question` request supports simple lookups on named policy inputs.
+A short `action: question` request supports simple lookups on one named policy input: one table, under about 100 words, answerable by a short pandas chain. Requests naming several tables, or needing loops, branches or several sections, are handed back.
 The push-back sentence ends “Send it as a script, or ask one part at a time.” Follow
 it by supplying a script or a smaller question. Hao's own open questions continue
 through `librarian --me "<question>"` with full user delivery. Protected source values,
