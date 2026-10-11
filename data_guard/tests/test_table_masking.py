@@ -666,7 +666,7 @@ def test_two_local_tries_must_agree_or_the_request_goes_back(case,tmp_path,monke
             action='answer' if schema['properties']['action']['enum']==['answer','unresolved'] else 'run_python'
             return b.validate_constrained(dict(action=action,input_id='toy',column='',n=1,code='pass' if action=='run_python' else ''),schema)
     question=dict(action='question',question='Count rows per gene. Return columns gene,count.',inputs={'table':'toy'})
-    tables=iter([b'gene\tcount\nA\t3\nB\t1\n',b'gene\tcount\nB\t1\nA\t3\n'])
+    tables=iter([b'gene\tcount\nA\t3\nB\t1\n',b'gene\tcount\nA\t3\nB\t1\n'])
     monkeypatch.setattr(b,'execute',lambda *a,**k:(next(tables),[]))
     rd=tmp_path/'same';rd.mkdir()
     b.local_question(question,policy,Agent(),rd)
@@ -694,20 +694,25 @@ def test_cut_off_or_empty_reply_is_asked_again_with_the_next_seed(tmp_path,monke
     assert reply=={'status':'ok'} and seen==[11,12,14] and len(agents.metrics[0]['repeats'])==2
 
 
-GOOD_CHAIN='d = pd.read_csv(inputs["table"], sep="\\t").query("group == \'A\'")\nout = d.groupby("group")["gene"].nunique().reset_index(name="genes")\nout.to_csv(output, sep="\\t", index=False)'
+def test_row_order_is_part_of_the_answer_when_two_tries_are_compared():
+    assert b.table_key(b'g\tn\nA\t1\nB\t2\n')!=b.table_key(b'g\tn\nB\t2\nA\t1\n')
+
+
+GOOD_CHAIN='d = load("table").query("group == \'A\'")\nout = d.groupby("group")["gene"].nunique().reset_index(name="genes")\nout.to_csv(output, sep="\\t", index=False)'
 
 
 @pytest.mark.parametrize('code,fits',[
     (GOOD_CHAIN,True),
-    ('pd.read_csv(inputs["table"], sep="\\t").head(3).to_csv(output, sep="\\t", index=False)',True),
+    ('load("table").head(3).to_csv(output, sep="\\t", index=False)',True),
+    ('pd.read_csv(inputs["table"], sep="\\t").head(3).to_csv(output, sep="\\t", index=False)',False),
     (GOOD_CHAIN+'\nx = 1\ny = 2',False),
     ('for r in range(3):\n    pass',False),
     ('import os\n'+GOOD_CHAIN,False),
-    (GOOD_CHAIN.replace('inputs["table"]','"/etc/passwd"'),False),
+    (GOOD_CHAIN.replace('load("table")','load("/etc/passwd")'),False),
     (GOOD_CHAIN.replace('to_csv(output','to_csv("/tmp/x"'),False),
-    ('d = pd.read_csv(inputs["table"], sep="\\t")\nd = [r for r in d]\nd.to_csv(output)',False),
-    ('d = pd.read_csv(inputs["table"], sep="\\t")\nopen("x","w")\nd.to_csv(output)',False),
-    ('d = pd.read_csv(inputs["table"], sep="\\t")\nd.to_csv(output)\nd.head()',False),
+    ('d = load("table")\nd = [r for r in d]\nd.to_csv(output)',False),
+    ('d = load("table")\nopen("x","w")\nd.to_csv(output)',False),
+    ('d = load("table")\nd.to_csv(output)\nd.head()',False),
     ('def f(:',False)])
 def test_chain_shape_accepts_short_chains_and_names_what_falls_outside(code,fits):
     problems=b.chain_problems(code,{'table'},4)
@@ -717,7 +722,7 @@ def test_chain_shape_accepts_short_chains_and_names_what_falls_outside(code,fits
 
 def test_unlisted_filter_value_is_named_before_running():
     facts=[dict(role='table',columns=['gene','group'],category_values=dict(group=['A','B']))]
-    assert b.unlisted_values('d = pd.read_csv(inputs["table"], sep="\\t").query("group == \'primary\'")',facts)==[dict(column='group',value='primary',values_present=['A','B'])]
+    assert b.unlisted_values('d = load("table").query("group == \'primary\'")',facts)==[dict(column='group',value='primary',values_present=['A','B'])]
     assert b.unlisted_values('d = d[d["group"] == "A"]',facts)==[]
 
 

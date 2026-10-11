@@ -718,7 +718,8 @@ class DirectAgents:
                     break
                 except Exception as exc:
                     repeats.append(str(exc) if isinstance(exc, Rejected) else type(exc).__name__)
-                    if send == 2: raise
+                    # After three sends the reply is still unreadable: a recoverable failed attempt, not a crash.
+                    if send == 2: raise Rejected('reply-unreadable')
             metric = dict(service='librarian', role=role, backend=scribe_id, seconds=time.monotonic()-started,
                           queue_seconds=started-queued, model_seconds=result.get('total_duration',0)/1E9, turns=1, repeats=repeats)
             with self.lock: self.metrics.append(metric)
@@ -1069,15 +1070,23 @@ def ask(agents, seed, *args):
 
 
 def table_key(raw):
-    """A table as header plus sorted rows, so two tries are compared on content, whatever the row order."""
+    """A table as header plus rows in order: row order is part of an answer (ranks, source order)."""
     rows = list(csv.reader(io.StringIO(raw.decode()), delimiter='\t'))
-    return (tuple(rows[0]) if rows else (), sorted(tuple(r) for r in rows[1:]))
+    return (tuple(rows[0]) if rows else (), [tuple(r) for r in rows[1:]])
 
 
 CHAIN = read_json(Path(__file__).with_name('standin_policy.json')).get('chain', dict(statements=4, python='/usr/bin/python3', read_only_roots=['/usr', '/lib', '/lib64', '/bin']))
 LOCAL_MODE = read_json(Path(__file__).with_name('standin_policy.json')).get('local_mode', 'script')
+# load() keeps every cell as the text in the file (TRUE stays "TRUE") and makes a column numeric only when
+# all of its non-missing cells are numbers, so what the agent filters on is what Evidence lists.
 CHAIN_PRELUDE = ('import sys, json\nimport pandas as pd\n'
-                 'p = json.load(open(sys.argv[1])); inputs = p["inputs"]; output = sys.argv[2]\n')
+                 'p = json.load(open(sys.argv[1])); inputs = p["inputs"]; output = sys.argv[2]\n'
+                 'def load(role):\n'
+                 '    d = pd.read_csv(inputs[role], sep="\\t", dtype=str, keep_default_na=False)\n'
+                 '    for c in d.columns:\n'
+                 '        v = d[c]; present = ~v.isin(["", "NA", "NaN", "nan"]); n = pd.to_numeric(v.where(present), errors="coerce")\n'
+                 '        if present.any() and n[present].notna().all(): d[c] = n\n'
+                 '    return d\n')
 
 
 def chain_body(code):
@@ -1111,16 +1120,15 @@ def chain_problems(code, roles, limit):
     if any(isinstance(node, banned) for node in ast.walk(tree)): problems.append('use chained table operations only: loops, branches, comprehensions, imports and definitions belong in a script')
     names = {node.id for node in ast.walk(tree) if isinstance(node, ast.Name)}
     if names & {'open', 'exec', 'eval', 'compile', '__import__', 'getattr', 'setattr', 'globals', 'locals', 'os', 'sys', 'subprocess', 'p'}:
-        problems.append('use only pd, inputs, output and names you assign')
+        problems.append('use only pd, load, output and names you assign')
     attrs = [node.attr for node in ast.walk(tree) if isinstance(node, ast.Attribute)]
     if any(a.startswith('_') or a in ('to_pickle', 'read_pickle', 'to_sql', 'read_sql', 'to_json', 'to_excel', 'to_parquet', 'read_json', 'read_excel', 'read_parquet', 'read_table', 'system') for a in attrs):
         problems.append('read with pd.read_csv and export with to_csv only')
-    reads = [node for node in ast.walk(tree) if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == 'read_csv']
+    reads = [node for node in ast.walk(tree) if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == 'load']
     def named_input(call):
-        a = call.args[0] if call.args else None
-        return (isinstance(a, ast.Subscript) and isinstance(a.value, ast.Name) and a.value.id == 'inputs'
-                and isinstance(a.slice, ast.Constant) and a.slice.value in roles)
-    if not reads or not all(named_input(c) for c in reads): problems.append('load each table as pd.read_csv(inputs["<role>"], sep="\\t") with a role from Inputs: '+', '.join(sorted(roles)))
+        return len(call.args) == 1 and isinstance(call.args[0], ast.Constant) and call.args[0].value in roles
+    if not reads or not all(named_input(c) for c in reads) or 'read_csv' in attrs or 'inputs' in names:
+        problems.append('load each table as load("<role>") with a role from Inputs: '+', '.join(sorted(roles)))
     exports = [node for node in ast.walk(tree) if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == 'to_csv']
     if len(exports) != 1 or not (exports[0].args and isinstance(exports[0].args[0], ast.Name) and exports[0].args[0].id == 'output') or not any(isinstance(n, ast.Call) and n is exports[0] for n in ast.walk(tree.body[-1])):
         problems.append('end with one export: <table>.to_csv(output, sep="\\t", index=False)')
@@ -1223,6 +1231,7 @@ def local_try(request,policy,agents,rd,seed):
     chain=policy.get('local_mode',LOCAL_MODE)=='chain'; chain_limit=dict(CHAIN,**policy.get('chain',{}))['statements']
     for turn in range(8):
         if turn>=6: escalated=True
+        if chain: schema['properties']['code']['maxLength']=2000
         active_schema=schema if last is None else object_schema(dict(action=dict(type='string',enum=['answer','unresolved']),input_id=dict(type='string',enum=list(request['inputs'].values())),column=dict(type='string',const=''),n=dict(type='integer',const=1),code=dict(type='string',const='')))
         state_instruction='Compute a table using run_python.' if last is None else 'The table was computed successfully. Choose answer to return it, or unresolved if it does not answer the question.'
         role=next(iter(request['inputs']))
@@ -1243,11 +1252,11 @@ def local_try(request,policy,agents,rd,seed):
             prompt=('Librarian agent. Answer the question with a short pandas script in chained style, using action run_python. '
                     'These lines are already present above your code:\n'+CHAIN_PRELUDE+
                     'Write at most '+str(chain_limit)+' statements after them, each one chain: '
-                    '(1) load a named input and do basic filtering, e.g. d = pd.read_csv(inputs["'+role+'"], sep="\\t").query(...); '
+                    '(1) load a named input with load() and do basic filtering, e.g. d = load("'+role+'").query(...); '
                     '(2) one chained operation that computes the answer; '
                     '(3) export it with .to_csv(output, sep="\\t", index=False); one more statement is spare, for a second table for example. '
                     'Do not repeat the lines above. A small table of named results is built in one statement, e.g. pd.DataFrame({"metric": ["rows", "genes"], "count": [len(d), d["gene"].nunique()]}). '
-                    'TRUE/FALSE columns load as booleans: filter with query("flag") or query("flag == True"). '
+                    'load() keeps cells as the text in the file, so TRUE/FALSE columns are text: filter with query("flag == \'TRUE\'"). Rows keep the file order unless you sort; groupby sorts its keys unless you pass sort=False. '
                     'Use chained table operations only (query, loc, groupby, agg, size, nunique, value_counts, sort_values, head, merge, drop_duplicates, rename, assign, pivot_table, reset_index, describe, quantile). '
                     'Use exact column names from Evidence; category_values lists every value a category column takes, filter only on those. '
                     'Use the exact output column names and row labels the question states. When an output cell names an input, write its role name. '
@@ -1262,6 +1271,7 @@ def local_try(request,policy,agents,rd,seed):
         except Rejected as exc:
             unresolved+=1
             if unresolved>=policy['max_attempts']: escalated=True
+            if chain: failed_check()
             facts.append(dict(error=str(exc),instruction='Return every required schema field with its exact JSON type. n is an integer from 1 to 10, not a decimal or string. Use only the listed input IDs and actions.'))
             continue
         if value['action']=='unresolved':
