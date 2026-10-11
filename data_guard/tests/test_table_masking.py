@@ -244,7 +244,9 @@ def test_direct_call_has_no_tools_or_reload_options(tmp_path,monkeypatch):
     agents=b.DirectAgents(policy)
     schema=b.object_schema(dict(code=dict(type='string'),status=dict(type='string',enum=['ok','unresolved'])))
     reply=agents.call('librarian','Synthetic code integrity',tmp_path/'call',4,schema)
-    assert reply['code']=="d={'quoted':\"text\"}" and 'tools' not in seen[0] and 'options' not in seen[0]
+    assert reply['code']=="d={'quoted':\"text\"}" and 'tools' not in seen[0]
+    # Only word-choice options are sent; nothing that would make the server reload the model.
+    assert seen[0]['options']==dict(temperature=0.2,seed=11,num_predict=6000)
     assert agents.metrics[0]['model_seconds']==1
 
 
@@ -345,7 +347,7 @@ def test_native_local_agent_unresolved_retries_then_escalates(case,tmp_path):
 
 
 def test_local_agent_incomplete_contract_escalates_without_private_retry(case,tmp_path,monkeypatch):
-    _,_,_,policy=case;policy=dict(policy,max_attempts=2,review_backend=9,pushback=dict(attempts=99))
+    _,_,_,policy=case;policy=dict(policy,max_attempts=2,review_backend=9,pushback=dict(attempts=99,tries=1))
     calls=[]
     class Agent:
         metrics=[]
@@ -364,7 +366,7 @@ def test_local_agent_incomplete_contract_escalates_without_private_retry(case,tm
 
 
 def test_local_agent_can_repair_table_after_final_unresolved(case,tmp_path,monkeypatch):
-    _,_,_,policy=case;policy=dict(policy,max_attempts=2,review_backend=9)
+    _,_,_,policy=case;policy=dict(policy,max_attempts=2,review_backend=9,pushback=dict(attempts=99,tries=1))
     calls=[]
     class Agent:
         metrics=[]
@@ -381,7 +383,7 @@ def test_local_agent_can_repair_table_after_final_unresolved(case,tmp_path,monke
 
 
 def test_local_execution_errors_escalate_with_public_type_only(case,tmp_path,monkeypatch):
-    _,_,_,policy=case;policy=dict(policy,max_attempts=2,review_backend=9,pushback=dict(attempts=99))
+    _,_,_,policy=case;policy=dict(policy,max_attempts=2,review_backend=9,pushback=dict(attempts=99,tries=1))
     calls=[]
     class Agent:
         metrics=[]
@@ -483,7 +485,7 @@ def test_nonfinite_words_are_permitted_text(value):
 
 
 def test_local_loop_requires_computation_and_repairs_all_ordered_parts(case,tmp_path,monkeypatch):
-    _,_,_,policy=case;calls=[];outputs=iter([b'metric\tcount\nfirst\t2\n',b'metric\tcount\nfirst\t2\nsecond\t3\n'])
+    _,_,_,policy=case;policy=dict(policy,pushback=dict(attempts=99,tries=1));calls=[];outputs=iter([b'metric\tcount\nfirst\t2\n',b'metric\tcount\nfirst\t2\nsecond\t3\n'])
     monkeypatch.setattr(b,'execute',lambda *a,**k:(next(outputs),[]))
     class Agent:
         metrics=[]
@@ -521,7 +523,7 @@ def test_execution_feedback_contains_builtin_type_and_script_line_only(tmp_path,
 
 
 def test_local_last_unresolved_has_reserved_main_execution_and_answer_turns(case,tmp_path,monkeypatch):
-    _,_,_,policy=case;policy=dict(policy,max_attempts=3,review_backend='main')
+    _,_,_,policy=case;policy=dict(policy,max_attempts=3,review_backend='main',pushback=dict(attempts=99,tries=1))
     calls=[]
     class Agent:
         metrics=[]
@@ -601,7 +603,7 @@ def test_local_agent_helpers_catch_misnamed_columns_and_headers():
 
 
 def test_local_agent_retries_on_renamed_header_and_unknown_column(case,tmp_path,monkeypatch):
-    _,_,_,policy=case;policy=dict(policy,max_attempts=3,review_backend=9,pushback=dict(attempts=3))
+    _,_,_,policy=case;policy=dict(policy,max_attempts=3,review_backend=9,pushback=dict(attempts=3,tries=1))
     codes=iter(["r.get('not_a_column')","pass","pass"]);tables=iter([b'gene\tn\nA\t3\n',b'gene\tcount\nA\t3\n']);prompts=[]
     class Agent:
         metrics=[]
@@ -652,3 +654,41 @@ def test_two_failed_attempts_hand_the_request_back_as_a_completed_reply(case,mon
     assert receipt['status']=='completed' and receipt['pushback'] is True and 'google' not in receipt
     assert out=='2 attempts at this request ended with an incomplete table. Send it as a script, or ask one part at a time.\n'
     assert not re.search(BAD_WORDS,out,re.I) and 9 not in backends and 'main' not in backends
+
+
+def test_two_local_tries_must_agree_or_the_request_goes_back(case,tmp_path,monkeypatch):
+    _,_,_,policy=case;policy=dict(policy,max_attempts=3,review_backend=9)
+    seen=[]
+    class Agent:
+        metrics=[]
+        def call(self,role,prompt,rd,backend,schema,seed=None):
+            seen.append(seed)
+            action='answer' if schema['properties']['action']['enum']==['answer','unresolved'] else 'run_python'
+            return b.validate_constrained(dict(action=action,input_id='toy',column='',n=1,code='pass' if action=='run_python' else ''),schema)
+    question=dict(action='question',question='Count rows per gene. Return columns gene,count.',inputs={'table':'toy'})
+    tables=iter([b'gene\tcount\nA\t3\nB\t1\n',b'gene\tcount\nB\t1\nA\t3\n'])
+    monkeypatch.setattr(b,'execute',lambda *a,**k:(next(tables),[]))
+    rd=tmp_path/'same';rd.mkdir()
+    b.local_question(question,policy,Agent(),rd)
+    assert seen==[11,11,23,23]
+    tables=iter([b'gene\tcount\nA\t3\n',b'gene\tcount\nA\t0\n'])
+    rd=tmp_path/'differ';rd.mkdir()
+    with pytest.raises(b.Pushback) as info:b.local_question(question,policy,Agent(),rd)
+    assert str(info.value)=='2 independent tries at this request produced different tables. Send it as a script, or ask one part at a time.'
+    assert not re.search(BAD_WORDS,str(info.value),re.I)
+
+
+def test_cut_off_or_empty_reply_is_asked_again_with_the_next_seed(tmp_path,monkeypatch):
+    from types import SimpleNamespace
+    import urllib.request, io
+    seen=[]
+    monkeypatch.setattr(b.subprocess,'run',lambda *a,**k:SimpleNamespace(returncode=0,stdout=json.dumps(dict(id=4,model='synthetic-model',host='http://127.0.0.1:11444')).encode()))
+    replies=iter([dict(message=dict(content=''),done_reason='length'),dict(message=dict(content='not json'),done_reason='stop'),
+                  dict(message=dict(content=json.dumps(dict(status='ok'))),done_reason='stop',total_duration=1000000000)])
+    class Opener:
+        def open(self,request,timeout):
+            seen.append(json.loads(request.data)['options']['seed']);return io.BytesIO(json.dumps(next(replies)).encode())
+    monkeypatch.setattr(urllib.request,'build_opener',lambda *a:Opener())
+    agents=b.DirectAgents(dict(lock_root=str(tmp_path/'locks'),agent_timeout_seconds=10))
+    reply=agents.call('librarian','Synthetic',tmp_path/'call',4,b.object_schema(dict(status=dict(type='string',enum=['ok','unresolved']))))
+    assert reply=={'status':'ok'} and seen==[11,12,14] and len(agents.metrics[0]['repeats'])==2

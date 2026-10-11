@@ -154,7 +154,7 @@ def test_main_resident_pin_lock_and_constrained_payload(tmp_path,resident_ok):
   schema=b.object_schema(dict(status=dict(type='string',enum=['reviewed'])))
   if resident_ok:
    assert s.main_call(agents,'unmask-review','Review the staff text.',tmp_path,schema)==dict(status='reviewed')
-   assert set(payloads[0])=={'model','stream','format','messages'}
+   assert set(payloads[0])=={'model','stream','format','messages','options'} and set(payloads[0]['options'])=={'temperature','seed','num_predict'}
    assert payloads[0]['model']==pin and agents.metrics[0]['backend']=='main'
    assert agents.metrics[0]['model_seconds']==1
   else:

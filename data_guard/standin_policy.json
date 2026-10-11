@@ -24,6 +24,15 @@
   "pushback": {
     "words": 180,
     "marks": 40,
-    "attempts": 2
+    "attempts": 2,
+    "tries": 2
+  },
+  "sampling": {
+    "temperature": 0.2,
+    "seeds": [
+      11,
+      23
+    ],
+    "max_tokens": 6000
   }
 }

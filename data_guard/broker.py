@@ -391,7 +391,7 @@ def policy_file(path):
     p = read_json(path)
     exact(p, ('version', 'private_root', 'script_roots', 'inputs', 'runtimes', 'scribes',
               'max_attempts', 'agent_timeout_seconds', 'execution_timeout_seconds',
-              'max_input_bytes', 'max_output_bytes') + tuple(k for k in ('reviewer_scribe', 'reply_format', 'execution_mode', 'gene_vocabulary', 'gene_columns', 'protected_columns', 'review_backend', 'lock_root', 'google_config', 'google_lock', 'google_folder', 'google_title', 'scribe_backends', 'optional_second_look', 'column_labels', 'column_kinds', 'bins', 'threshold_cap', 'review_model', 'main_state', 'main_lock', 'reason_labels', 'shown_headings', 'pushback') if k in p), 'policy-fields')
+              'max_input_bytes', 'max_output_bytes') + tuple(k for k in ('reviewer_scribe', 'reply_format', 'execution_mode', 'gene_vocabulary', 'gene_columns', 'protected_columns', 'review_backend', 'lock_root', 'google_config', 'google_lock', 'google_folder', 'google_title', 'scribe_backends', 'optional_second_look', 'column_labels', 'column_kinds', 'bins', 'threshold_cap', 'review_model', 'main_state', 'main_lock', 'reason_labels', 'shown_headings', 'pushback', 'sampling') if k in p), 'policy-fields')
     require(reply_format(p) in ('lines', 'json'), 'reply-format')
     require(type(p['version']) is int and p['version'] == 1, 'policy-version')
     require(Path(p['private_root']).is_absolute(), 'private-root')
@@ -673,7 +673,7 @@ class DirectAgents:
         self.policy, self.models, self.metrics = policy, {}, []
         self.lock = threading.Lock()
 
-    def call(self, role, prompt, rd, scribe_id=None, schema=None):
+    def call(self, role, prompt, rd, scribe_id=None, schema=None, seed=None):
         import fcntl
         from urllib.request import Request, build_opener, ProxyHandler
         if scribe_id == 'main':
@@ -699,19 +699,30 @@ class DirectAgents:
             with self.lock:
                 require(self.models.setdefault(scribe_id, endpoint['model']) == endpoint['model'], 'scribe-model-changed')
             payload = dict(model=endpoint['model'], stream=False, format=schema,
-                           messages=[dict(role='system',content='You are librarian staff. Perform the assigned '+role+' task and obey the user instructions. Return only the schema-constrained JSON choices, not a substitution of values for choices.'),dict(role='user', content=prompt)])
+                           messages=[dict(role='system',content='You are librarian staff. Perform the assigned '+role+' task and obey the user instructions. Return only the schema-constrained JSON choices, not a substitution of values for choices.'),dict(role='user', content=prompt)], options=sampling(self.policy, seed))
             save(rd / 'request.json', payload)
-            # No tools, sampling/context/thread options, model swaps or reloads.
-            req = Request(endpoint['host'] + '/api/chat', data=json.dumps(payload).encode(), headers={'Content-Type':'application/json'})
-            with build_opener(ProxyHandler({})).open(req, timeout=self.policy['agent_timeout_seconds']) as response:
-                result = json.load(response)
-            save(rd / 'response.json', result)
+            # No tools, context/thread options, model swaps or reloads; temperature and seed only.
+            # Guided repeat: a reply cut off at the length cap, empty, or outside the reply form is asked again
+            # with the next seed, up to three sends in all; only the last failure is raised.
+            repeats = []
+            for send in range(3):
+                payload['options'] = dict(payload['options'], seed=payload['options']['seed'] + send)
+                req = Request(endpoint['host'] + '/api/chat', data=json.dumps(payload).encode(), headers={'Content-Type':'application/json'})
+                with build_opener(ProxyHandler({})).open(req, timeout=self.policy['agent_timeout_seconds']) as response:
+                    result = json.load(response)
+                save(rd / ('response.json' if send == 0 else f'response-{send}.json'), result)
+                try:
+                    require(result.get('done_reason') != 'length' and result['message']['content'].strip(), 'reply-cut-off')
+                    value = decode(result['message']['content'])
+                    validate_constrained(value, schema)
+                    break
+                except Exception as exc:
+                    repeats.append(str(exc) if isinstance(exc, Rejected) else type(exc).__name__)
+                    if send == 2: raise
             metric = dict(service='librarian', role=role, backend=scribe_id, seconds=time.monotonic()-started,
-                          queue_seconds=started-queued, model_seconds=result.get('total_duration',0)/1E9, turns=1)
+                          queue_seconds=started-queued, model_seconds=result.get('total_duration',0)/1E9, turns=1, repeats=repeats)
             with self.lock: self.metrics.append(metric)
             save(rd / 'call.json', metric)
-            value = decode(result['message']['content'])
-            validate_constrained(value, schema)
             return value
 
 
@@ -740,7 +751,7 @@ def staff_binding(request, catalog, agents, policy, rd):
     for wave in range(policy['max_attempts']):
         def one(side):
             if pair[side] is None:
-                value = agents.call('binding', prompt, rd/f'binding-{wave}-{side}', policy['scribes'][side], schema)
+                value = ask(agents, seeds(policy)[side % len(seeds(policy))] + 1000*wave, 'binding', prompt, rd/f'binding-{wave}-{side}', policy['scribes'][side], schema)
                 if value['status'] == 'bound':
                     pair[side] = bindings({k:value[k] for k in ('inputs','parameters')}, request)
         # Per-call backend locks serialize shared endpoints and queue independent requests.
@@ -1035,6 +1046,34 @@ def unmask_request(request,policy,agents,rd,audience):
         return receipt
 
 
+SAMPLING = read_json(Path(__file__).with_name('standin_policy.json')).get('sampling', dict(temperature=0.2, seeds=[11, 23]))
+
+
+def sampling(policy, seed=None):
+    """Low temperature and a fixed seed: the same request gives the same reply, and two seeds give two
+    independent replies. These options change word choice only; the server keeps the loaded model."""
+    chosen = dict(SAMPLING, **policy.get('sampling', {}))
+    # num_predict caps a reply that runs away (seen as thousands of tokens with empty content); it ends in
+    # seconds and the call is repeated, instead of holding the server until the request times out.
+    return dict(temperature=chosen['temperature'], seed=chosen['seeds'][0] if seed is None else seed, num_predict=chosen.get('max_tokens', 6000))
+
+
+def seeds(policy):
+    return list(dict(SAMPLING, **policy.get('sampling', {}))['seeds'])
+
+
+def ask(agents, seed, *args):
+    """Call staff with a seed when the caller supports one (test doubles keep their five-argument form)."""
+    import inspect
+    return agents.call(*args, seed=seed) if 'seed' in inspect.signature(agents.call).parameters else agents.call(*args)
+
+
+def table_key(raw):
+    """A table as header plus sorted rows, so two tries are compared on content, whatever the row order."""
+    rows = list(csv.reader(io.StringIO(raw.decode()), delimiter='\t'))
+    return (tuple(rows[0]) if rows else (), sorted(tuple(r) for r in rows[1:]))
+
+
 class Pushback(Exception):
     """A no-script request the local agent hands back; the message is the reply to the requester."""
 
@@ -1073,6 +1112,16 @@ def requested_header(question):
 
 
 def local_question(request,policy,agents,rd):
+    """Two independent tries of the local agent must produce the same table (as the two scribes must
+    agree on a binding); otherwise the request goes back to its sender."""
+    count=dict(PUSHBACK,**policy.get('pushback',{})).get('tries',2)
+    tries=[local_try(request,policy,agents,rd if count==1 else directory(rd/f'try-{i}'),seeds(policy)[i % len(seeds(policy))]) for i in range(count)]
+    if any(table_key(raw)!=table_key(tries[0][1]) for _,raw in tries[1:]):
+        raise Pushback(str(count)+' independent tries at this request produced different tables. Send it as a script, or ask one part at a time.')
+    return tries[0][0]
+
+
+def local_try(request,policy,agents,rd,seed):
     """Broker-owned bounded agent loop; transcript private, snippets sandboxed."""
     exact(request,('action','question','inputs'),'question-request')
     require(type(request['inputs']) is dict and request['inputs'],'question-inputs')
@@ -1080,7 +1129,7 @@ def local_question(request,policy,agents,rd):
     inputs={k:policy['inputs'][v] for k,v in request['inputs'].items()}
     schema=object_schema(dict(action=dict(type='string',enum=['list_columns','row_count','distinct','first_rows','run_python','unresolved']),
         input_id=dict(type='string',enum=list(request['inputs'].values())),column=dict(type='string'),n=dict(type='integer',minimum=1,maximum=10),code=dict(type='string',maxLength=32768)))
-    facts=[]; last=None; unresolved=0; incomplete=0; escalated=False
+    facts=[]; last=None; last_raw=None; unresolved=0; incomplete=0; escalated=False
     limits=dict(PUSHBACK,**policy.get('pushback',{})); failed=0
     words,marks=request_size(request['question']); tables=len(set(request['inputs'].values()))
     advice=' Send it as a script, or ask one part at a time.'
@@ -1103,7 +1152,11 @@ def local_question(request,policy,agents,rd):
             types[column]=('integer' if values and all(re.fullmatch(r'[+-]?\d+',v) for v in values)
                            else 'number' if values and all(re.fullmatch(r'[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[Ee][+-]?\d+)?',v) for v in values)
                            else 'string')
-        facts.append(dict(input_id=ident,role=role,columns=header,row_count=len(rows)-1,types=types))
+        values={}
+        for j,column in enumerate(header):
+            seen=list(dict.fromkeys(r[j] for r in rows[1:]))
+            if types[column]=='string' and 1<len(seen)<=12 and len(rows)-1>len(seen): values[column]=seen
+        facts.append(dict(input_id=ident,role=role,columns=header,row_count=len(rows)-1,types=types,category_values=values))
     for turn in range(8):
         if turn>=6: escalated=True
         active_schema=schema if last is None else object_schema(dict(action=dict(type='string',enum=['answer','unresolved']),input_id=dict(type='string',enum=list(request['inputs'].values())),column=dict(type='string',const=''),n=dict(type='integer',const=1),code=dict(type='string',const='')))
@@ -1120,13 +1173,13 @@ def local_question(request,policy,agents,rd):
                 'The supplied types describe scalar TSV cells: an integer count is copied or converted with int, never counted as comma-separated names. Read and combine all required tables. '
                 'Write TSV to sys.argv[2] using csv.writer(open(sys.argv[2],"w"),delimiter=chr(9),lineterminator=chr(10)); '
                 'Use exact requested metric labels and order; copy scalar count columns using int, never list-length or row count. For numerical mean use statistics.mean of finite float values; median uses statistics.median; type-7 or linear quartiles use statistics.quantiles(values,n=4,method="inclusive"). '
-                'Use the exact output column names the question states; never rename one. When an output cell names an input, write its role name (the key in Inputs), never a file path. Read a column as row["name"] with a name from Evidence; never use row.get(). '
+                'category_values in Evidence lists every value a category column takes; filter only on values listed there. Use the exact output column names the question states; never rename one. When an output cell names an input, write its role name (the key in Inputs), never a file path. Read a column as row["name"] with a name from Evidence; never use row.get(). '
                 'writerow(header), then writerows(data). Choose run_python with the entire code string. Only after its result choose answer.')
         if last is not None:
             prompt=('Librarian agent final reply. The native run has produced this table. Choose answer to deliver it when it answers the question; choose unresolved only for a concrete mismatch. '
                     'Confirm every part of the question checklist is computed; a truncated preview does not mean the table is truncated. The fixed n=1 is a reply field, not a limit on count values.\nQuestion: '+request['question']+'\nParts checklist: '+json.dumps(checklist)+'\nComputed table:\n'+facts[-1].get('table',next((f['table'] for f in reversed(facts) if 'table' in f),'')))
         try:
-            value=agents.call('local-agent-escalation' if escalated else 'local-agent',prompt,rd/f'agent-{turn}',policy.get('review_backend',9) if escalated else policy['scribes'][0],active_schema)
+            value=ask(agents,seed,'local-agent-escalation' if escalated else 'local-agent',prompt,rd/f'agent-{turn}',policy.get('review_backend',9) if escalated else policy['scribes'][0],active_schema)
         except Rejected as exc:
             unresolved+=1
             if unresolved>=policy['max_attempts']: escalated=True
@@ -1141,7 +1194,7 @@ def local_question(request,policy,agents,rd):
             facts.append(dict(error='staff-unresolved',instruction='Resolve using the named input facts and any computed table'))
             continue
         if value['action']=='answer':
-            if last is not None: return last
+            if last is not None: return last,last_raw
             facts.append(dict(error='answer requires a computed run_python table')); continue
         require(1<=value['n']<=10,'agent-row-limit')
         require(value['input_id'] in request['inputs'].values(),'agent-input-id')
@@ -1204,7 +1257,7 @@ def local_question(request,policy,agents,rd):
                     facts.append(dict(error='requested-labels-incomplete',required_labels=labels,instruction='Compute every requested metric/category in exact order with its exact label.'))
                     failed_check(); continue
             # Final broker run executes the retained snippet through its same native path.
-            unresolved=0;last=temp; facts.append(dict(table=raw.decode()[:4096]+('\n[PREVIEW TRUNCATED: complete table retained privately; '+str(len(raw))+' bytes, '+str(len(list(csv.reader(io.StringIO(raw.decode()),delimiter=chr(9))))-1)+' data rows]' if len(raw.decode())>4096 else '')))
+            unresolved=0;last=temp;last_raw=raw; facts.append(dict(table=raw.decode()[:4096]+('\n[PREVIEW TRUNCATED: complete table retained privately; '+str(len(raw))+' bytes, '+str(len(list(csv.reader(io.StringIO(raw.decode()),delimiter=chr(9))))-1)+' data rows]' if len(raw.decode())>4096 else '')))
     raise Rejected('agent-turn-limit')
 
 

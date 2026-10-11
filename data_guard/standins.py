@@ -329,7 +329,7 @@ def main_call(agents, role, prompt, rd, schema):
     import broker as b
     b.require(role in ('unmask-review','local-agent-escalation','binding-escalation'), 'main-role')
     with resident_main(agents.policy,rd) as (host,pinned,opener,started,queued):
-        payload = dict(model=pinned,stream=False,format=schema,messages=[dict(role='system',content='You are the librarian. Return schema-constrained decisions. The code releases values.'),dict(role='user',content=prompt)])
+        payload = dict(model=pinned,stream=False,format=schema,messages=[dict(role='system',content='You are the librarian. Return schema-constrained decisions. The code releases values.'),dict(role='user',content=prompt)],options=b.sampling(agents.policy))
         b.save(Path(rd)/'request.json',payload)
         request = Request(host+'/api/chat',data=json.dumps(payload).encode(),headers={'Content-Type':'application/json'})
         result = None
