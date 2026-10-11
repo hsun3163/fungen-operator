@@ -1208,6 +1208,9 @@ def local_try(request,policy,agents,rd,seed):
     advice=' Send it as a script, or ask one part at a time.'
     if words>limits['words'] or marks>limits['marks']:
         raise Pushback('This request has '+str(marks)+' clauses in '+str(words)+' words and names '+str(tables)+(' table.' if tables==1 else ' tables.')+advice)
+    if policy.get('local_mode',LOCAL_MODE)=='chain' and tables>1:
+        # Hao: combining or comparing tables is work for the frontier model's script, whatever its size.
+        raise Pushback('This request combines '+str(tables)+' tables.'+advice)
     def failed_check():
         # Effort test: code checks failed on this many computed attempts.
         nonlocal failed
@@ -1257,7 +1260,7 @@ def local_try(request,policy,agents,rd,seed):
                     'Write at most '+str(chain_limit)+' statements after them, each one chain: '
                     '(1) load a named input with load() and do basic filtering, e.g. d = load("'+role+'").query(...); '
                     '(2) one chained operation that computes the answer; '
-                    '(3) export it with .to_csv(output, sep="\\t", index=False); one more statement is spare, for a second table for example. '
+                    '(3) export it with .to_csv(output, sep="\\t", index=False). One more statement is spare, for an intermediate step. '
                     'Do not repeat the lines above. A small table of named results is built in one statement, e.g. pd.DataFrame({"metric": ["rows", "genes"], "count": [len(d), d["gene"].nunique()]}). '
                     'load() keeps cells as the text in the file, so TRUE/FALSE columns are text: filter with query("flag == \'TRUE\'"). Rows keep the file order unless you sort; groupby sorts its keys unless you pass sort=False. '
                     'Use chained table operations only (query, loc, groupby, agg, size, nunique, value_counts, sort_values, head, merge, drop_duplicates, rename, assign, pivot_table, reset_index, describe, quantile). '

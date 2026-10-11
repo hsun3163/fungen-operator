@@ -790,3 +790,14 @@ def test_chain_agent_that_gives_up_after_feedback_hands_the_request_back(case,tm
     rd=tmp_path/'agent';rd.mkdir()
     with pytest.raises(b.Pushback) as info:b.local_question(dict(action='question',question='Do it.',inputs={'table':'toy'}),policy,Agent(),rd)
     assert 'short chain' in str(info.value) and backends==[4,4]
+
+
+def test_chain_agent_hands_back_a_request_that_names_two_tables(case,tmp_path):
+    _,_,_,policy=case;policy=dict(policy,local_mode='chain',inputs=dict(policy['inputs'],other=policy['inputs']['toy']))
+    class Agent:
+        metrics=[]
+        def call(self,*a,**k):raise AssertionError('model called')
+    rd=tmp_path/'agent';rd.mkdir()
+    with pytest.raises(b.Pushback) as info:b.local_question(dict(action='question',question='Compare genes.',inputs={'a':'toy','b':'other'}),policy,Agent(),rd)
+    assert str(info.value)=='This request combines 2 tables. Send it as a script, or ask one part at a time.'
+    assert not re.search(BAD_WORDS,str(info.value),re.I)
