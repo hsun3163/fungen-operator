@@ -1,7 +1,7 @@
-# Reusable librarian scribes
+# Opportunistic librarian scribes
 
 A **scribe** is an extra local-model worker for bounded lookups on unpublished data. Each scribe has its own
-Ollama server and GPU. Use them to free the librarian for other work, or to compute the same small table twice
+Ollama server and GPU. Scribes start only when a suitable GPU is unallocated now; they never wait for capacity. Use them to free the librarian for other work, or to compute the same small table twice
 independently. They follow the same privacy and read-only source-data contract as the librarian. This is a
 cooperative privacy precaution, not a security boundary; the agents have network access.
 
@@ -25,6 +25,8 @@ librarian --scribe --check "task"                     tunnel 11440+id
   answers/<run id>.md, latest.md (locked append)       one GPU per scribe
                                                       shared staged models
 ```
+
+When no scribe is healthy, routing uses the fixed main librarian, and A/B run sequentially under its usual lock.
 
 A and B have different processes, Codex conversations, logs, answers, scripts and working directories. With one
 healthy scribe they share that scribe GPU; with two they use different endpoints. The reviewer is a third fresh
@@ -60,7 +62,8 @@ Before *every* scribe launcher call the code sets `MINERVA_OLLAMA_STATE_FILE`, `
 `MINERVA_OLLAMA_REMOTE_PORT`, `MINERVA_OLLAMA_LOCAL_PORT` and `MINERVA_OLLAMA_DEFAULT_MODEL` explicitly. It also
 pins `OLLAMA_HOST`, `CODEX_OSS_BASE_URL` and `CODEX_OLLAMA_MODEL` to the selected healthy scribe, discarding
 inherited librarian endpoint overrides. State is parsed and validated before the existing launcher sources it.
-There is no fallback to the librarian when scribes are unavailable.
+Only when no scribe is healthy, routing explicitly restores the main librarian identity, reports the fallback
+on stderr, and uses the ordinary serialized wrapper. Healthy scribe calls retain all endpoint isolation.
 
 The shared model store is read by servers; no lifecycle or routing command pulls, creates or deletes models.
 Staging is a separate operator step. Scribes share the librarian's Codex configuration and `AGENTS.md` privacy
@@ -157,9 +160,9 @@ production warmup does. Model licenses/download access and binary installation r
 From the session host:
 
 ```bash
-scribes up 1             # ensure id 1 exists; leave an active or pending job alone
-scribes up 2             # ensure ids 1 and 2 exist, each on its own GPU
-scribes status           # job/state/node, remote/local ports, model, /api/ps VRAM, health
+scribes up 1             # start id 1 only if a suitable GPU is free now
+scribes up 2             # ensure up to ids 1 and 2, capped by currently free GPUs
+scribes status           # job/state/node, ports, model, VRAM, health, pending age in seconds
 scribes test 1           # create scribes/synthetic.tsv; agent computes/verifies result.tsv
 scribes down 2           # stop only verified scribe id 2
 scribes down             # stop all verified scribe jobs
@@ -170,7 +173,8 @@ librarian --scribe --check --me "Compute the defined result table from these exa
 
 Options `--scribe`, `--check`, `--me` and `--receipt` may be combined before the task. `--check` requires
 `--scribe`. `LIBRARIAN_SCRIBE_ID=1` pins a particular healthy scribe for troubleshooting; otherwise routing
-selects healthy staged scribes by state file. No healthy scribe is a nonzero failure, never an implicit launch.
+selects healthy staged scribes by state file. No healthy scribe falls back to the main librarian, with one
+operational line on stderr; `--check` runs independent A and B sequentially there. Routing never launches a GPU job.
 
 `--check` asks each session to write `result.tsv` with a header and to retain its computing script in its run
 directory. A/B do not see each other's work. Comparison sorts column names and complete rows (retaining duplicate
@@ -193,28 +197,60 @@ successful command, and for bwrap/sandbox/unified-exec failures even when Codex 
 answer. A failure prints `Librarian failed: <reason>. Log: <path>` and exits nonzero instead of printing `Done`.
 Logs and answers are private; inspect only your synthetic probe logs when debugging with a hosted agent.
 
-## Sizing and relaunch
+## Free-GPU admission and minimum resources
 
-Defaults: one H100 80 GB, eight host cores, 64 GB host memory, four-hour walltime, `SCRIBE_PARALLEL=3`,
-262,144 context tokens, flash attention, q8_0 KV cache, model kept loaded. A100 80 GB is also selectable:
+Hao's decision, **2026-10-05**: scribes are opportunistic helpers. `scribes up N` starts only the missing ids
+that fit currently free resources. It prints `no free GPU; no scribe started` when none qualify.
+
+| Resource | Default minimum |
+|---|---|
+| GPU | One unallocated GPU with at least 32 GB total memory, any model |
+| Examples | A100 40/80 GB, L40S, H100 PCIe/HBM3, B200 |
+| CPU | 2 host cores / scheduler slots |
+| Host RAM | 32 GB |
+| Parallel sessions | `SCRIBE_PARALLEL=1` |
+| Walltime | `SCRIBE_WALLTIME=04:00` (4 hours) |
+| Pending limit | `SCRIBE_MAX_PENDING=5` (minutes; accepts `[hour:]minute`) |
+| Context / cache | 262,144 tokens, flash attention, q8_0 KV, model kept loaded |
+
+The measured reason for this minimum is about **27 GB GPU memory for one full 262k session** with
+`qwen3.8:27b-262k`. The earlier draft measurement (job 273377057 on lg02e13) reported 29.3/80 GB total GPU
+memory used, including server overhead. `/api/ps size_vram` reports model residency rather than the full KV
+allocation; status labels it VRAM_GB. Raising parallel sessions needs a separately sized GPU allocation.
+
+Admission uses native LSF queries, outside the agent sandbox:
+
+1. `bqueues -l gpu gpuexpress` supplies open/active queues and their `HOSTS`; `bmgroup -w -r` expands host groups.
+2. `bhosts -gpu <queue hosts>` supplies per-GPU `NJOBS`, `RUN`, `SUSP`, `RSV`. All four must be zero. These
+   fields track scheduler allocation/reservation, unlike memory use or utilization.
+3. `lsload -gpuload -w <queue hosts>` supplies `gpu_mtotal` and `gpu_status`; capacity must be >=32 GB and status ok.
+4. `bhosts -w <queue hosts>` supplies host status and slots. Status must be ok; `MAX - NJOBS` must leave at least
+   two slots per new scribe. NJOBS already includes reservations. Candidate count is capped by both GPUs and cores.
+
+Each submission targets one eligible host with `-m`, requests an exclusive GPU with `gmem=32G`, and prefers
+`gpuexpress` when its walltime limit permits, otherwise `gpu`. `SCRIBE_GPU_MODEL` optionally narrows by exact
+native model name; there is no H100/A100-80 allowlist. Query/schema errors fail closed before submission.
+
+A snapshot cannot guarantee immediate dispatch: other jobs may win the GPU, and GPU hosts enforce exclusive
+GPU allocation plus CPU/GPU core affinity. This explains why throwaway jobs can pend even when GPU memory
+looks unused or the host has spare aggregate cores. LSF remains responsible for affinity placement.
+
+Every submission includes `bsub -ptl 5` by default. The installed LSF help says pending-limit alarm/control
+requires LSF RTM; the flag alone does not guarantee cancellation. Therefore `up` also checks the submitted job
+once, verifies its exact id/name, and immediately cancels it if still PEND/WAIT/PSUSP. It never loops waiting
+for capacity. `status` displays pending jobs and their cumulative pending age (`pend_time`, seconds), including
+older submissions. Existing active jobs remain untouched by `up`.
 
 ```bash
-SCRIBE_GPU_MODEL=NVIDIAA100_SXM4_80GB SCRIBE_WALLTIME=08:00 SCRIBE_PARALLEL=3 scribes up 1
-# H100 selector: NVIDIAH10080GBHBM3
-# Optional SCRIBE_MODEL, SCRIBE_MODELS_DIR, SCRIBE_OLLAMA_BIN must refer to staged inputs.
+SCRIBE_MAX_PENDING=2 scribes up 1
+SCRIBE_GPU_MODEL=NVIDIAA100_PCIE_40GB scribes up 1
+# Optional SCRIBE_MODEL, SCRIBE_MODELS_DIR, SCRIBE_OLLAMA_BIN refer to staged inputs.
 ```
 
-Measured **2026-10-05**, draft job **273377057**, node **lg02e13**, model `qwen3.8:27b-262k`, one parallel slot:
-18.5 GB model, 29.3/80 GB GPU memory used (approximately 9.5 GB KV), 100% GPU model placement, about 62 tokens/s.
-`/api/ps size_vram` reports model residency, not all allocated KV memory; `scribes status` labels this value VRAM_GB.
-Three full-context slots imply roughly 18.5 + 3 × 9.5 = 47 GB before overhead, a sizing estimate rather than a
-measured three-client throughput benchmark. Both allowed 80 GB cards have headroom; verify the new job log's
-warmup and nvidia-smi output. The existing draft job stays at its original one-slot configuration until relaunched.
-
 At walltime the server exits and clears its owned state. There is **no automatic renewal** for scribes.
-Run `scribes up N` again, then `scribes status` and `scribes test <id>` when ready. Existing running jobs retain
-their original submission settings. To change settings, intentionally stop the selected scribe with `down <id>`,
-then call `up N`. Failed/expired jobs are not counted as active. Queue waits may create a gap in availability.
+Run `scribes up N` again when capacity is free, then `scribes status` and `scribes test <id>` when ready.
+Existing running jobs retain their original settings; change them with an intentional `down <id>` then `up N`.
+Failed/expired jobs are not counted as active. With no healthy scribe, lookups continue on the main librarian.
 
 ## Debugging checklist
 
@@ -226,7 +262,7 @@ then call `up N`. Failed/expired jobs are not counted as active. Queue waits may
 | Scribe local port busy | Inspect `ss -ltnp` for 11440+id on this session host. Check the common helper's tunnel diagnostics. Use a free scribe id; leave 11435 untouched. |
 | Remote port busy | Inspect the scribe job log and 8890+id listener on its node; server refuses to adopt an existing process. Use a distinct id or intentionally stop that scribe. |
 | Model missing | `/api/tags` or warmup fails; stage the exact model/alias separately. Never pull through a running production endpoint. |
-| GPU job PEND | `scribes status`, `bjobs -l <scribe job id>`; inspect GPU request/queue/allocation and wait or select the allowed A100 type for a new submission. |
+| GPU job PEND | New `up` submissions are cancelled immediately if dispatch loses the race. Status includes pending age for older jobs. Retry `up N` when capacity is free; lookups use the main librarian meanwhile. |
 | State exists but no health | Job may have expired or been killed; inspect that exact scribe's LSF log, `up N`, then test when ready. |
 | A/B mismatch or no table | Read `comparison.json`, both private scripts/answers, and reviewer log. Ensure task defines exact inputs/columns/precision; unresolved review is reported explicitly. |
 | No successful command / empty answer | Open named log; check pinned binary, sandbox, timeout and endpoint. The wrapper resumes a successful command session with reasoning off only to obtain its final answer. |
@@ -255,6 +291,6 @@ python3 -m pytest data_guard/tests
 ```
 
 `test_scribes.py` checks identity/state isolation, exact-name refusal, idempotent submission parameters,
-normalization, successful command evidence, failed execution despite a plausible answer, independent A/B
-routing and third-reviewer dispatch. All scheduler/model endpoints in these unit tests are stubs and all
+normalization, successful command evidence, failed execution despite a plausible answer, recorded native free-GPU parsing, submission caps, minimum resources, pending limits/age, immediate cancellation,
+independent A/B routing, serialized fallback and third-reviewer dispatch. All scheduler/model endpoints in these unit tests are stubs and all
 values invented. `scribes test 1` is the separate live, synthetic, login-host end-to-end check.

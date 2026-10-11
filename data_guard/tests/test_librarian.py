@@ -12,11 +12,15 @@ echo "NOISY tool output: secret-row-42"
 echo "NOISY stderr" >&2
 [ -z "$STUB_NO_COMMAND" ] && echo '{"type":"item.completed","item":{"type":"command_execution","exit_code":0}}'
 [ -n "$STUB_LOG_ERROR" ] && echo "$STUB_LOG_ERROR"
+[ -n "$STUB_LOCK" ] && flock -n "$LIBRARIAN_HOME/librarian.lock" -c true && exit 7
 [ -n "$STUB_ARGS" ] && printf '%s\\n' "$@" > "$STUB_ARGS"
 while [ $# -gt 0 ]; do
+    [ "$1" = -C ] && rd=$2
     [ "$1" = -o ] && out=$2
     shift
 done
+[ -n "$STUB_CALLS" ] && printf '%s\\n' "$rd" >> "$STUB_CALLS"
+[ -n "$STUB_TABLE" ] && printf 'key\\tvalue\\na\\t1\\n' > "$rd/result.tsv"
 [ -n "$STUB_FAIL" ] && exit 3
 printf '%s\\n' "${STUB_ANSWER:-FAKE ANSWER}" > "$out"
 """
@@ -39,6 +43,17 @@ def run(tmp_path, *args, fail=False, **extra):
 
 def runs(tmp_path):
     return sorted((tmp_path / "home" / "runs").iterdir())
+
+
+def test_network_override_is_an_exec_argument(tmp_path):
+    trace = tmp_path / 'args.txt'
+    p = run(tmp_path, 'synthetic task', LIBRARIAN_NETWORK='off', STUB_ARGS=str(trace))
+    assert p.returncode == 0
+    args = trace.read_text().splitlines()
+    # The host launcher injects additional -c flags after exec. The pinned CLI
+    # uses that subcommand override list, so a global-only network flag is lost.
+    setting = args.index('sandbox_workspace_write.network_access=false')
+    assert setting > args.index('exec') and args[setting - 1] == '-c'
 
 
 def test_default_mode_prints_only_answer(tmp_path):
@@ -200,4 +215,51 @@ def test_failed_commands_never_print_done_even_with_answer(tmp_path, error):
 def test_no_command_never_releases_plausible_answer(tmp_path):
     p=run(tmp_path, '--me', 'synthetic task', STUB_NO_COMMAND='1')
     assert p.returncode != 0 and 'no command succeeded' in p.stdout
+    assert not (tmp_path / 'home/latest.md').exists()
+
+
+@pytest.mark.parametrize('check', [False, True])
+def test_scribe_fallback_cli_preserves_main_lock_and_sequential_runs(tmp_path, check):
+    home = tmp_path / 'userhome'; home.mkdir()
+    calls = tmp_path / 'calls'
+    p = run(tmp_path, '--scribe', *(['--check'] if check else []), 'invented task',
+            HOME=str(home), STUB_CALLS=str(calls), STUB_TABLE='1', STUB_LOCK='1')
+    assert p.returncode == 0, p.stdout + p.stderr
+    assert p.stderr.splitlines() == ['No healthy scribe; running A and B sequentially on the main librarian.' if check
+                                   else 'No healthy scribe; falling back to the main librarian.']
+    assert [Path(line).name for line in calls.read_text().splitlines()] == (['A', 'B'] if check else ['A'])
+    assert 'FAKE ANSWER' in p.stdout and 'NOISY' not in p.stdout + p.stderr
+
+
+def test_scribe_fallback_receipt_remains_json_only(tmp_path):
+    home = tmp_path / 'userhome'; home.mkdir()
+    answer = {**receipt(), 'invented_private_value': 123}
+    p = run(tmp_path, '--scribe', '--receipt', 'invented task', HOME=str(home), STUB_ANSWER=json.dumps(answer))
+    assert p.returncode == 0 and json.loads(p.stdout) == receipt()
+    assert '123' not in p.stdout + p.stderr
+    assert p.stderr == 'No healthy scribe; falling back to the main librarian.\n'
+
+
+def test_scribe_fallback_me_keeps_answer_private(tmp_path):
+    home = tmp_path / 'userhome'; home.mkdir()
+    p = run(tmp_path, '--scribe', '--me', 'invented task', HOME=str(home))
+    assert p.returncode == 0 and p.stdout.startswith('Done')
+    assert 'FAKE ANSWER' not in p.stdout + p.stderr
+    assert 'FAKE ANSWER' in (tmp_path / 'home/latest.md').read_text()
+
+
+@pytest.mark.parametrize('error,note', [
+    ('error=unsupported call: read', 'invalid tool call or arguments'),
+    ('Failed to create unified exec process', 'sandbox execution error'),
+    ('', 'no command succeeded'),
+])
+def test_private_final_reply_retains_session_errors_as_notes(tmp_path, error, note):
+    trace = tmp_path / 'args.txt'
+    p = run(tmp_path, '--private', 'Return a binding from the inlined facts.',
+            STUB_LOG_ERROR=error, STUB_NO_COMMAND='1', STUB_ANSWER='input.table=current', STUB_ARGS=str(trace))
+    assert p.returncode == 0 and p.stdout == ''
+    rd = runs(tmp_path)[0]
+    assert (rd / 'answer.md').read_text() == 'input.table=current\n'
+    assert json.loads((rd / 'session-audit.json').read_text()) == {'exit_code': 0, 'note': note}
+    assert 'Before answering, execute pwd' not in trace.read_text()
     assert not (tmp_path / 'home/latest.md').exists()

@@ -32,7 +32,7 @@ PY
 # Match returned job names as well as requesting a name: no wildcard deletion.
 jobs() {
     local output rc=0
-    output=$(bjobs -u "$USER" -J "$1" -o 'jobid stat job_name exec_host' -noheader 2>&1) || rc=$?
+    output=$(bjobs -u "$USER" -J "$1" -o 'jobid stat job_name exec_host pend_time' -noheader 2>&1) || rc=$?
     if (( rc != 0 )); then
         [[ $output == *'No unfinished job found'* || $output == *'No job found'* ]] && return 0
         fail "scheduler query failed: $output"
@@ -44,28 +44,59 @@ case $cmd in
 up)
     [[ $# == 1 ]] || fail 'usage: scribes up N'
     valid_id "$1"
-    gpu=${SCRIBE_GPU_MODEL:-NVIDIAH10080GBHBM3}
-    case $gpu in NVIDIAH10080GBHBM3|NVIDIAA100_SXM4_80GB) ;; *) fail 'GPU must be NVIDIAH10080GBHBM3 or NVIDIAA100_SXM4_80GB' ;; esac
+    gpu=${SCRIBE_GPU_MODEL:-}
+    [[ -z $gpu || $gpu =~ ^[A-Za-z0-9_]+$ ]] || fail 'invalid GPU model selector'
+    pending=${SCRIBE_MAX_PENDING:-5}
+    [[ $pending =~ ^([0-9]+:)?[0-9]+$ && $pending =~ [1-9] ]] || fail 'pending limit must be positive [hour:]minute'
     wall=${SCRIBE_WALLTIME:-04:00}
     [[ $wall =~ ^[0-9]+:[0-5][0-9]$ ]] || fail 'walltime must be HH:MM'
-    parallel=${SCRIBE_PARALLEL:-3}
+    parallel=${SCRIBE_PARALLEL:-1}
     [[ $parallel =~ ^[1-9][0-9]*$ ]] && (( parallel <= 8 )) || fail 'parallel must be 1..8'
     mkdir -p "$root"
     exec 8>"$root/lifecycle.lock"; flock 8
+    candidates=(); checked=0; next=0
     for ((id=1; id<=$1; id++)); do
         name=codex-ollama-scribe-$id
         active=$(jobs "$name")
         if awk -v name="$name" '$3==name && $2 ~ /^(RUN|PEND|PSUSP|USUSP|SSUSP|WAIT)$/ {found=1} END {exit !found}' <<< "$active"; then
             echo "Scribe $id already active"; continue
         fi
+        if (( checked == 0 )); then
+            free=$(python3 "$here/scribe_support.py" free-gpus "$gpu" "$wall")
+            if [[ -n $free ]]; then mapfile -t candidates <<< "$free"; fi
+            checked=1
+        fi
+        if (( next >= ${#candidates[@]} )); then
+            if (( next == 0 )); then echo 'no free GPU; no scribe started'; else echo 'no more free GPUs; no additional scribe submitted'; fi
+            break
+        fi
+        read -r host queue found_model <<< "${candidates[next]}"
+        next=$((next + 1))
         export SCRIBE_ID=$id SCRIBE_MODEL=${SCRIBE_MODEL:-qwen3.8:27b-262k} SCRIBE_PARALLEL=$parallel
-        bsub -J "$name" -W "$wall" -gpu "num=1:gmodel=$gpu" -oo "$root/%J.log" -env all < "$here/scribe_server.lsf"
+        request='num=1:gmem=32G:mode=exclusive_process:j_exclusive=yes'
+        [[ -z $gpu ]] || request+=":gmodel=$gpu"
+        submitted=$(bsub -J "$name" -q "$queue" -m "$host" -W "$wall" -ptl "$pending" -gpu "$request" -oo "$root/%J.log" -env all < "$here/scribe_server.lsf")
+        echo "$submitted"
+        [[ $submitted =~ Job\ \<([0-9]+)\> ]] || fail 'cannot identify submitted scribe job'
+        submitted_id=${BASH_REMATCH[1]}
+        # Allocation snapshots race with dispatch. Check once; never leave our job waiting.
+        active=$(jobs "$name")
+        while read -r job stat returned_name node age; do
+            [[ $job == "$submitted_id" ]] || continue
+            [[ $returned_name == "$name" ]] || fail 'unexpected submitted job name; refusing cancellation'
+            if [[ $stat =~ ^(PEND|WAIT|PSUSP)$ ]]; then
+                bkill "$submitted_id"
+                echo "Scribe $id did not start immediately; removed from queue"
+            else
+                echo "Scribe $id: $stat on $node"
+            fi
+        done <<< "$active"
     done
     ;;
 status)
-    printf 'JOB\tSTATE\tNAME\tNODE\tREMOTE/LOCAL\tMODEL\tVRAM_GB\tHEALTH\n'
+    printf 'JOB\tSTATE\tNAME\tNODE\tREMOTE/LOCAL\tMODEL\tVRAM_GB\tHEALTH\tPENDING_SECONDS\n'
     active=$(jobs 'codex-ollama-scribe-*')
-    while read -r job stat name node; do
+    while read -r job stat name node age; do
         [[ $name =~ ^codex-ollama-scribe-([1-9][0-9]*)$ ]] || continue
         id=${BASH_REMATCH[1]}; valid_id "$id"
         model=$(model_for "$id" 2>/dev/null || echo unknown)
@@ -75,7 +106,7 @@ status)
             vram=$(curl -sf --noproxy '*' --max-time 5 "$host/api/ps" | python3 "$here/scribe_support.py" health "$model")
             health=healthy
         fi
-        printf '%s\t%s\t%s\t%s\t%s/%s\t%s\t%s\t%s\n' "$job" "$stat" "$name" "$node" "$((8890+id))" "$((11440+id))" "$model" "$vram" "$health"
+        printf '%s\t%s\t%s\t%s\t%s/%s\t%s\t%s\t%s\t%s\n' "$job" "$stat" "$name" "$node" "$((8890+id))" "$((11440+id))" "$model" "$vram" "$health" "${age:--}"
     done <<< "$active"
     ;;
 down)
@@ -84,7 +115,7 @@ down)
     mkdir -p "$root"; exec 8>"$root/lifecycle.lock"; flock 8
     active=$(jobs "$pattern")
     [[ -z $active ]] && exit 0
-    while read -r job stat name node; do
+    while read -r job stat name node age; do
         [[ $name =~ ^codex-ollama-scribe-([1-9][0-9]*)$ ]] || fail "refusing non-scribe job $name"
         id=${BASH_REMATCH[1]}; valid_id "$id"
         [[ $# == 0 || $name == "$pattern" ]] || fail "unexpected job name $name"

@@ -1,5 +1,5 @@
 #!/bin/bash
-# librarian [--scribe [--check]] [--me | --receipt] "<task>"
+# librarian [--scribe [--check]] [--me | --receipt | --committee RULE] "<task>"
 #
 # default: final librarian message -> stdout
 # --me:    final librarian message -> latest.md; caller receives only "Done"
@@ -17,6 +17,8 @@ export CODEX_REAL_BIN=${LIBRARIAN_CODEX_BIN:-$HOME/sunh14/codex-0155/bin/codex}
 
 # Native Codex writable roots for explicitly authorized manuscript operations.
 # Normal retrieval calls keep their existing read-only project boundary.
+network_args=()
+[ "${LIBRARIAN_NETWORK:-}" = off ] && network_args=(-c sandbox_workspace_write.network_access=false)
 codex_dirs=()
 while [ "$1" = --add-dir ]; do
     if [ -z "$2" ] || [ ! -d "$2" ]; then
@@ -39,11 +41,30 @@ aud="the coding agent"
 
 scribe=0
 check=0
+broker_request=
+private_mode=0
+response_args=()
+committee_rule=
+# Private scribe children inherit only this explicit, validated audience setting.
+if [ "${LIBRARIAN_SCRIBE_SESSION:-0}" = 1 ] || [ "${LIBRARIAN_NO_PUBLISH:-0}" = 1 ]; then
+    committee_rule=${LIBRARIAN_COMMITTEE_RULE:-}
+fi
 while [ $# -gt 0 ]; do
     case "$1" in
+        --broker)
+            [ -z "$broker_request" ] && [ -n "$2" ] || { echo 'Librarian failed: --broker requires one request file'; exit 2; }
+            broker_request=$2; shift ;;
+        --committee)
+            [ -n "$2" ] && [ -f "$2" ] || { echo "Librarian failed: committee rule missing"; exit 2; }
+            committee_rule=$(readlink -f "$2"); shift ;;
         --scribe) scribe=1 ;;
         --check) check=1 ;;
         --internal) ;; # private child run; same sandbox/privacy contract
+        --private)
+            private_mode=1
+            tag=private
+            aud='the local broker only. Your complete response stays private; return exactly the reply format specified in the task'
+            ;;
         --me) tag=me; aud="the user" ;;
         --receipt)
             tag=receipt
@@ -53,11 +74,50 @@ while [ $# -gt 0 ]; do
     esac
     shift
 done
+if [ -n "$broker_request" ]; then
+    if [ "$private_mode" = 1 ] || [ "$scribe" != 0 ] || [ "$check" != 0 ] || [ $# != 0 ]; then
+        echo 'Librarian failed: broker mode conflicts with another routing mode or task'; exit 2
+    fi
+    umask 077
+fi
+if [ "$private_mode" = 1 ]; then
+    if [ "$tag" != private ] || [ "$scribe" != 0 ] || [ "$check" != 0 ] || [ -n "$committee_rule" ]; then
+        echo 'Librarian failed: private mode conflicts with another audience or routing mode'; exit 2
+    fi
+    umask 077
+    if [ -n "${LIBRARIAN_OUTPUT_SCHEMA:-}" ]; then
+        [ -f "$LIBRARIAN_OUTPUT_SCHEMA" ] || { echo 'Librarian failed: private response schema missing'; exit 2; }
+        response_args=(--output-schema "$LIBRARIAN_OUTPUT_SCHEMA")
+    fi
+fi
 if [ "$check" = 1 ] && [ "$scribe" != 1 ]; then
     echo 'Librarian failed: --check requires --scribe'; exit 2
 fi
 
+if [ -n "$committee_rule" ]; then
+    [ "$tag" = agent ] && [ "$check" = 0 ] || { echo 'Librarian failed: committee audience conflicts with other audience'; exit 2; }
+    release=$(python3 - "$committee_rule" <<'RULE'
+import json,sys
+try:
+    r=json.load(open(sys.argv[1]))
+    assert r['audience']=='research-committee'
+    assert isinstance(r['withheld_quantities'],list) and all(isinstance(v,str) and v for v in r['withheld_quantities'])
+    assert isinstance(r['screen_patterns'],list) and all(isinstance(v,str) for v in r['screen_patterns'])
+except Exception:
+    sys.exit(2)
+print(json.dumps(r,ensure_ascii=False))
+RULE
+    ) || { echo 'Librarian failed: invalid committee release rule'; exit 2; }
+    export LIBRARIAN_COMMITTEE_RULE="$committee_rule"
+    aud="the research-committee caller under the explicit committee Audience exception. Release every requested finding apart from withheld quantities; write withheld where one was requested. Release rule: $release"
+fi
+
 task=$*
+[ -n "$broker_request" ] && task="Review the frontier-script request in $broker_request"
+if [ -n "$committee_rule" ]; then
+    task="Committee audience: answer the caller in full apart from the quantities in this release rule; say withheld where requested. Release rule: $release
+$task"
+fi
 if [ "$1" = --slots ] && [ "$tag" = agent ]; then
     tag=slots
     aud="the local masking script, which keeps the response private; return the requested JSON only"
@@ -65,7 +125,7 @@ if [ "$1" = --slots ] && [ "$tag" = agent ]; then
 fi
 
 if [ -z "$task" ]; then
-    echo 'usage: librarian [--scribe [--check]] [--me | --receipt] "<task>" | librarian mask <command>'
+    echo 'usage: librarian [--scribe [--check]] [--me | --receipt | --committee RULE] "<task>" | librarian --broker REQUEST [--me | --receipt | --committee RULE] | librarian mask <command>'
     exit 2
 fi
 
@@ -80,16 +140,40 @@ mkdir -p "$run" || { echo "Librarian failed: cannot create $run"; exit 1; }
 printf '%s\n' "$task" > "$run/task"
 
 # Hold this lock for the whole librarian session, including resume. Scribes never take it.
-if [ "$scribe" = 0 ] && [ "${LIBRARIAN_SCRIBE_SESSION:-0}" != 1 ]; then
+if [ "$scribe" = 0 ] && [ -z "$broker_request" ] && [ "${LIBRARIAN_SCRIBE_SESSION:-0}" != 1 ]; then
     exec 9>"$L/librarian.lock"
     flock 9
 fi
 
-if [ "$scribe" = 1 ]; then
+if [ -n "$broker_request" ]; then
+    # Private broker children acquire the native main-model lock themselves.
+    # Deliver the reviewed answer through the unchanged audience branches below.
+    LIBRARIAN_BROKER_AUDIENCE="$aud" LIBRARIAN_BROKER_ANSWER="$run/answer.md" \
+        python3 "$here/broker.py" "$broker_request" > "$run/broker-receipt.json" 2> "$run/log"
+    rc=$?
+    if [ "$rc" != 0 ]; then
+        echo "Librarian failed: withheld by staff. Log: $run/log"; exit 1
+    fi
+    python3 - "$run/broker-receipt.json" <<'DELIVERY' >&2
+import json,sys
+r=json.load(open(sys.argv[1]))
+if r.get('service')=='librarian':
+    if r.get('rephrase_request'): print(r['rephrase_request'])
+    delivery=r.get('google',{})
+    print('Librarian run: '+r['run_id']+'; Google: '+delivery.get('status','retained')+(' ('+delivery['reason']+')' if 'reason' in delivery else ''))
+DELIVERY
+elif [ "$scribe" = 1 ]; then
     export LIBRARIAN_SCRIBE_ADD_DIRS
     LIBRARIAN_SCRIBE_ADD_DIRS=$(python3 -c 'import json,sys; print(json.dumps(sys.argv[1:]))' "${codex_dirs[@]}")
     python3 "$here/scribe_support.py" route "$run" "$check" "$tag" >> "$run/log" 2>&1
     rc=$?
+    if [ -f "$run/backend" ] && [ "$(cat "$run/backend")" = librarian ]; then
+        if [ "$check" = 1 ]; then
+            echo 'No healthy scribe; running A and B sequentially on the main librarian.' >&2
+        else
+            echo 'No healthy scribe; falling back to the main librarian.' >&2
+        fi
+    fi
     if [ "$rc" != 0 ]; then
         echo "Librarian failed: scribe routing or session failed. Log: $run/log"; exit 1
     fi
@@ -100,16 +184,20 @@ export JUPYTER_CONFIG_DIR="$run/.jupyter"
 export JUPYTER_RUNTIME_DIR="$run/.jupyter/runtime"
 export IPYTHONDIR="$run/.jupyter/ipython"
 
+session_instruction="Before answering, execute pwd in this run directory to verify commands work."
+[ "$private_mode" = 1 ] && session_instruction="The task contains private binding or review evidence. No command is needed when that evidence is sufficient."
+
 # stdin from /dev/null: codex exec appends piped stdin to the prompt and would
 # otherwise wait on a caller's open pipe.
 timeout -k 30 "$timeout_s" \
     env CODEX_HOME="$L/codex" \
-    codex "${codex_dirs[@]}" exec --oss --json \
+    codex "${codex_dirs[@]}" exec --oss --json "${network_args[@]}" \
+        "${response_args[@]}" \
         --skip-git-repo-check \
         -s workspace-write \
         -C "$run" \
         -o "$run/answer.md" \
-        "Your answer goes to $aud. Your run directory is $run. Before answering, execute pwd in this run directory to verify commands work. Task: $task" \
+        "Your answer goes to $aud. Your run directory is $run. ${session_instruction} Task: $task" \
         < /dev/null > "$run/log" 2>&1
 
 rc=$?
@@ -119,26 +207,36 @@ rc=$?
 # reasoning off only to write the final message.
 # Detect execution failures even when Codex returns rc=0 and writes a plausible answer.
 reason=$(python3 "$here/scribe_support.py" log "$run/log")
-if [ $? != 0 ]; then
+if [ $? != 0 ] && [ "$private_mode" != 1 ]; then
     echo "Librarian failed: $reason. Log: $run/log"; exit 1
 fi
 sid=$(python3 "$here/scribe_support.py" session "$run/log")
 if [ $rc -eq 0 ] && [ ! -s "$run/answer.md" ] && [ -n "$sid" ]; then
     timeout -k 30 "$timeout_s" \
         env CODEX_HOME="$L/codex" \
-        codex "${codex_dirs[@]}" exec --oss --json -s workspace-write -c 'model_reasoning_effort="none"' \
-            resume --skip-git-repo-check \
+        codex "${codex_dirs[@]}" exec --oss --json "${network_args[@]}" -s workspace-write -c 'model_reasoning_effort="none"' \
+            resume "${response_args[@]}" --skip-git-repo-check \
             -o "$run/answer.md" \
             "$sid" \
             "Write your final answer to the task now, from the work above. Your answer goes to $aud. Output only the answer." \
             < /dev/null >> "$run/log" 2>&1
     rc=$?
     reason=$(python3 "$here/scribe_support.py" log "$run/log")
-    if [ $? != 0 ]; then
+    if [ $? != 0 ] && [ "$private_mode" != 1 ]; then
         echo "Librarian failed: $reason. Log: $run/log"; exit 1
     fi
 fi
 fi # direct backend versus scribe routing
+
+# Private final replies are validated by the broker; session diagnostics stay local.
+if [ "$private_mode" = 1 ]; then
+    python3 - "$run/session-audit.json" "$rc" "$reason" <<'AUDIT'
+import json,sys
+from pathlib import Path
+Path(sys.argv[1]).write_text(json.dumps(dict(exit_code=int(sys.argv[2]), note=sys.argv[3] or None))+'\n')
+AUDIT
+    [ -s "$run/answer.md" ] && exit 0
+fi
 
 if [ $rc -eq 124 ] || [ $rc -eq 137 ]; then
     echo "Librarian failed: timed out after ${timeout_s}s. Log: $run/log"
@@ -153,6 +251,11 @@ fi
 if [ ! -s "$run/answer.md" ]; then
     echo "Librarian failed: no final answer was written. Log: $run/log"
     exit 1
+fi
+
+# Broker children have no publication side effects or direct caller response.
+if [ "$tag" = private ]; then
+    exit 0
 fi
 
 # JupyterLab opens only paths under its root (~), so user-facing paths are
@@ -190,6 +293,12 @@ link_paths() {
             print out $0
         }'
 }
+
+if [ -n "$committee_rule" ]; then
+    # Committee calls never publish private raw answers to latest.md or the answer repo.
+    cat "$run/answer.md"
+    exit 0
+fi
 
 if [ "${LIBRARIAN_NO_PUBLISH:-0}" = 1 ]; then
     mkdir -p "$L/answers"
@@ -233,6 +342,17 @@ try:
         raise ValueError()
     if blockers:
         receipt['blockers'] = blockers
+    if 'run_id' in answer:
+        if not re.fullmatch(r'run-[0-9a-f]{32}', answer['run_id']): raise ValueError('run-id')
+        receipt['run_id']=answer['run_id']
+    if 'delivery' in answer:
+        delivery=answer['delivery']
+        if not isinstance(delivery,dict) or delivery.get('status') not in ('sent','local-retained'): raise ValueError('delivery')
+        clean={'status':delivery['status']}
+        if 'reason' in delivery:
+            if not re.fullmatch(r'[A-Za-z0-9-]{1,128}',delivery['reason']): raise ValueError('delivery-reason')
+            clean['reason']=delivery['reason']
+        receipt['delivery']=clean
 except Exception:
     print('Librarian failed: invalid status receipt; private answer retained.')
     sys.exit(1)

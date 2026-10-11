@@ -201,17 +201,27 @@ def desired_paragraphs(markdown):
     result = []
     for block in m.markdown_blocks(markdown):
         if block['literal']:
-            # Markdown source comments are invisible in the rendered manuscript.
-            # Leave them in the local source/export; do not turn them into prose.
+            # A block comment may share its closing line with visible prose.
             visible = re.sub(r'<!--.*?-->', '', block['raw'], flags=re.S)
             if visible.strip():
-                raise m.MaskError('unsupported-google-markup', block['position'])
+                if visible == block['raw']:
+                    raise m.MaskError('unsupported-google-markup', block['position'])
+                result.extend(desired_paragraphs(visible))
             continue
         prefix = block['prefixes'][0]
         bullet = bool(re.fullmatch(r'\s*[-+*] +', prefix))
         if prefix.strip() and not bullet and not block['heading']:
             raise m.MaskError('unsupported-google-markup', block['position'])
-        result.append({'runs': block['runs'], 'heading': block['heading'], 'bullet': bullet})
+        # Masking can escape comment delimiters into ordinary text runs. Filter
+        # visible characters here as well as literal blocks, retaining their styles.
+        items = m.chars(block['runs'])
+        hidden = set()
+        for match in re.finditer(r'<!--.*?-->', m.plain(block['runs']), flags=re.S):
+            if not any(style.get('code') for _, style in items[match.start():match.end()]):
+                hidden.update(range(match.start(), match.end()))
+        runs = m.runs_from_chars([item for i, item in enumerate(items) if i not in hidden])
+        if m.plain(runs).strip():
+            result.append({'runs': runs, 'heading': block['heading'], 'bullet': bullet})
     return result
 
 
@@ -343,3 +353,62 @@ def sync_dictionary(dictionary, config):
         requests.append({'deleteContentRange': {'range': {'startIndex': 1, 'endIndex': end}}})
     requests.append({'insertText': {'location': {'index': 1}, 'text': readable_dictionary(dictionary).rstrip('\n')}})
     api(config, 'POST', identifier, body={'writeControl': {'requiredRevisionId': revision}, 'requests': requests})
+
+
+def result_settings(path):
+    """Results delivery uses its own settings, without a manuscript dictionary."""
+    import tomllib
+    from pathlib import Path
+    try:
+        config=tomllib.loads(Path(path).expanduser().read_text())['masking']
+        return {key:config[key] for key in ('rclone_remote','results_folder','results_title') if key in config}
+    except Exception:
+        raise m.MaskError('google-configuration') from None
+
+
+def send_result(policy, run, raw):
+    """Best-effort one running results Doc, using Hao's existing rclone remote."""
+    from datetime import datetime, timezone
+    from pathlib import Path
+    import fcntl, hashlib
+    # The byte-exact private result already exists locally before this function.
+    try:
+        config_path = Path(policy.get('google_config', Path.home()/'sunh14/librarian_agent/codex/config.toml'))
+        config = result_settings(config_path)
+        folder = policy.get('google_folder', config.get('results_folder', 'Librarian/results'))
+        title = policy.get('google_title', config.get('results_title','Librarian results'))
+        # Serialize the same document; unrelated requests keep executing concurrently.
+        lock = Path(policy.get('google_lock', config_path.parent.parent / 'results-google.lock'))
+        with lock.open('a') as fd:
+            fcntl.flock(fd,fcntl.LOCK_EX)
+            parent=ensure_folder(config,folder)
+            identifier=ensure_file(config,parent,title,'application/vnd.google-apps.document',{'librarianResults':'v1'})
+            stamp=datetime.now(timezone.utc).isoformat(timespec='seconds')
+            run_id=Path(run).name
+            content=raw.decode('utf-8')
+            if len(raw)>32768:
+                # rclone handles upload and token refresh; the full table stays local.
+                name=run_id+'.tsv'
+                target=config['rclone_remote']+':'+folder+'/'+name
+                subprocess.run(['rclone','copyto',str(Path(run)/'human.tsv'),target,'--retries','1'],check=True,capture_output=True,timeout=60)
+                # Resolve an authenticated Drive URL without creating public permissions.
+                files=drive_api(config,'GET',params={'q':"trashed = false and '"+parent+"' in parents and name = '"+name+"'",'fields':'nextPageToken,files(id)','pageSize':2})
+                matches=files.get('files',[])
+                if len(matches)!=1 or files.get('nextPageToken') or not re.fullmatch(r'[A-Za-z0-9_-]+',matches[0].get('id','')):
+                    raise m.MaskError('google-large-table-link')
+                link='https://drive.google.com/file/d/'+matches[0]['id']+'/view'
+                content='Large table: '+link+'\nSHA256: '+hashlib.sha256(raw).hexdigest()+'\n'
+            entry='\nLibrarian result '+stamp+' '+run_id+'\n'+content
+            metadata=api(config,'GET',identifier,params={'fields':'documentId,revisionId,body(content(endIndex))'})
+            end=max((e.get('endIndex',1) for e in metadata.get('body',{}).get('content',[])),default=2)-1
+            api(config,'POST',identifier,body={'writeControl':{'requiredRevisionId':metadata['revisionId']},
+                'requests':[{'insertText':{'location':{'index':max(1,end)},'text':entry}}]})
+            # Verify the request ID marker without copying document contents into any hosted receipt.
+            live=api(config,'GET',identifier)
+            text=''.join(e.get('textRun',{}).get('content','') for p in live.get('body',{}).get('content',[]) for e in p.get('paragraph',{}).get('elements',[]))
+            if run_id not in text: raise m.MaskError('google-send-verification')
+            return dict(status='sent',document='https://docs.google.com/document/d/'+identifier+'/edit')
+    except m.MaskError as error:
+        return dict(status='local-retained',reason=str(error).split(' at position ')[0])
+    except Exception as error:
+        return dict(status='local-retained',reason='google-send-'+type(error).__name__)

@@ -8,6 +8,7 @@ import subprocess
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
+FIXTURE = json.loads((ROOT / 'tests/fixtures/scribe_gpu_lsf.json').read_text())
 spec = importlib.util.spec_from_file_location('scribe_support', ROOT / 'scribe_support.py')
 helper = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(helper)
@@ -40,6 +41,20 @@ def test_normalize_scientific_numbers_and_text_identity(tmp_path):
 def test_log_rejects_errors_even_with_answer_and_success(tmp_path, error):
     log = tmp_path / 'log'
     log.write_text(json.dumps(dict(type='item.completed', item=dict(type='command_execution', exit_code=0, aggregated_output=error))))
+    assert helper.log_failure(log) == 'sandbox execution error'
+
+
+@pytest.mark.parametrize('error', [
+    'ERROR codex_core::tools::router: error=`justification` requires an explicit `sandbox_permissions`; use `sandbox_permissions: "require_escalated"` for unsandboxed execution, or omit `justification`.',
+    'ERROR codex_core::tools::router: error=unsupported call: read',
+])
+def test_recovered_tool_argument_errors_are_not_sandbox_failures(tmp_path, error):
+    log = tmp_path / 'log'
+    log.write_text(error + '\n' + json.dumps(dict(type='item.completed', item=dict(
+        type='command_execution', exit_code=0, aggregated_output='ok'))))
+    assert helper.log_failure(log) == 'invalid tool call or arguments'
+    with log.open('a') as f:
+        f.write('\nbwrap: Creating new namespace failed: No space left on device')
     assert helper.log_failure(log) == 'sandbox execution error'
 
 
@@ -78,13 +93,27 @@ def test_state_identity_never_accepts_librarian(tmp_path):
 def lifecycle_env(tmp_path):
     bindir = tmp_path / 'bin'; bindir.mkdir()
     trace = tmp_path / 'trace'
-    for name in ('bjobs', 'bsub', 'bkill'):
+    scripts = {
+        'bjobs': 'if [ -f "$HOME/submitted" ]; then printf "%s\\n" "$FAKE_AFTER_SUBMIT"; else printf "%s\\n" "$FAKE_JOBS"; fi\n',
+        'bsub': 'cat >/dev/null\nprintf "parallel=%s\\n" "$SCRIBE_PARALLEL" >> "$TRACE"\ntouch "$HOME/submitted"\necho "Job <123> is submitted to queue <gpuexpress>."\n',
+        'bkill': '',
+        'bqueues': 'printf "%s\\n" "$FAKE_QUEUES"\n',
+        'bmgroup': 'printf "%s\\n" "$FAKE_GROUPS"\n',
+        'bhosts': 'if [[ "$*" == *-gpu* ]]; then printf "%s\\n" "$FAKE_ALLOCATION"; else printf "%s\\n" "$FAKE_SLOTS"; fi\n',
+        'lsload': 'printf "%s\\n" "$FAKE_LOAD"\n',
+    }
+    for name, body in scripts.items():
         script = bindir / name
-        script.write_text('#!/bin/bash\nprintf "%s\\n" "$0 $*" >> "$TRACE"\n' +
-                          ('printf "%s\\n" "$FAKE_JOBS"\n' if name == 'bjobs' else 'cat >/dev/null\n' if name == 'bsub' else ''))
+        script.write_text('#!/bin/bash\nprintf "%s\\n" "$0 $*" >> "$TRACE"\n' + body)
         script.chmod(0o755)
     env = dict(os.environ, PATH=f'{bindir}:{os.environ["PATH"]}', HOME=str(tmp_path),
-               LIBRARIAN_HOME=str(tmp_path / 'private'), TRACE=str(trace), FAKE_JOBS='')
+               LIBRARIAN_HOME=str(tmp_path / 'private'), TRACE=str(trace), FAKE_JOBS='',
+               FAKE_AFTER_SUBMIT='123 RUN codex-ollama-scribe-1 2*lg02e01 0',
+               FAKE_QUEUES=FIXTURE['queues'], FAKE_GROUPS=FIXTURE['groups'],
+               FAKE_ALLOCATION=FIXTURE['bhosts_gpu'], FAKE_LOAD=FIXTURE['lsload_gpuload'],
+               FAKE_SLOTS=FIXTURE['bhosts_slots'])
+    for key in ('SCRIBE_GPU_MODEL', 'SCRIBE_PARALLEL', 'SCRIBE_WALLTIME', 'SCRIBE_MAX_PENDING'):
+        env.pop(key, None)
     return env, trace
 
 
@@ -106,15 +135,100 @@ def test_down_crosschecks_exact_live_names(tmp_path):
     assert p.returncode == 0 and 'bkill 123' in trace.read_text()
 
 
+def available_allocation(text=FIXTURE['bhosts_gpu'], host='lg02e01', count=1):
+    rows = helper.lsf_table(text, ('HOST_NAME', 'GPU_ID'), True)
+    header = text.splitlines()[0].split()
+    for row in rows:
+        if row['HOST_NAME'] == host and int(row['GPU_ID']) < count:
+            for key in ('NJOBS', 'RUN', 'SUSP', 'RSV'):
+                row[key] = '0'
+    return ' '.join(header) + '\n' + '\n'.join(' '.join(row[k] for k in header) for row in rows) + '\n'
+
+
 def test_up_idempotent_and_parameterized(tmp_path):
     env, trace = lifecycle_env(tmp_path)
-    env.update(FAKE_JOBS='123 RUN codex-ollama-scribe-1 8*node', SCRIBE_PARALLEL='3', SCRIBE_WALLTIME='02:30', SCRIBE_GPU_MODEL='NVIDIAA100_SXM4_80GB')
-    p = subprocess.run([str(ROOT / 'scribes'), 'up', '1'], env=env, capture_output=True)
-    assert p.returncode == 0 and 'bsub' not in trace.read_text()
-    env['FAKE_JOBS'] = ''
-    p = subprocess.run([str(ROOT / 'scribes'), 'up', '1'], env=env, capture_output=True)
-    assert p.returncode == 0
-    assert '-J codex-ollama-scribe-1 -W 02:30 -gpu num=1:gmodel=NVIDIAA100_SXM4_80GB' in trace.read_text()
+    env.update(FAKE_JOBS='123 RUN codex-ollama-scribe-1 2*node 0', SCRIBE_PARALLEL='2',
+               SCRIBE_WALLTIME='02:30', SCRIBE_MAX_PENDING='2', SCRIBE_GPU_MODEL='NVIDIAA100_SXM4_80GB')
+    p = subprocess.run([str(ROOT / 'scribes'), 'up', '1'], env=env, capture_output=True, text=True)
+    assert p.returncode == 0 and 'bsub' not in trace.read_text() and 'bhosts' not in trace.read_text()
+    env.update(FAKE_JOBS='', FAKE_ALLOCATION=available_allocation(host='lg07c09'))
+    p = subprocess.run([str(ROOT / 'scribes'), 'up', '1'], env=env, capture_output=True, text=True)
+    assert p.returncode == 0, p.stderr
+    assert '-J codex-ollama-scribe-1 -q gpuexpress -m lg07c09 -W 02:30 -ptl 2 -gpu num=1:gmem=32G:mode=exclusive_process:j_exclusive=yes:gmodel=NVIDIAA100_SXM4_80GB' in trace.read_text()
+    assert 'parallel=2' in trace.read_text()
+
+
+def test_recorded_free_gpu_parser_ignores_memory_use_and_reservations():
+    assert helper.free_gpu_slots(FIXTURE['bhosts_gpu'], FIXTURE['lsload_gpuload'], FIXTURE['bhosts_slots']) == []
+    alloc = available_allocation()
+    assert helper.free_gpu_slots(alloc, FIXTURE['lsload_gpuload'], FIXTURE['bhosts_slots']) == [('lg02e01', 'NVIDIAH10080GBHBM3')]
+    alloc = alloc.replace('lg02e01 0 NVIDIAH10080GBH 76.2G 0M 0 0 0 0', 'lg02e01 0 NVIDIAH10080GBH 76.2G 0M 0 0 0 1')
+    assert helper.free_gpu_slots(alloc, FIXTURE['lsload_gpuload'], FIXTURE['bhosts_slots']) == []
+
+
+@pytest.mark.parametrize('host,model', [('lg07c01', 'NVIDIAA100_PCIE_40GB'), ('lg07c09', 'NVIDIAA100_SXM4_80GB'),
+    ('lg02e17', 'NVIDIAL40S'), ('lg05g29', 'NVIDIAH100PCIe'), ('lg01e01', 'NVIDIAB200')])
+def test_accepts_any_qualifying_gpu_model(host, model):
+    rows = helper.lsf_table(FIXTURE['bhosts_slots'], ('HOST_NAME', 'STATUS', 'MAX', 'NJOBS'))
+    header = FIXTURE['bhosts_slots'].splitlines()[0].split()
+    for row in rows:
+        if row['HOST_NAME'] == host:
+            row.update(STATUS='ok', NJOBS=str(int(row['MAX']) - 2))
+    slots = ' '.join(header) + '\n' + '\n'.join(' '.join(row[k] for k in header) for row in rows)
+    found = helper.free_gpu_slots(available_allocation(host=host), FIXTURE['lsload_gpuload'], slots)
+    assert found == [(host, model)]
+
+
+def test_parser_rejects_small_cards_full_cores_and_bad_schema():
+    # The recorded unallocated V100 16G is too small.
+    assert not any(host == 'lg03a01' for host, _ in helper.free_gpu_slots(FIXTURE['bhosts_gpu'], FIXTURE['lsload_gpuload'], FIXTURE['bhosts_slots']))
+    slots = FIXTURE['bhosts_slots'].replace('96     64     64', '96     95     95')
+    assert helper.free_gpu_slots(available_allocation(), FIXTURE['lsload_gpuload'], slots) == []
+    with pytest.raises(ValueError):
+        helper.free_gpu_slots('unexpected output', FIXTURE['lsload_gpuload'], slots)
+
+
+def test_up_no_free_gpu_does_not_submit(tmp_path):
+    env, trace = lifecycle_env(tmp_path)
+    p = subprocess.run([str(ROOT / 'scribes'), 'up', '3'], env=env, capture_output=True, text=True)
+    assert p.returncode == 0 and p.stdout == 'no free GPU; no scribe started\n'
+    assert 'bsub' not in trace.read_text()
+
+
+def test_up_caps_submissions_and_uses_small_defaults(tmp_path):
+    env, trace = lifecycle_env(tmp_path)
+    env['FAKE_ALLOCATION'] = available_allocation()
+    p = subprocess.run([str(ROOT / 'scribes'), 'up', '3'], env=env, capture_output=True, text=True)
+    assert p.returncode == 0, p.stderr
+    lines = trace.read_text().splitlines()
+    assert len([line for line in lines if '/bsub ' in line]) == 1
+    assert '-W 04:00 -ptl 5 -gpu num=1:gmem=32G:mode=exclusive_process:j_exclusive=yes' in trace.read_text()
+    assert 'parallel=1' in trace.read_text()
+    server = (ROOT / 'scribe_server.lsf').read_text()
+    assert '#BSUB -n 2' in server and 'rusage[mem=32G]' in server and '#BSUB -ptl 5' in server
+
+
+def test_submission_race_cancels_only_exact_pending_scribe(tmp_path):
+    env, trace = lifecycle_env(tmp_path)
+    env.update(FAKE_ALLOCATION=available_allocation(), FAKE_AFTER_SUBMIT='123 PEND codex-ollama-scribe-1 - 1')
+    p = subprocess.run([str(ROOT / 'scribes'), 'up', '1'], env=env, capture_output=True, text=True)
+    assert p.returncode == 0 and 'removed from queue' in p.stdout
+    assert 'bkill 123' in trace.read_text()
+
+
+def test_submission_race_refuses_unexpected_identity(tmp_path):
+    env, trace = lifecycle_env(tmp_path)
+    env.update(FAKE_ALLOCATION=available_allocation(), FAKE_AFTER_SUBMIT='123 PEND codex-ollama-flash-next - 1')
+    p = subprocess.run([str(ROOT / 'scribes'), 'up', '1'], env=env, capture_output=True, text=True)
+    assert p.returncode != 0 and 'bkill' not in trace.read_text()
+
+
+def test_status_shows_pending_age(tmp_path):
+    env, _ = lifecycle_env(tmp_path)
+    env['FAKE_JOBS'] = '123 PEND codex-ollama-scribe-1 - 67'
+    p = subprocess.run([str(ROOT / 'scribes'), 'status'], env=env, capture_output=True, text=True)
+    assert p.returncode == 0 and 'PENDING_SECONDS' in p.stdout
+    assert p.stdout.splitlines()[1].endswith('\t67')
 
 
 @pytest.mark.parametrize('status', ['match', 'mismatch', 'no-table'])
@@ -202,3 +316,56 @@ def test_state_rejects_source_side_effects_and_redirects(tmp_path):
         path.write_text(path.read_text() + extra + '\n')
         with pytest.raises(ValueError):
             helper.state_model(path, 1)
+
+
+@pytest.mark.parametrize('check,status', [(False, 'match'), (True, 'match'), (True, 'mismatch')])
+def test_no_healthy_scribe_falls_back_sequentially(tmp_path, monkeypatch, check, status):
+    monkeypatch.setenv('HOME', str(tmp_path))
+    monkeypatch.setenv('LIBRARIAN_SCRIBE_ID', '1')
+    monkeypatch.setenv('LIBRARIAN_SCRIBE_SESSION', '1')
+    monkeypatch.setenv('OLLAMA_HOST', 'http://127.0.0.1:11441')
+    monkeypatch.setenv('CODEX_OSS_BASE_URL', 'http://127.0.0.1:11441/v1')
+    monkeypatch.setenv('MINERVA_OLLAMA_DEFAULT_MODEL', 'invented:scribe')
+    run = tmp_path / 'run'; run.mkdir()
+    sessions = []
+    def fake(args, **kwargs):
+        if args[1] == 'endpoint':
+            return subprocess.CompletedProcess(args, 1, '', '')
+        env = kwargs['env']; rd = Path(env['LIBRARIAN_RUN_DIR']); rd.mkdir()
+        sessions.append(rd.name)
+        assert 'LIBRARIAN_SCRIBE_SESSION' not in env  # ordinary wrapper must take its lock
+        assert 'OLLAMA_HOST' not in env and 'CODEX_OSS_BASE_URL' not in env
+        assert 'MINERVA_OLLAMA_DEFAULT_MODEL' not in env
+        assert env['MINERVA_OLLAMA_JOB_NAME'] == 'codex-ollama-flash-next'
+        assert env['MINERVA_OLLAMA_STATE_FILE'].endswith('ollama-flash-next.env')
+        assert env['MINERVA_OLLAMA_REMOTE_PORT'] == '8889' and env['MINERVA_OLLAMA_LOCAL_PORT'] == '11435'
+        (rd / 'answer.md').write_text('invented answer')
+        (rd / 'result.tsv').write_text('key\tvalue\na\t' + ('2' if status == 'mismatch' and rd.name == 'B' else '1') + '\n')
+        return subprocess.CompletedProcess(args, 0, '', '')
+    class ForbiddenPool:
+        def __init__(self, *args, **kwargs):
+            pytest.fail('main librarian fallback must run sequentially')
+    monkeypatch.setattr(helper.subprocess, 'run', fake)
+    monkeypatch.setattr(helper, 'ThreadPoolExecutor', ForbiddenPool)
+    helper.route(run, 'invented task', check, 'me')
+    assert sessions == (['A', 'B', 'reviewer'] if status == 'mismatch' else ['A', 'B'] if check else ['A'])
+    assert (run / 'backend').read_text() == 'librarian\n'
+    assert (run / 'answer.md').is_file()
+
+
+@pytest.mark.parametrize('command', ['bqueues', 'bmgroup', 'bhosts', 'lsload'])
+def test_failed_free_gpu_query_never_submits(tmp_path, command):
+    env, trace = lifecycle_env(tmp_path)
+    (tmp_path / 'bin' / command).write_text('#!/bin/bash\necho "query unavailable" >&2\nexit 1\n')
+    p = subprocess.run([str(ROOT / 'scribes'), 'up', '1'], env=env, capture_output=True, text=True)
+    assert p.returncode != 0 and 'bsub' not in trace.read_text()
+
+
+def test_candidate_count_is_capped_by_free_cores():
+    alloc = available_allocation(count=4)
+    slots = FIXTURE['bhosts_slots'].replace('96     64     64', '96     93     93')
+    assert helper.free_gpu_slots(alloc, FIXTURE['lsload_gpuload'], slots) == [('lg02e01', 'NVIDIAH10080GBHBM3')]
+
+
+def test_closed_hosts_never_admit_scribes():
+    assert helper.free_gpu_slots(available_allocation(host='lg05g29'), FIXTURE['lsload_gpuload'], FIXTURE['bhosts_slots']) == []

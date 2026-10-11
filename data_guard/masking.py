@@ -70,8 +70,8 @@ def plain(runs):
     return "".join(r["text"] for r in runs)
 
 
-def validate_runs(value, runs):
-    if not isinstance(value, str) or not value.strip() or not isinstance(runs, list):
+def validate_runs(value, runs, *, allow_empty=False):
+    if not isinstance(value, str) or (not allow_empty and not value.strip()) or not isinstance(runs, list):
         raise MaskError("invalid-value")
     for run in runs:
         if not isinstance(run, dict) or set(run) - {"text", *STYLES} or not isinstance(run.get("text"), str):
@@ -436,7 +436,7 @@ def load_dictionary(path):
                 if entry["status"] not in ("pending", "needs-human") or not isinstance(entry["description"], str):
                     raise ValueError()
             else:
-                validate_runs(entry["value"], entry["runs"])
+                validate_runs(entry["value"], entry["runs"], allow_empty=entry.get("table_cell") is True)
                 if "status" in entry or "description" in entry:
                     raise ValueError()
         return dictionary
@@ -872,6 +872,216 @@ def main(argv=None):
         if "lock" in locals():
             os.close(lock)
 
+
+
+# Table release uses the manuscript dictionary and VALUE/TEXT identifiers.
+def table_bytes(rows):
+    import csv, io
+    stream = io.StringIO()
+    csv.writer(stream, delimiter='\t', lineterminator='\n').writerows(rows)
+    return stream.getvalue().encode()
+
+
+_GENE_AMBIGUITIES = None
+
+def gene_spans(value, genes, *, gene_column=False):
+    """One case-sensitive matcher shared by release and disclosure auditing."""
+    global _GENE_AMBIGUITIES
+    if _GENE_AMBIGUITIES is None:
+        _GENE_AMBIGUITIES = frozenset(Path(__file__).with_name('gene_ambiguous_words.txt').read_text().splitlines())
+    stop = _GENE_AMBIGUITIES
+    vocabulary = genes if isinstance(genes, (set, frozenset)) else set(genes)
+    if whole_number(value) is not None:
+        return []
+    spans = [(m.start(), m.end()) for m in re.finditer(r'ENS[A-Z]*G\d+(?:\.\d+)?', value)]
+    for match in re.finditer(r'\S+', value):
+        word = match.group()
+        trimmed = word.strip(".,;:!?()[]{}"+chr(34)+chr(39))
+        offset = word.find(trimmed) if trimmed else 0
+        word = trimmed
+        if word in vocabulary and whole_number(word) is None and (gene_column or word not in stop):
+            spans.append((match.start()+offset, match.start()+offset+len(word)))
+    if gene_column and value and not spans and not re.search(r'\{\{(?:TEXT|VALUE)-[A-Z0-9]+\}\}',value) and value not in ('[gene identifier]','[decimal value]','[withheld by staff]'):
+        spans.append((0, len(value)))
+    return sorted(set(spans))
+
+
+def contains_gene(value, genes, *, gene_column=False):
+    return bool(gene_spans(value, genes, gene_column=gene_column))
+
+
+def whole_number(value):
+    from decimal import Decimal, InvalidOperation
+    if not NUMBER.fullmatch(value):
+        return None
+    try:
+        percent = value.endswith('%')
+        spelling = value[:-1] if percent else value
+        if ',' in spelling:
+            if not re.fullmatch(r'[+-]?\d{1,3}(?:,\d{3})+(?:\.0*)?',spelling): return None
+            spelling = spelling.replace(',','')
+        n = Decimal(spelling)
+        if n.is_finite() and n == n.to_integral_value():
+            return str(int(n))+('%' if percent else '')
+    except (InvalidOperation, ValueError, OverflowError):
+        pass
+    return None
+
+
+def redacted_text(value, genes, *, gene_column=False):
+    spans = [(a,b,'gene identifier',None) for a,b in gene_spans(value,genes,gene_column=gene_column)]
+    for match in re.finditer(r'[+-]?(?:\d+\.\d*|\.\d+|\d+[Ee][+-]?\d+)(?:[Ee][+-]?\d+)?',value):
+        if not any(a<=match.start()<b for a,b,_,_ in spans):
+            integer=whole_number(match.group())
+            spans.append((match.start(),match.end(),'decimal value' if integer is None else None,integer))
+    output=[];cursor=0;reasons=[]
+    for a,b,reason,integer in sorted(spans):
+        if a<cursor:continue
+        output.extend([value[cursor:a],'['+reason+']' if reason else integer]);cursor=b
+        if reason:reasons.append(reason)
+    output.append(value[cursor:])
+    return ''.join(output),sorted(set(reasons))
+
+
+def protected_encoding(value, protected):
+    import base64
+    from decimal import Decimal, InvalidOperation
+    forbidden = {str(v) for v in protected if str(v)}
+    numbers = []
+    for original in tuple(forbidden):
+        forbidden.update([original.encode().hex(), base64.b64encode(original.encode()).decode()])
+        try:
+            n = Decimal(original)
+            if n.is_finite() and n != 0:
+                numbers.append(n)
+        except InvalidOperation:
+            pass
+    if any(v in value for v in forbidden):
+        return True
+    # Scan encoded numeric tokens even inside a label or larger quoted string.
+    for token in re.findall(r'[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[Ee][+-]?\d+)?%?', value):
+        try:
+            n = Decimal(token.rstrip('%')) / (100 if token.endswith('%') else 1)
+            if any(n == original * Decimal(10)**power for original in numbers for power in range(-12, 13)):
+                return True
+        except InvalidOperation:
+            continue
+    return False
+
+
+def numeric_text(value):
+    # Decimal/scientific/percent spellings remain numeric inside a larger text cell.
+    return (NUMBER.fullmatch(value) is not None or
+            re.search(r'[+-]?(?:\d+\.\d+|\.\d+|\d+[Ee][+-]?\d+|\d+(?:\.\d+)?%)', value) is not None or
+            re.fullmatch(r'[+-]?(?:inf(?:inity)?|nan)', value, re.I) is not None)
+
+
+def mask_table(dictionary, document, raw, script, *, genes=(), protected=()):
+    """Mask every cell first, including all headings; restore original bytes privately."""
+    import base64, csv, io
+    rows = list(csv.reader(io.StringIO(raw.decode('utf-8')), delimiter='\t', strict=True))
+    if not rows or any(len(row) != len(rows[0]) for row in rows):
+        raise MaskError('table-shape')
+    record = dictionary['documents'].setdefault(document, {})
+    record['table_bytes'] = base64.b64encode(raw).decode()
+    record['table_sha256'] = fingerprint(raw)
+    mapping, masked, positions, inline = {}, [], {}, {}
+    for i, row in enumerate(rows):
+        output = []
+        for j, value in enumerate(row):
+            key = (value, i == 0, j)
+            if key not in mapping:
+                kind = 'VALUE' if NUMBER.fullmatch(value) else 'TEXT'
+                mapping[key] = add_entry(dictionary, document, value, [{'text': value}], kind=kind,
+                                           context='librarian table cell')
+                dictionary['entries'][mapping[key]]['table_cell'] = True
+            token = mapping[key]
+            positions.setdefault(token, []).append([i, j])
+            output.append(token)
+        masked.append(output)
+    record.update(table=masked, positions=positions, columns=rows[0], inline=inline)
+    return table_bytes(masked)
+
+
+def restore_table(dictionary, document):
+    import base64
+    record = dictionary['documents'][document]
+    raw = base64.b64decode(record['table_bytes'], validate=True)
+    if fingerprint(raw) != record['table_sha256']:
+        raise MaskError('table-hash')
+    return raw
+
+
+def table_rules(dictionary, document, *, genes=(), protected=(), gene_columns=(), protected_columns=(), shown_headings=()):
+    """Whole numbers always release. Other cells use identifier/decimal code rules.
+    A heading on the operator whitelist is always shown; the cells under it keep their own rules."""
+    record = dictionary['documents'][document]
+    inline = record.setdefault('inline', {})
+    parent_tokens = {t for row in record['table'] for t in row}
+    for token in parent_tokens:
+        value = dictionary['entries'][token]['value']; cells = record['positions'][token]
+        gene_column = any(i > 0 and record['columns'][j] in gene_columns for i,j in cells)
+        spans = [(a,b,'gene identifier') for a,b in gene_spans(value,genes,gene_column=gene_column)]
+        for match in re.finditer(r'[+-]?(?:\d+\.\d*|\.\d+|\d+[Ee][+-]?\d+)(?:[Ee][+-]?\d+)?',value):
+            if whole_number(match.group()) is None and not any(a<=match.start()<b for a,b,_ in spans):spans.append((match.start(),match.end(),'decimal value'))
+        if spans and not any(a==0 and b==len(value) for a,b,_ in spans):
+            fragments=[]
+            for a,b,reason in sorted(spans):
+                child=next((c for x,y,c,r in inline.get(token,[]) if x==a and y==b and r==reason),None)
+                if child is None:child=add_entry(dictionary,document,value[a:b],[{'text':value[a:b]}],kind='VALUE' if reason=='decimal value' else 'TEXT',context='librarian table fragment')
+                fragments.append((a,b,child,reason))
+                for cell in cells:
+                    if cell not in record['positions'].setdefault(child,[]):record['positions'][child].append(cell)
+            inline[token]=fragments
+    decisions = {}
+    for token, cells in record['positions'].items():
+        value = dictionary['entries'][token]['value']
+        integer = whole_number(value)
+        gene_column = any(i > 0 and record['columns'][j] in gene_columns for i,j in cells)
+        protected_column = any(i > 0 and record['columns'][j] in protected_columns for i,j in cells)
+        redacted, reasons = redacted_text(value, genes, gene_column=gene_column)
+        rule = 'allowed-text'; allowed = True; released = redacted
+        if integer is not None:
+            rule = 'allowed-integer'; released = integer
+        elif value in shown_headings and all(i == 0 for i,j in cells) and not reasons and not NUMBER.fullmatch(value):
+            rule = 'allowed-heading'
+        elif (gene_column and value) or redacted == '[gene identifier]':
+            rule = 'gene-identifier'; allowed = False
+        elif NUMBER.fullmatch(value) or redacted == '[decimal value]':
+            rule = 'decimal-value'; allowed = False
+        elif protected_column:
+            rule = 'protected-column'; allowed = False
+        elif reasons:
+            rule = 'allowed-redacted-text'; released = redacted
+            if record.get('inline',{}).get(token):
+                parts=[];cursor=0
+                for a,b,child,reason in record['inline'][token]:
+                    parts.extend([redacted_text(value[cursor:a],())[0],child+' ['+reason+']']);cursor=b
+                parts.append(redacted_text(value[cursor:],())[0]);released=''.join(parts)
+        decisions[token] = dict(allowed=allowed, rule=rule, released_value=released if allowed else '',
+                                masked_reasons=reasons if allowed else ['gene identifier' if rule=='gene-identifier' else 'decimal value' if rule=='decimal-value' else 'withheld by staff'])
+    return decisions
+
+
+def release_table(dictionary, document, choices, rules, prior=None):
+    """Code releases permitted cells; staff may withhold text, never integers."""
+    record = dictionary['documents'][document]
+    allowed = {t for t,r in rules.items() if r['allowed']}
+    audit = []
+    for token, choice in choices.items():
+        if token not in record['positions'] or choice not in ('unmask', 'keep masked', 'unresolved'):
+            raise MaskError('unmask-choice')
+        if choice == 'keep masked' and rules[token]['rule'] not in ('allowed-integer', 'allowed-heading') and token not in (prior or ()):
+            allowed.discard(token)
+    for token, rule in rules.items():
+        decision = token in allowed
+        reason = 'allowed' if decision else 'gene identifier' if rule['rule']=='gene-identifier' else 'decimal value' if rule['rule']=='decimal-value' else 'withheld by staff'
+        audit.append(dict(item=token, requested=choices.get(token,'code'), decision='unmask' if decision else 'keep masked',
+                          rule=rule['rule'], reason=reason))
+    reason_by_token = {a['item']:a['reason'] for a in audit}
+    rows = [[rules[v].get('released_value', dictionary['entries'][v]['value']) if v in allowed else
+             v+' ['+reason_by_token[v]+']' for v in row] for row in record['table']]
+    return table_bytes(rows), sorted(allowed), audit
 
 if __name__ == "__main__":
     sys.exit(main())

@@ -2,10 +2,11 @@
 # Submit through data_guard/scribes up N; command-line bsub flags set name/GPU/walltime/log.
 #BSUB -P acc_LOAD
 #BSUB -q gpu
-#BSUB -n 8
-#BSUB -R "rusage[mem=64G] span[hosts=1]"
-#BSUB -gpu "num=1:gmodel=NVIDIAH10080GBHBM3"
+#BSUB -n 2
+#BSUB -R "rusage[mem=32G] span[hosts=1]"
+#BSUB -gpu "num=1:gmem=32G:mode=exclusive_process:j_exclusive=yes"
 #BSUB -W 04:00
+#BSUB -ptl 5
 
 set -euo pipefail
 id=${SCRIBE_ID:?set SCRIBE_ID}
@@ -14,7 +15,7 @@ name=codex-ollama-scribe-$id
 [[ ${LSB_JOBNAME:-} == "$name" ]] || { echo 'Exact scribe LSF job name required'; exit 2; }
 model=${SCRIBE_MODEL:-qwen3.8:27b-262k}
 [[ $model =~ ^[A-Za-z0-9_.:/-]+$ ]] || exit 2
-parallel=${SCRIBE_PARALLEL:-3}
+parallel=${SCRIBE_PARALLEL:-1}
 [[ $parallel =~ ^[1-9][0-9]*$ ]] && (( parallel <= 8 )) || exit 2
 port=$((8890 + id))
 state="$HOME/.codex/ollama-scribe-${id}.env"

@@ -1,10 +1,18 @@
 # Data librarian
 
-Hosted coding agents (Codex, Claude Code) write code, operate workflows, run QC and debug. A separate Codex
-instance running a **local Qwen model** on a Minerva GPU node, the librarian, reads unpublished results. Final
-scientific results go from the librarian to the user, not to the hosted agent.
+## Who does what
 
-This is a practical precaution, not a security boundary.
+You hand your code to the librarian, and the librarian runs it. The frontier writes the script and works with placeholders. Two Laguna XS scribe conversations on backend 4 choose bindings; one issues the run and checks text for missed identifiers. Code owns sandbox execution, masking, whole-number release, bins, percentiles, directions, positive rephrase replies, unmasked table restoration, scratch Google delivery and the audit. Laguna S on Hao's main librarian resolves eligible text reviews and bounded escalation under Hao's existing lock; it leaves gene and decimal release decisions to code. Hao owns the policy and receives unmasked broker tables through `--me` and Google. Open `--me` investigations remain model-written. Escalation may resolve a binding after the scribe agreement budget expires.
+
+Current role limits and the operator policy are documented in [~/sunh14/fungen-operator-data-guard/data_guard/BROKER.md](http://127.0.0.1:8548/lab/tree/sunh14/fungen-operator-data-guard/data_guard/BROKER.md). The main job and resident model keep their existing launch settings. The broker targets accidental leakage; deliberate encoded leakage is outside Hao's current threat model.
+
+## Private execution broker
+
+`librarian --broker request.json` adds the frontier-script workflow: two private scribe parameter bindings,
+controller execution of the pinned script, and local librarian review. It preserves the existing return
+logic: coding/debugging answers to the caller, `--me` delivery to the user, explicit committee rules, and
+the `--receipt` filter. It uses the operator's `LIBRARIAN_BROKER_POLICY` configuration. See [BROKER.md](BROKER.md) for the request/policy formats,
+tests, and the additional runtime permissions required for an enforced backend-privacy boundary.
 
 ## Mental model
 
@@ -53,9 +61,10 @@ Default free-text operational replies are not a reliable boundary for numeric QC
 
 ## Scribes
 
-For extra local-model workers on separate GPUs, see [SCRIBES.md](SCRIBES.md): setup from scratch,
+For opportunistic local-model workers on currently free GPUs, see [SCRIBES.md](SCRIBES.md): setup from scratch,
 `scribes up/status/test/down`, isolated routing with `librarian --scribe`, independent A/B verification with
-`--scribe --check`, sizing, relaunch and debugging. The librarian backend stays fixed. Agent sessions run on
+`--scribe --check`, free-GPU admission, 2 cores/32 GB RAM/one >=32 GB GPU, relaunch and debugging.
+No healthy scribe falls back to the serialized main librarian; A/B run sequentially there. The librarian backend stays fixed. Agent sessions run on
 the login/session host or in LSF jobs placed with `-R "$(data_guard/codex_lsf_select)"` (see SCRIBES.md, debugging). The wrapper serializes librarian calls.
 
 ## Files

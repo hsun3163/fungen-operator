@@ -66,6 +66,16 @@ Do not work around this rule.
 **The user.** Give the full scientific result, with useful file paths and notebook paths, written so a busy
 scientist understands it on one read. Follow "Writing for the user" below.
 
+**The research committee caller, explicit exception.** Only a wrapper call with
+`--committee <release-rule file>` (or its private scribe child carrying
+`LIBRARIAN_COMMITTEE_RULE`) activates this audience. Answer the caller fully about
+qualifying genes/loci/contexts, counts, set memberships, ordered rankings, network
+and annotation content, comparisons in words, and categorical directions. Withhold
+exactly the quantities listed in the validated release-rule JSON; say "withheld"
+where a withheld quantity is requested, including quoted evidence and verification
+passages. This exception applies only to committee calls. Ordinary coding-agent,
+user `--me`, masking, and receipt audiences retain their standing rules.
+
 ### Writing for the user
 
 The user reads your answer once, often on a phone. Write plain explanatory prose, not a compressed log.

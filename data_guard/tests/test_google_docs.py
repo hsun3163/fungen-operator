@@ -254,3 +254,41 @@ def test_inline_code_uses_monospaced_runs(recorded):
     run = live['tabs'][0]['documentTab']['body']['content'][1]['paragraph']['elements'][0]['textRun']
     run['textStyle']['weightedFontFamily'] = {'fontFamily': 'Roboto Mono'}
     assert g.paragraphs(live, {'tab': 'synthetic-tab'})[0]['runs'][0]['code'] is True
+
+
+@pytest.mark.parametrize('comment', [
+    '<!-- Synthetic source note -->',
+    '<!-- Synthetic source note\ncontinued -->',
+    r'\<!-- Synthetic source note --\>',
+])
+def test_inline_source_comments_preserve_surrounding_styles(comment):
+    blocks = g.desired_paragraphs(
+        '# Methods\n\nBefore **bold' + comment + ' text**, *italic*, '
+        '[reference](https://example.org), x<sup>2</sup> and y<sub>1</sub>.\n')
+    assert [m.plain(b['runs']) for b in blocks] == [
+        'Methods', 'Before bold text, italic, reference, x2 and y1.']
+    runs = blocks[1]['runs']
+    assert {'text': 'bold text', 'bold': True} in runs
+    assert {'text': 'italic', 'italic': True} in runs
+    assert {'text': 'reference', 'link': 'https://example.org'} in runs
+    assert {'text': '2', 'superscript': True} in runs
+    assert {'text': '1', 'subscript': True} in runs
+    text, _ = g.styled_insert(blocks, 1, 'synthetic-tab', True)
+    assert '<!--' not in text and 'Synthetic source note' not in text
+
+
+def test_comment_closing_line_keeps_prose_and_code_literals():
+    blocks = g.desired_paragraphs('<!-- Synthetic note\ncontinued -->Visible **prose**.\n')
+    assert [m.plain(b['runs']) for b in blocks] == ['Visible prose.']
+    assert {'text': 'prose', 'bold': True} in blocks[0]['runs']
+    blocks = g.desired_paragraphs('Literal `<!-- example -->` remains code.\n')
+    assert {'text': '<!-- example -->', 'code': True} in blocks[0]['runs']
+    assert g.desired_paragraphs(r'\<!-- comment only --\>' + '\n') == []
+
+
+def test_inline_source_comment_import_does_not_change_google_doc(files, recorded, monkeypatch):
+    _, calls = setup_google(files, recorded, monkeypatch)
+    files[2].write_text(files[2].read_text().replace(
+        'Invented', 'Invented<!-- Synthetic source note\ncontinued -->'))
+    m.do_import(files[0], 'synthetic')
+    assert not any(method == 'POST' for method, *_ in calls)
