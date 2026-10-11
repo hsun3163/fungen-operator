@@ -391,7 +391,7 @@ def policy_file(path):
     p = read_json(path)
     exact(p, ('version', 'private_root', 'script_roots', 'inputs', 'runtimes', 'scribes',
               'max_attempts', 'agent_timeout_seconds', 'execution_timeout_seconds',
-              'max_input_bytes', 'max_output_bytes') + tuple(k for k in ('reviewer_scribe', 'reply_format', 'execution_mode', 'gene_vocabulary', 'gene_columns', 'protected_columns', 'review_backend', 'lock_root', 'google_config', 'google_lock', 'google_folder', 'google_title', 'scribe_backends', 'optional_second_look', 'column_labels', 'column_kinds', 'bins', 'threshold_cap', 'review_model', 'main_state', 'main_lock', 'reason_labels', 'shown_headings', 'pushback', 'sampling') if k in p), 'policy-fields')
+              'max_input_bytes', 'max_output_bytes') + tuple(k for k in ('reviewer_scribe', 'reply_format', 'execution_mode', 'gene_vocabulary', 'gene_columns', 'protected_columns', 'review_backend', 'lock_root', 'google_config', 'google_lock', 'google_folder', 'google_title', 'scribe_backends', 'optional_second_look', 'column_labels', 'column_kinds', 'bins', 'threshold_cap', 'review_model', 'main_state', 'main_lock', 'reason_labels', 'shown_headings', 'pushback', 'sampling', 'local_mode', 'chain') if k in p), 'policy-fields')
     require(reply_format(p) in ('lines', 'json'), 'reply-format')
     require(type(p['version']) is int and p['version'] == 1, 'policy-version')
     require(Path(p['private_root']).is_absolute(), 'private-root')
@@ -489,7 +489,7 @@ def execute(policy, request, snapshot, selected, rd, dynamic_columns=False):
     params = {'inputs': {role: f'/inputs/{ident}' for role, ident in selected['inputs'].items()},
               'parameters': selected['parameters']}
     save(rd / 'parameters.json', params)
-    runtime = policy['runtimes'][request['script']['runtime']]
+    runtime = policy['runtimes'].get(request['script']['runtime']) or dict(argv=[dict(CHAIN,**policy.get('chain',{}))['python'],'-I'],read_only_roots=dict(CHAIN,**policy.get('chain',{}))['read_only_roots'])
     bwrap = shutil.which('bwrap')
     require(bwrap is not None, 'sandbox-unavailable')
     command = [bwrap, '--die-with-parent', '--new-session', '--unshare-all', '--clearenv']
@@ -1074,6 +1074,69 @@ def table_key(raw):
     return (tuple(rows[0]) if rows else (), sorted(tuple(r) for r in rows[1:]))
 
 
+CHAIN = read_json(Path(__file__).with_name('standin_policy.json')).get('chain', dict(statements=4, python='/usr/bin/python3', read_only_roots=['/usr', '/lib', '/lib64', '/bin']))
+LOCAL_MODE = read_json(Path(__file__).with_name('standin_policy.json')).get('local_mode', 'script')
+CHAIN_PRELUDE = ('import sys, json\nimport pandas as pd\n'
+                 'p = json.load(open(sys.argv[1])); inputs = p["inputs"]; output = sys.argv[2]\n')
+
+
+def chain_body(code):
+    """The agent's own statements, with a restated prelude (imports, p, inputs, output) set aside."""
+    import ast
+    try: tree = ast.parse(code)
+    except SyntaxError: return code
+    def prelude(node):
+        if isinstance(node, (ast.Import, ast.ImportFrom)): return True
+        targets = [t for n in ([node] if isinstance(node, ast.Assign) else []) for t in n.targets]
+        return bool(targets) and all(isinstance(t, ast.Name) and t.id in ('p', 'inputs', 'output') for t in targets)
+    body = list(tree.body)
+    while body and prelude(body[0]): body.pop(0)
+    return '\n'.join(ast.unparse(node) for node in body)
+
+
+def chain_problems(code, roles, limit):
+    """Why a snippet falls outside the short pandas chain shape (empty list when it fits).
+    Shape (Hao): after the fixed prelude, one statement loads a named input and filters, one chained
+    operation computes the answer, one exports, and one more is spare. No loops, branches or definitions."""
+    import ast
+    try: tree = ast.parse(code)
+    except SyntaxError as exc: return ['Python syntax error on line '+str(exc.lineno)]
+    problems = []
+    if not 1 <= len(tree.body) <= limit: problems.append('write at most '+str(limit)+' statements; this has '+str(len(tree.body)))
+    for node in tree.body:
+        if not (isinstance(node, ast.Expr) or (isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name))):
+            problems.append('each statement is one chain, assigned to a name or exporting the result'); break
+    banned = (ast.Import, ast.ImportFrom, ast.For, ast.While, ast.If, ast.With, ast.Try, ast.FunctionDef, ast.ClassDef, ast.AsyncFunctionDef,
+              ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp, ast.Global, ast.Nonlocal, ast.Delete, ast.Await, ast.Yield, ast.YieldFrom)
+    if any(isinstance(node, banned) for node in ast.walk(tree)): problems.append('use chained table operations only: loops, branches, comprehensions, imports and definitions belong in a script')
+    names = {node.id for node in ast.walk(tree) if isinstance(node, ast.Name)}
+    if names & {'open', 'exec', 'eval', 'compile', '__import__', 'getattr', 'setattr', 'globals', 'locals', 'os', 'sys', 'subprocess', 'p'}:
+        problems.append('use only pd, inputs, output and names you assign')
+    attrs = [node.attr for node in ast.walk(tree) if isinstance(node, ast.Attribute)]
+    if any(a.startswith('_') or a in ('to_pickle', 'read_pickle', 'to_sql', 'read_sql', 'to_json', 'to_excel', 'to_parquet', 'read_json', 'read_excel', 'read_parquet', 'read_table', 'system') for a in attrs):
+        problems.append('read with pd.read_csv and export with to_csv only')
+    reads = [node for node in ast.walk(tree) if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == 'read_csv']
+    def named_input(call):
+        a = call.args[0] if call.args else None
+        return (isinstance(a, ast.Subscript) and isinstance(a.value, ast.Name) and a.value.id == 'inputs'
+                and isinstance(a.slice, ast.Constant) and a.slice.value in roles)
+    if not reads or not all(named_input(c) for c in reads): problems.append('load each table as pd.read_csv(inputs["<role>"], sep="\\t") with a role from Inputs: '+', '.join(sorted(roles)))
+    exports = [node for node in ast.walk(tree) if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == 'to_csv']
+    if len(exports) != 1 or not (exports[0].args and isinstance(exports[0].args[0], ast.Name) and exports[0].args[0].id == 'output') or not any(isinstance(n, ast.Call) and n is exports[0] for n in ast.walk(tree.body[-1])):
+        problems.append('end with one export: <table>.to_csv(output, sep="\\t", index=False)')
+    return problems
+
+
+def unlisted_values(code, facts):
+    """Category values a snippet filters on that the column never takes (a silent empty selection)."""
+    listed = {c: set(v) for f in facts if 'role' in f for c, v in f.get('category_values', {}).items()}
+    found = []
+    for column, value in re.findall(r"""\b([A-Za-z_]\w*)\s*==\s*\\?['"]([^'"\\]+)\\?['"]""", code) + \
+                         re.findall(r"""\[\s*['"]([A-Za-z_]\w*)['"]\s*\]\s*==\s*['"]([^'"]+)['"]""", code):
+        if column in listed and value not in listed[column]: found.append(dict(column=column, value=value, values_present=sorted(listed[column])))
+    return found
+
+
 class Pushback(Exception):
     """A no-script request the local agent hands back; the message is the reply to the requester."""
 
@@ -1157,6 +1220,7 @@ def local_try(request,policy,agents,rd,seed):
             seen=list(dict.fromkeys(r[j] for r in rows[1:]))
             if types[column]=='string' and 1<len(seen)<=12 and len(rows)-1>len(seen): values[column]=seen
         facts.append(dict(input_id=ident,role=role,columns=header,row_count=len(rows)-1,types=types,category_values=values))
+    chain=policy.get('local_mode',LOCAL_MODE)=='chain'; chain_limit=dict(CHAIN,**policy.get('chain',{}))['statements']
     for turn in range(8):
         if turn>=6: escalated=True
         active_schema=schema if last is None else object_schema(dict(action=dict(type='string',enum=['answer','unresolved']),input_id=dict(type='string',enum=list(request['inputs'].values())),column=dict(type='string',const=''),n=dict(type='integer',const=1),code=dict(type='string',const='')))
@@ -1175,6 +1239,21 @@ def local_try(request,policy,agents,rd,seed):
                 'Use exact requested metric labels and order; copy scalar count columns using int, never list-length or row count. For numerical mean use statistics.mean of finite float values; median uses statistics.median; type-7 or linear quartiles use statistics.quantiles(values,n=4,method="inclusive"). '
                 'category_values in Evidence lists every value a category column takes; filter only on values listed there. Use the exact output column names the question states; never rename one. When an output cell names an input, write its role name (the key in Inputs), never a file path. Read a column as row["name"] with a name from Evidence; never use row.get(). '
                 'writerow(header), then writerows(data). Choose run_python with the entire code string. Only after its result choose answer.')
+        if chain and last is None:
+            prompt=('Librarian agent. Answer the question with a short pandas script in chained style, using action run_python. '
+                    'These lines are already present above your code:\n'+CHAIN_PRELUDE+
+                    'Write at most '+str(chain_limit)+' statements after them, each one chain: '
+                    '(1) load a named input and do basic filtering, e.g. d = pd.read_csv(inputs["'+role+'"], sep="\\t").query(...); '
+                    '(2) one chained operation that computes the answer; '
+                    '(3) export it with .to_csv(output, sep="\\t", index=False); one more statement is spare, for a second table for example. '
+                    'Do not repeat the lines above. A small table of named results is built in one statement, e.g. pd.DataFrame({"metric": ["rows", "genes"], "count": [len(d), d["gene"].nunique()]}). '
+                    'TRUE/FALSE columns load as booleans: filter with query("flag") or query("flag == True"). '
+                    'Use chained table operations only (query, loc, groupby, agg, size, nunique, value_counts, sort_values, head, merge, drop_duplicates, rename, assign, pivot_table, reset_index, describe, quantile). '
+                    'Use exact column names from Evidence; category_values lists every value a category column takes, filter only on those. '
+                    'Use the exact output column names and row labels the question states. When an output cell names an input, write its role name. '
+                    'Metadata actions (list_columns, row_count, distinct, first_rows) gather facts first when you need them; n must be 1..10. '
+                    'When the question needs loops, branches, several differently built sections or more statements than allowed, choose unresolved.\n'
+                    'Question: '+request['question']+'\nInputs: '+json.dumps(request['inputs'])+'\nEvidence: '+json.dumps(facts))
         if last is not None:
             prompt=('Librarian agent final reply. The native run has produced this table. Choose answer to deliver it when it answers the question; choose unresolved only for a concrete mismatch. '
                     'Confirm every part of the question checklist is computed; a truncated preview does not mean the table is truncated. The fixed n=1 is a reply field, not a limit on count values.\nQuestion: '+request['question']+'\nParts checklist: '+json.dumps(checklist)+'\nComputed table:\n'+facts[-1].get('table',next((f['table'] for f in reversed(facts) if 'table' in f),'')))
@@ -1186,6 +1265,8 @@ def local_try(request,policy,agents,rd,seed):
             facts.append(dict(error=str(exc),instruction='Return every required schema field with its exact JSON type. n is an integer from 1 to 10, not a decimal or string. Use only the listed input IDs and actions.'))
             continue
         if value['action']=='unresolved':
+            if chain and last is None and not any('error' in f for f in facts):
+                raise Pushback('This request needs more than a short chain of table operations.'+advice)
             unresolved+=1
             if unresolved>=policy['max_attempts']: escalated=True
             if last is not None:
@@ -1209,8 +1290,14 @@ def local_try(request,policy,agents,rd,seed):
         elif act=='first_rows': facts.append(dict(rows=rows[:value['n']],preview_truncated=len(rows)>value['n'],total_rows=len(rows),shown_rows=min(value['n'],len(rows))))
         elif act=='run_python':
             require(len(value['code'])<=32768,'agent-code-limit')
+            if chain:
+                value=dict(value,code=chain_body(value['code']))
+                problems=chain_problems(value['code'],set(request['inputs']),chain_limit); absent=[] if problems else unlisted_values(value['code'],facts)
+                if problems or absent:
+                    facts.append(dict(error='outside-chain-shape' if problems else 'filter-values-absent',problems=problems,absent_values=absent,instruction='Rewrite the snippet in the chain shape and use run_python again.' if problems else 'These filter values never occur in that column. Filter on values_present and use run_python again.')); failed_check(); continue
+                value=dict(value,code=CHAIN_PRELUDE+value['code'])
             known={c for f in facts if 'role' in f for c in f['columns']}|set(request['inputs'])
-            missing=unknown_columns(value['code'],known)
+            missing=[] if chain else unknown_columns(value['code'],known)
             if missing:
                 unresolved+=1
                 if unresolved>=policy['max_attempts']: escalated=True
@@ -1219,7 +1306,7 @@ def local_try(request,policy,agents,rd,seed):
             snapshot=directory(rd/f'agent-snapshot-{turn}'); directory(snapshot/'inputs'); save(snapshot/'analysis',value['code'].encode())
             for ident in request['inputs'].values(): save(snapshot/'inputs'/ident,table_content(policy['inputs'][ident],policy['max_input_bytes']))
             # Snippet output headings are private until the code-driven release rules run.
-            temp=dict(version=1,question=request['question'],script=dict(path=str(path),sha256=digest(path.read_bytes()),runtime='python'),inputs={k:[v] for k,v in request['inputs'].items()},parameters={},output=dict(columns=[]))
+            temp=dict(version=1,question=request['question'],script=dict(path=str(path),sha256=digest(path.read_bytes()),runtime='pandas' if chain else 'python'),inputs={k:[v] for k,v in request['inputs'].items()},parameters={},output=dict(columns=[]))
             try:
                 raw,_=execute(policy,temp,snapshot,dict(inputs=request['inputs'],parameters={}),rd/f'agent-execution-{turn}',dynamic_columns=True)
             except Exception as exc:

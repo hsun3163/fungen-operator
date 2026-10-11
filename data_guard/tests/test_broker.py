@@ -31,7 +31,7 @@ def case(tmp_path):
     script = scripts / 'analysis.py'; script.write_bytes(SCRIPT)
     source = tmp_path / 'source.tsv'
     source.write_text('group\tvalue\nA\t0.654321\nA\t0.876543\nB\t0.123456\n')
-    policy = dict(version=1, private_root=str(tmp_path / 'private'), script_roots=[str(scripts)],
+    policy = dict(version=1, local_mode='script', private_root=str(tmp_path / 'private'), script_roots=[str(scripts)],
                   execution_mode='agent-session', inputs={'toy': str(source)}, runtimes={'python': {
                       'argv': ['/usr/bin/python3', '-I'],
                       'read_only_roots': [p for p in ('/usr', '/lib', '/lib64', '/bin') if Path(p).exists()]}},
@@ -228,7 +228,7 @@ def test_policy_missing_and_malformed_request_cli_never_echo_values(case):
 
 def test_private_wrapper_retains_answer_without_publishing(tmp_path):
     bindir = tmp_path / 'bin'; bindir.mkdir()
-    stub = bindir / 'codex'
+    stub = bindir / 'codex-oss'
     stub.write_text('''#!/bin/sh
 echo '{"type":"item.completed","item":{"type":"command_execution","exit_code":0}}'
 echo 'SECRET_LOG_0_654321' >&2
@@ -261,7 +261,7 @@ printf '%s\\n' '{"id":4,"host":"http://127.0.0.1:11444","model":"invented-local-
 ''')
     endpoints.chmod(0o755)
     bindir = folder / 'bin'; bindir.mkdir()
-    codex = bindir / 'codex'
+    codex = bindir / 'codex-oss'
     codex.write_text('''#!/usr/bin/env python3
 import fcntl,json,os,sys
 from pathlib import Path
@@ -320,7 +320,7 @@ def test_private_wrapper_rejects_conflicting_modes(other):
 
 def test_private_schema_is_preserved_when_native_wrapper_resumes(tmp_path):
     bindir = tmp_path / 'bin'; bindir.mkdir()
-    stub = bindir / 'codex'
+    stub = bindir / 'codex-oss'
     stub.write_text('''#!/usr/bin/env python3
 import json,os,sys
 from pathlib import Path
@@ -372,7 +372,7 @@ print(json.dumps({'id':i,'host':f'http://127.0.0.1:{11440+i}','model':'synthetic
 ''')
     endpoints.chmod(0o755)
     bindir = folder / 'bin'; bindir.mkdir()
-    stub = bindir / 'codex'
+    stub = bindir / 'codex-oss'
     stub.write_text('''#!/usr/bin/env python3
 import fcntl,json,os,sys
 from pathlib import Path

@@ -5,7 +5,7 @@
 # --me:    final librarian message -> latest.md; caller receives only "Done"
 # --receipt: local allowlist emits only slot statuses and verification flags
 #
-# The model endpoint comes from the `codex --oss` launcher: set OLLAMA_HOST to
+# The model endpoint comes from the `codex-oss` launcher: set OLLAMA_HOST to
 # pin it, otherwise the launcher finds the Ollama LSF job and tunnels to it.
 
 script=$(readlink -f "$0")
@@ -201,7 +201,7 @@ session_instruction="Before answering, execute pwd in this run directory to veri
 # otherwise wait on a caller's open pipe.
 timeout -k 30 "$timeout_s" \
     env CODEX_HOME="$L/codex" \
-    codex "${codex_dirs[@]}" exec --oss --json "${network_args[@]}" \
+    codex-oss "${codex_dirs[@]}" exec --oss --json "${network_args[@]}" \
         "${response_args[@]}" \
         --skip-git-repo-check \
         -s workspace-write \
@@ -216,15 +216,36 @@ rc=$?
 # reasoning, so no final message is recorded. Resume the same session with
 # reasoning off only to write the final message.
 # Detect execution failures even when Codex returns rc=0 and writes a plausible answer.
-reason=$(python3 "$here/scribe_support.py" log "$run/log")
-if [ $? != 0 ] && [ "$private_mode" != 1 ]; then
+reason=$(python3 "$here/scribe_support.py" log "$run/log"); log_rc=$?
+sid=$(python3 "$here/scribe_support.py" session "$run/log")
+# Guard rails guide the agent; they block only work that has no evidence behind it.
+# Mistakes the agent recovered from stand as notes. When its last tool call failed,
+# hand it the correction and let it redo the step, at most twice.
+guided=0
+while [ $log_rc != 0 ] && [ "$reason" = 'ended on a failed tool call' ] && [ -n "$sid" ] \
+        && [ "$private_mode" != 1 ] && [ $guided -lt 2 ]; do
+    guided=$((guided + 1))
+    hint=$(python3 "$here/scribe_support.py" guidance "$run/log")
+    timeout -k 30 "$timeout_s" \
+        env CODEX_HOME="$L/codex" \
+        codex-oss "${codex_dirs[@]}" exec --oss --json "${network_args[@]}" -s workspace-write \
+            resume "${response_args[@]}" --skip-git-repo-check \
+            -o "$run/answer.md" \
+            "$sid" \
+            "Your last tool call failed. $hint Redo that step with one command, then write your final answer to the task from the work above. Your answer goes to $aud." \
+            < /dev/null >> "$run/log" 2>&1
+    rc=$?
+    reason=$(python3 "$here/scribe_support.py" log "$run/log"); log_rc=$?
+done
+if [ $log_rc != 0 ] && [ "$private_mode" != 1 ]; then
     echo "Librarian failed: $reason. Log: $run/log"; exit 1
 fi
-sid=$(python3 "$here/scribe_support.py" session "$run/log")
+notes=$(python3 "$here/scribe_support.py" notes "$run/log")
+[ -n "$notes" ] && printf 'recovered tool mistakes: %s; guided retries: %s\n' "$notes" "$guided" > "$run/session-notes.txt"
 if [ $rc -eq 0 ] && [ ! -s "$run/answer.md" ] && [ -n "$sid" ]; then
     timeout -k 30 "$timeout_s" \
         env CODEX_HOME="$L/codex" \
-        codex "${codex_dirs[@]}" exec --oss --json "${network_args[@]}" -s workspace-write -c 'model_reasoning_effort="none"' \
+        codex-oss "${codex_dirs[@]}" exec --oss --json "${network_args[@]}" -s workspace-write -c 'model_reasoning_effort="none"' \
             resume "${response_args[@]}" --skip-git-repo-check \
             -o "$run/answer.md" \
             "$sid" \

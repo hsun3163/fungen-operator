@@ -79,7 +79,7 @@ hosted frontier agent
         |
         | coding / QC / debug question        librarian "<task>"
         v
-local-model librarian  (codex exec --oss, local Qwen)
+local-model librarian  (codex-oss exec, local Qwen)
         |
         | reads protected data locally
         v
@@ -131,7 +131,7 @@ the login/session host or in LSF jobs placed with `-R "$(data_guard/codex_lsf_se
 |---|---|
 | `librarian` | wrapper (`librarian [--scribe [--check]] [--me] "<task>"`) |
 | `scribes`, `scribe_server.lsf`, `scribe_support.py` | scribe lifecycle, GPU server and local checks/routing |
-| `minerva_codex`, `minerva_ollama_common.sh`, `ollama-models.json` | existing Minerva launcher/helper, retained for fresh setup |
+| `codex-oss`, `minerva_ollama_common.sh`, `ollama-models.json` | existing Minerva launcher/helper, retained for fresh setup |
 | `SCRIBES.md` | complete setup, isolation, use and debugging guide |
 | `AGENTS.md` | librarian instructions; linked into the librarian's `CODEX_HOME` |
 | `config.toml` | librarian Codex config template |
@@ -172,7 +172,7 @@ Environment (e.g. in `~/.bashrc`):
 | `LIBRARIAN_REPO` | `$LIBRARIAN_HOME/repo` | private git clone; README.md = latest answer, answers/ = all |
 | `LIBRARIAN_JUPYTER_BASE_URL` | `http://127.0.0.1:$JUPYTER_PORT` | JupyterLab base URL for links (no token), as reached through the tunnel; the Minerva launcher exports `JUPYTER_PORT` |
 
-**Endpoint.** `librarian` calls `codex exec --oss` through the existing Minerva launcher (`~/local/bin/codex`,
+**Endpoint.** `librarian` calls `codex-oss exec` through the Minerva launcher (`~/local/bin/codex-oss`,
 `~/local/scripts/minerva_ollama_common.sh`). With `OLLAMA_HOST` unset, the launcher finds the running
 `codex-ollama-flash-next` LSF job and tunnels `127.0.0.1:11435` to it, so a new GPU node needs no change. Set
 `OLLAMA_HOST` to pin a specific endpoint. There is no hosted-model fallback: if Qwen is unreachable the call fails.
@@ -214,7 +214,7 @@ call. There is no other audit system.
 2. Open the run log it names.
 3. Check the Qwen node: `bjobs -J codex-ollama-flash-next`, `curl -s --noproxy '*' http://127.0.0.1:11435/api/tags`.
 4. A run with no successful command or any bwrap/sandbox execution error now fails even if Codex wrote an answer.
-5. Check `$LIBRARIAN_HOME/codex/config.toml` (`codex exec --oss --strict-config ...` validates it).
+5. Check `$LIBRARIAN_HOME/codex/config.toml` (`codex-oss exec --strict-config ...` validates it).
 6. Check timeout (`LIBRARIAN_TIMEOUT`) and sandbox errors in the log.
 
 ## Review notebooks

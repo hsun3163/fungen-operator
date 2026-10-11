@@ -101,13 +101,13 @@ export LIBRARIAN_PROTECTED=/your/exact/protected/path
 ```
 
 For an existing account, preserve its config and links; setup is a one-time recipe, not a reset command.
-The repository includes the Minerva launcher (`data_guard/minerva_codex`) and common tunnel helper
+The repository includes the Minerva launcher (`data_guard/codex-oss`) and common tunnel helper
 (`data_guard/minerva_ollama_common.sh`), plus the required compact model catalogue (`data_guard/ollama-models.json`), copied from the existing working session-host installation. On a fresh
 account, install them once:
 
 ```bash
 mkdir -p ~/local/bin ~/local/scripts
-install -m 755 "$repo/data_guard/minerva_codex" ~/local/bin/codex
+install -m 755 "$repo/data_guard/codex-oss" ~/local/bin/codex-oss
 install -m 644 "$repo/data_guard/minerva_ollama_common.sh" ~/local/scripts/minerva_ollama_common.sh
 install -m 644 "$repo/data_guard/ollama-models.json" ~/.codex/ollama-models.json
 ```

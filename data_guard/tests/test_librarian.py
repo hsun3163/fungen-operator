@@ -12,6 +12,8 @@ echo "NOISY tool output: secret-row-42"
 echo "NOISY stderr" >&2
 [ -z "$STUB_NO_COMMAND" ] && echo '{"type":"item.completed","item":{"type":"command_execution","exit_code":0}}'
 [ -n "$STUB_LOG_ERROR" ] && echo "$STUB_LOG_ERROR"
+[ -n "$STUB_SLIP_TIMES" ] && echo '{"type":"thread.started","thread_id":"stub-thread"}'
+[ -n "$STUB_SLIP_TIMES" ] && echo x >> "$STUB_SLIP_COUNT" && [ "$(wc -l < "$STUB_SLIP_COUNT")" -le "$STUB_SLIP_TIMES" ] && echo 'ERROR codex_core::tools::router: error=unsupported call: read'
 [ -n "$STUB_LOCK" ] && flock -n "$LIBRARIAN_HOME/librarian.lock" -c true && exit 7
 [ -n "$STUB_ARGS" ] && printf '%s\\n' "$@" > "$STUB_ARGS"
 while [ $# -gt 0 ]; do
@@ -29,7 +31,7 @@ printf '%s\\n' "${STUB_ANSWER:-FAKE ANSWER}" > "$out"
 def run(tmp_path, *args, fail=False, **extra):
     bindir = tmp_path / "bin"
     bindir.mkdir(exist_ok=True)
-    stub = bindir / "codex"
+    stub = bindir / "codex-oss"
     stub.write_text(STUB)
     stub.chmod(0o755)
     env = dict(os.environ, PATH=f"{bindir}:{os.environ['PATH']}", LIBRARIAN_HOME=str(tmp_path / "home"))
@@ -210,6 +212,25 @@ def test_failed_commands_never_print_done_even_with_answer(tmp_path, error):
     assert p.returncode != 0 and p.stdout.startswith('Librarian failed:')
     assert 'Done' not in p.stdout
     assert not (tmp_path / 'home/latest.md').exists()
+
+
+@pytest.mark.parametrize('slips,done', [(1, True), (2, True), (3, False)])
+def test_last_failed_tool_call_gets_guided_retries_then_stands_or_fails(tmp_path, slips, done):
+    count = tmp_path / 'slips'
+    trace = tmp_path / 'args.txt'
+    p = run(tmp_path, '--me', 'synthetic task', STUB_SLIP_TIMES=str(slips), STUB_SLIP_COUNT=str(count), STUB_ARGS=str(trace))
+    assert len(count.read_text().splitlines()) == min(slips, 2) + 1
+    if done:
+        assert p.returncode == 0 and p.stdout.startswith('Done')
+        assert (tmp_path / 'home/latest.md').exists()
+        # The retry is a resume of the same session that names the correction.
+        args = trace.read_text()
+        assert 'resume' in args and 'stub-thread' in args and 'exec_command' in args
+        (rd,) = runs(tmp_path)
+        assert f'guided retries: {slips}' in (rd / 'session-notes.txt').read_text()
+    else:
+        assert p.returncode != 0 and 'ended on a failed tool call' in p.stdout
+        assert not (tmp_path / 'home/latest.md').exists()
 
 
 def test_no_command_never_releases_plausible_answer(tmp_path):

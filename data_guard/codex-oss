@@ -1,9 +1,14 @@
 #!/bin/bash
+# codex-oss: Codex on the Minerva local-model (Ollama) runtime.
+# It opens the connection to the Ollama server, points Codex at it, fills in the local provider and the
+# default model, and always runs in --oss mode. Plain `codex` is the hosted Codex and does none of this.
+# CODEX_REAL_BIN selects the Codex binary (the librarian pins its own copy this way).
 set -euo pipefail
 
 real_codex="${CODEX_REAL_BIN:-$HOME/.npm-global/bin/codex}"
 common_sh="$HOME/local/scripts/minerva_ollama_common.sh"
-use_oss=0
+use_oss=1
+saw_oss=0
 has_model=0
 requested_model=""
 has_local_provider=0
@@ -25,11 +30,13 @@ while [[ $# -gt 0 ]]; do
     -oss)
       normalized_args+=(--oss)
       use_oss=1
+      saw_oss=1
       shift
       ;;
     --oss)
       normalized_args+=(--oss)
       use_oss=1
+      saw_oss=1
       shift
       ;;
     -c|--config|--enable|--disable)
@@ -158,6 +165,10 @@ if (( use_oss )) && (( ! skip_setup )); then
       ollama_base_url="http://$ollama_base_url"
     fi
     export CODEX_OSS_BASE_URL="${ollama_base_url%/v1}/v1"
+  fi
+
+  if (( ! saw_oss )); then
+    injected_args+=(--oss)
   fi
 
   # Keep the local model prompt lean; explicit CLI feature choices take priority.

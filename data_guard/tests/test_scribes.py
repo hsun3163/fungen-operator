@@ -49,12 +49,38 @@ def test_log_rejects_errors_even_with_answer_and_success(tmp_path, error):
     'ERROR codex_core::tools::router: error=unsupported call: read',
 ])
 def test_recovered_tool_argument_errors_are_not_sandbox_failures(tmp_path, error):
+    ok = json.dumps(dict(type='item.completed', item=dict(type='command_execution', exit_code=0, aggregated_output='ok')))
     log = tmp_path / 'log'
-    log.write_text(error + '\n' + json.dumps(dict(type='item.completed', item=dict(
-        type='command_execution', exit_code=0, aggregated_output='ok'))))
+    # A mistake followed by a successful command is recovered: the session stands, with a note.
+    log.write_text(error + '\n' + ok)
+    assert helper.log_failure(log) is None
+    assert helper.log_notes(log) == 'tool x1'
+    # A mistake with no successful command anywhere has no evidence behind it.
+    log.write_text(error)
     assert helper.log_failure(log) == 'invalid tool call or arguments'
+    # Ending on a mistake asks for a guided retry and names the correction.
+    log.write_text(ok + '\n' + error)
+    assert helper.log_failure(log) == 'ended on a failed tool call'
+    assert 'exec_command' in helper.log_guidance(log)
+    # An environment failure that is never followed by a success still blocks.
     with log.open('a') as f:
         f.write('\nbwrap: Creating new namespace failed: No space left on device')
+    assert helper.log_failure(log) == 'sandbox execution error'
+    with log.open('a') as f:
+        f.write('\n' + ok)
+    assert helper.log_failure(log) is None
+
+
+def test_missing_working_directory_is_a_recoverable_mistake(tmp_path):
+    ok = json.dumps(dict(type='item.completed', item=dict(type='command_execution', exit_code=0, aggregated_output='ok')))
+    slip = 'Rejected("Failed to create unified exec process: No such file or directory (os error 2)")'
+    log = tmp_path / 'log'
+    log.write_text(ok + '\n' + slip)
+    assert helper.log_failure(log) == 'ended on a failed tool call'
+    assert 'working directory' in helper.log_guidance(log)
+    log.write_text(ok + '\n' + slip + '\n' + ok)
+    assert helper.log_failure(log) is None and helper.log_notes(log) == 'exec x1'
+    log.write_text(slip)
     assert helper.log_failure(log) == 'sandbox execution error'
 
 

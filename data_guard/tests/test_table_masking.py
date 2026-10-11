@@ -692,3 +692,67 @@ def test_cut_off_or_empty_reply_is_asked_again_with_the_next_seed(tmp_path,monke
     agents=b.DirectAgents(dict(lock_root=str(tmp_path/'locks'),agent_timeout_seconds=10))
     reply=agents.call('librarian','Synthetic',tmp_path/'call',4,b.object_schema(dict(status=dict(type='string',enum=['ok','unresolved']))))
     assert reply=={'status':'ok'} and seen==[11,12,14] and len(agents.metrics[0]['repeats'])==2
+
+
+GOOD_CHAIN='d = pd.read_csv(inputs["table"], sep="\\t").query("group == \'A\'")\nout = d.groupby("group")["gene"].nunique().reset_index(name="genes")\nout.to_csv(output, sep="\\t", index=False)'
+
+
+@pytest.mark.parametrize('code,fits',[
+    (GOOD_CHAIN,True),
+    ('pd.read_csv(inputs["table"], sep="\\t").head(3).to_csv(output, sep="\\t", index=False)',True),
+    (GOOD_CHAIN+'\nx = 1\ny = 2',False),
+    ('for r in range(3):\n    pass',False),
+    ('import os\n'+GOOD_CHAIN,False),
+    (GOOD_CHAIN.replace('inputs["table"]','"/etc/passwd"'),False),
+    (GOOD_CHAIN.replace('to_csv(output','to_csv("/tmp/x"'),False),
+    ('d = pd.read_csv(inputs["table"], sep="\\t")\nd = [r for r in d]\nd.to_csv(output)',False),
+    ('d = pd.read_csv(inputs["table"], sep="\\t")\nopen("x","w")\nd.to_csv(output)',False),
+    ('d = pd.read_csv(inputs["table"], sep="\\t")\nd.to_csv(output)\nd.head()',False),
+    ('def f(:',False)])
+def test_chain_shape_accepts_short_chains_and_names_what_falls_outside(code,fits):
+    problems=b.chain_problems(code,{'table'},4)
+    assert (problems==[])==fits
+    assert all(isinstance(p,str) and p for p in problems)
+
+
+def test_unlisted_filter_value_is_named_before_running():
+    facts=[dict(role='table',columns=['gene','group'],category_values=dict(group=['A','B']))]
+    assert b.unlisted_values('d = pd.read_csv(inputs["table"], sep="\\t").query("group == \'primary\'")',facts)==[dict(column='group',value='primary',values_present=['A','B'])]
+    assert b.unlisted_values('d = d[d["group"] == "A"]',facts)==[]
+
+
+def test_chain_mode_guides_then_runs_with_the_fixed_prelude(case,tmp_path,monkeypatch):
+    _,_,_,policy=case;policy=dict(policy,local_mode='chain',max_attempts=3,pushback=dict(attempts=3,tries=1))
+    codes=iter(['for r in range(3):\n    pass',GOOD_CHAIN]);prompts=[];ran=[]
+    class Agent:
+        metrics=[]
+        def call(self,role,prompt,rd,backend,schema):
+            prompts.append(prompt)
+            action='answer' if schema['properties']['action']['enum']==['answer','unresolved'] else 'run_python'
+            return b.validate_constrained(dict(action=action,input_id='toy',column='',n=1,code=next(codes) if action=='run_python' else ''),schema)
+    def execute(policy,request,snapshot,selected,rd,dynamic_columns=False):
+        ran.append(((snapshot/'analysis').read_text(),request['script']['runtime']));return b'group\tgenes\nA\t2\n',[]
+    monkeypatch.setattr(b,'execute',execute)
+    rd=tmp_path/'agent';rd.mkdir()
+    b.local_question(dict(action='question',question='Count genes in group A.',inputs={'table':'toy'}),policy,Agent(),rd)
+    assert 'short pandas script' in prompts[0] and 'outside-chain-shape' in prompts[1]
+    assert ran==[(b.CHAIN_PRELUDE+b.chain_body(GOOD_CHAIN),'pandas')]
+
+
+def test_chain_mode_hands_back_a_request_that_does_not_fit(case,tmp_path):
+    _,_,_,policy=case;policy=dict(policy,local_mode='chain',pushback=dict(tries=1))
+    class Agent:
+        metrics=[]
+        def call(self,role,prompt,rd,backend,schema):
+            return b.validate_constrained(dict(action='unresolved',input_id='toy',column='',n=1,code=''),schema)
+    rd=tmp_path/'agent';rd.mkdir()
+    with pytest.raises(b.Pushback) as info:b.local_question(dict(action='question',question='Do several things.',inputs={'table':'toy'}),policy,Agent(),rd)
+    assert str(info.value)=='This request needs more than a short chain of table operations. Send it as a script, or ask one part at a time.'
+    assert not re.search(BAD_WORDS,str(info.value),re.I)
+
+
+def test_restated_prelude_is_set_aside_before_the_shape_check():
+    code='import sys, json\nimport pandas as pd\np = json.load(open(sys.argv[1])); inputs = p["inputs"]; output = sys.argv[2]\n'+GOOD_CHAIN
+    body=b.chain_body(code)
+    assert 'import' not in body and b.chain_problems(body,{'table'},4)==[]
+    assert b.chain_body('def f(:')=='def f(:'

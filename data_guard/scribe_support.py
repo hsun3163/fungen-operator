@@ -145,36 +145,84 @@ def state_model(path, ident):
     return model
 
 
-def log_failure(path, require_command=True):
-    text = Path(path).read_text(errors='replace')
-    succeeded = False
-    outputs = []
-    for line in text.splitlines():
+# Guard-rail philosophy (Hao, 2026-10-11): tolerate the agent's own mistakes and guide it
+# back; block only when its work has no evidence behind it. A wrong tool name, a missing
+# working directory or a refused sandbox call is a mistake the agent can recover from. The
+# session stands when a command succeeded after its last mistake.
+ENVIRONMENT = re.compile(r'bwrap[^\n]*(?:fail|error|can.t|namespace)|\bsandbox\b[^\n]*(?:fail|error)|(?:fail|error)[^\n]*\bsandbox\b|Creating new namespace failed', re.I)
+EXEC_PROCESS = re.compile(r'Failed to create unified exec process')
+TOOL_CALL = re.compile(r'error=`justification` requires an explicit `sandbox_permissions`|error=unsupported call:[^\n"\\]*')
+GUIDANCE = {
+    'environment': 'The sandbox refused that command. Run commands inside your run directory and read the named files with cat.',
+    'exec': 'That command could not start because its working directory or program does not exist. Leave the working directory unset, or use your run directory.',
+    'tool': 'That tool does not exist. The only tool is exec_command, which runs one shell command; read files with cat through it.',
+}
+
+
+def log_events(path):
+    """Ordered tool events of one session log: ('ok' | 'environment' | 'exec' | 'tool', detail)."""
+    events = []
+
+    def classify(text, success=False):
+        if ENVIRONMENT.search(text):
+            events.append(('environment', ENVIRONMENT.search(text).group()[:120]))
+        elif EXEC_PROCESS.search(text):
+            events.append(('exec', EXEC_PROCESS.search(text).group()))
+        elif TOOL_CALL.search(text):
+            events.append(('tool', TOOL_CALL.search(text).group()[:120]))
+        elif success:
+            events.append(('ok', ''))
+
+    for line in Path(path).read_text(errors='replace').splitlines():
         try:
             event = json.loads(line)
         except ValueError:
-            outputs.append(line)
-            if re.search(r'\bsucceeded in\b', line):
-                succeeded = True
+            classify(line, bool(re.search(r'\bsucceeded in\b', line)))
             continue
-        item = event.get('item', {})
+        if not isinstance(event, dict):
+            continue
+        item = event.get('item') or {}
         if item.get('type') == 'error':
-            outputs.append(item.get('message', ''))
-        if item.get('type') == 'command_execution':
-            outputs.append(item.get('aggregated_output', ''))
-            if event.get('type') == 'item.completed' and item.get('exit_code') == 0:
-                succeeded = True
+            classify(item.get('message', ''))
+        if item.get('type') == 'command_execution' and event.get('type') == 'item.completed':
+            classify(item.get('aggregated_output') or '', item.get('exit_code') == 0)
         if event.get('type') in ('error', 'turn.failed'):
             error = event.get('error', {})
-            outputs.append(event.get('message', '') + ' ' + (error.get('message', '') if isinstance(error, dict) else str(error)))
-    errors = '\n'.join(outputs)
-    if re.search(r'bwrap[^\n]*(?:fail|error|can.t|namespace)|\bsandbox\b[^\n]*(?:fail|error)|(?:fail|error)[^\n]*\bsandbox\b|Failed to create unified exec process|Creating new namespace failed', errors, re.I):
+            classify(event.get('message', '') + ' ' + (error.get('message', '') if isinstance(error, dict) else str(error)))
+    return events
+
+
+def log_failure(path, require_command=True):
+    """None when the session's work stands; otherwise the reason it does not.
+    Mistakes followed by a successful command are recovered and do not fail the session."""
+    events = log_events(path)
+    kinds = [kind for kind, _ in events]
+    if 'ok' not in kinds:
+        if 'environment' in kinds or 'exec' in kinds:
+            return 'sandbox execution error'
+        if 'tool' in kinds:
+            return 'invalid tool call or arguments'
+        return 'no command succeeded' if require_command else None
+    last = kinds[-1]
+    if last == 'environment':
         return 'sandbox execution error'
-    if re.search(r'error=`justification` requires an explicit `sandbox_permissions`|error=unsupported call:', errors):
-        return 'invalid tool call or arguments'
-    if require_command and not succeeded:
-        return 'no command succeeded'
+    if last in ('exec', 'tool'):
+        return 'ended on a failed tool call'
     return None
+
+
+def log_guidance(path):
+    """One sentence that tells the agent how to redo the step its last tool call failed on."""
+    for kind, _ in reversed(log_events(path)):
+        if kind != 'ok':
+            return GUIDANCE[kind]
+    return ''
+
+
+def log_notes(path):
+    """Recovered mistakes of a session, for the audit line: 'tool x2; exec x1' or ''."""
+    kinds = [kind for kind, _ in log_events(path) if kind != 'ok']
+    return '; '.join(f'{kind} x{kinds.count(kind)}' for kind in sorted(set(kinds)))
 
 
 def session_id(path):
@@ -325,6 +373,10 @@ if __name__ == '__main__':
             error = log_failure(args[0], len(args) == 1)
             if error:
                 print(error); sys.exit(1)
+        elif cmd == 'guidance':
+            print(log_guidance(args[0]))
+        elif cmd == 'notes':
+            print(log_notes(args[0]))
         elif cmd == 'session':
             print(session_id(args[0]))
         elif cmd == 'compare':

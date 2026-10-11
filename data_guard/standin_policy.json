@@ -34,5 +34,17 @@
       23
     ],
     "max_tokens": 6000
+  },
+  "local_mode": "chain",
+  "chain": {
+    "statements": 4,
+    "python": "/sc/arion/work/sunh14/conda/envs/py3.11/bin/python3",
+    "read_only_roots": [
+      "/usr",
+      "/lib",
+      "/lib64",
+      "/bin",
+      "/sc/arion/work/sunh14/conda/envs/py3.11"
+    ]
   }
 }
