@@ -696,6 +696,8 @@ def test_cut_off_or_empty_reply_is_asked_again_with_the_next_seed(tmp_path,monke
 
 def test_row_order_is_part_of_the_answer_when_two_tries_are_compared():
     assert b.table_key(b'g\tn\nA\t1\nB\t2\n')!=b.table_key(b'g\tn\nB\t2\nA\t1\n')
+    assert b.table_key(b'g\tn\nA\t1\n')!=b.table_key(b'g\tn\nA\t1.0\n')
+    assert b.table_key(b'g\tn\nA\t1\n')==b.table_key(b'g\tn\nA\t1\n')
 
 
 GOOD_CHAIN='d = load("table").query("group == \'A\'")\nout = d.groupby("group")["gene"].nunique().reset_index(name="genes")\nout.to_csv(output, sep="\\t", index=False)'

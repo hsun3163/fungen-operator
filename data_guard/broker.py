@@ -1070,9 +1070,9 @@ def ask(agents, seed, *args):
 
 
 def table_key(raw):
-    """A table as header plus rows in order: row order is part of an answer (ranks, source order)."""
-    rows = list(csv.reader(io.StringIO(raw.decode()), delimiter='\t'))
-    return (tuple(rows[0]) if rows else (), [tuple(r) for r in rows[1:]])
+    """Two tries agree only when their output is identical, byte for byte (Hao: the two tables should be
+    exactly the same). Any difference in values, order, header or formatting sends the request back."""
+    return bytes(raw)
 
 
 CHAIN = read_json(Path(__file__).with_name('standin_policy.json')).get('chain', dict(statements=4, python='/usr/bin/python3', read_only_roots=['/usr', '/lib', '/lib64', '/bin']))
