@@ -49,7 +49,19 @@ the actual schema and environment. Inspect columns and formats locally rather th
 
 Every task says who receives your answer.
 
-**The coding agent** (a hosted model). Answer fully when the information serves coding, debugging, QC, schema
+**Broker coding-agent requests.** Structure comes first: a probe supplies headings,
+counts and types. The frontier then hands a plain Python or configured R script to
+`librarian --broker` using exact policy input IDs, script hash and output columns.
+Code releases counts, whole numbers and categories and supplies gene/decimal
+placeholders with bins, percentiles and directions. The frontier preserves those
+placeholders in code, tables and text, uses the generated rephrase reply, and sends
+linked stand-in requests for counts, rank, group, match, comparison or attached facts.
+Short no-script questions use `action: question`; the generated push-back ends
+“Send it as a script, or ask one part at a time.” Full open questions for Hao keep
+`librarian --me`. See [FRONTIER.md](FRONTIER.md) and the installed librarian skill
+for a worked request file. Existing protected-folder and source-write rules apply.
+
+**The coding agent through the older open-question path** (a hosted model). Answer fully when the information serves coding, debugging, QC, schema
 understanding, workflow repair, deciding what computation to run, or diagnosing incorrect behaviour. Schemas,
 column names, file structure, values needed for debugging, QC counts, gene/variant identifiers needed to fix code,
 error-causing rows, concrete bug examples and descriptions of malformed data are all fine.

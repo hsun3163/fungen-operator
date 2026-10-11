@@ -75,6 +75,7 @@ while [ $# -gt 0 ]; do
     shift
 done
 if [ -n "$broker_request" ]; then
+    export LIBRARIAN_BROKER_POLICY=${LIBRARIAN_BROKER_POLICY:-$L/operator/broker-policy.json}
     if [ "$private_mode" = 1 ] || [ "$scribe" != 0 ] || [ "$check" != 0 ] || [ $# != 0 ]; then
         echo 'Librarian failed: broker mode conflicts with another routing mode or task'; exit 2
     fi
@@ -148,9 +149,18 @@ fi
 if [ -n "$broker_request" ]; then
     # Private broker children acquire the native main-model lock themselves.
     # Deliver the reviewed answer through the unchanged audience branches below.
-    LIBRARIAN_BROKER_AUDIENCE="$aud" LIBRARIAN_BROKER_ANSWER="$run/answer.md" \
-        python3 "$here/broker.py" "$broker_request" > "$run/broker-receipt.json" 2> "$run/log"
-    rc=$?
+    if ! broker_route=$(python3 "$here/live_inventory.py" --policy "$LIBRARIAN_BROKER_POLICY" \
+        --request "$broker_request" --output "$run/operator-policy.json" --probe-answer "$run/answer.md" 2> "$run/log"); then
+        echo "Librarian failed: withheld by staff. Log: $run/log"; exit 1
+    fi
+    if [ "$broker_route" = analysis ]; then
+        LIBRARIAN_BROKER_POLICY="$run/operator-policy.json" \
+            LIBRARIAN_BROKER_AUDIENCE="$aud" LIBRARIAN_BROKER_ANSWER="$run/answer.md" \
+            python3 "$here/broker.py" "$broker_request" > "$run/broker-receipt.json" 2> "$run/log"
+        rc=$?
+    else
+        rc=0
+    fi
     if [ "$rc" != 0 ]; then
         echo "Librarian failed: withheld by staff. Log: $run/log"; exit 1
     fi

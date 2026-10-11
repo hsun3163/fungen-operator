@@ -1,0 +1,19 @@
+eqtl	row_count	distinct_genes	gene	distinct_gene_fraction	distinct_gene_fraction_bin	distinct_gene_fraction_percentile
+IsoMiGa_MFG	533	195	{{TEXT-DFMU}} [gene identifier]	{{VALUE-IZX3}} [decimal value]	below 0.50	89
+IsoMiGa_PFC	1409	452	{{TEXT-DFMU}} [gene identifier]	{{VALUE-7KH2}} [decimal value]	below 0.50	50
+IsoMiGa_STG	314	110	{{TEXT-DFMU}} [gene identifier]	{{VALUE-PD6B}} [decimal value]	below 0.50	83
+IsoMiGa_SVZ	262	100	{{TEXT-2A5C}} [gene identifier]	{{VALUE-PFQH}} [decimal value]	below 0.50	100
+IsoMiGa_THA	221	81	{{TEXT-YH4B}} [gene identifier]	{{VALUE-DOXD}} [decimal value]	below 0.50	94
+IsoMiGa_fixed_meta	3227	1011	{{TEXT-6BRL}} [gene identifier]	{{VALUE-FCCN}} [decimal value]	below 0.50	17
+MESA_mono_v5_white	3578	1112	{{TEXT-BVIP}} [gene identifier]	{{VALUE-FY55}} [decimal value]	below 0.50	11
+MG1_fixed_meta	1992	629	{{TEXT-7LWJ}} [gene identifier]	{{VALUE-BJ46}} [decimal value]	below 0.50	22
+MG2_fixed_meta	1697	526	{{TEXT-7LWJ}} [gene identifier]	{{VALUE-6MOM}} [decimal value]	below 0.50	6
+MG3_fixed_meta	900	287	{{TEXT-G6MO}} [gene identifier]	{{VALUE-7K6Z}} [decimal value]	below 0.50	39
+MG4_fixed_meta	825	265	{{TEXT-6CO4}} [gene identifier]	{{VALUE-4GSX}} [decimal value]	below 0.50	56
+MG_fixed_meta	3107	987	{{TEXT-DFMU}} [gene identifier]	{{VALUE-GFFW}} [decimal value]	below 0.50	33
+Onek1k_monocyte	787	250	{{TEXT-NKDZ}} [gene identifier]	{{VALUE-QCXZ}} [decimal value]	below 0.50	28
+STARNET_FC_liftover	5425	1743	{{TEXT-BVIP}} [gene identifier]	{{VALUE-ZQ2B}} [decimal value]	below 0.50	61
+STARNET_MP	9776	3122	{{TEXT-6BRL}} [gene identifier]	{{VALUE-XNWY}} [decimal value]	below 0.50	44
+TenK10K_CD14_Mono	5966	1920	{{TEXT-GHYE}} [gene identifier]	{{VALUE-6DUL}} [decimal value]	below 0.50	72
+TenK10K_CD16_Mono	5401	1736	{{TEXT-GHYE}} [gene identifier]	{{VALUE-37QW}} [decimal value]	below 0.50	67
+rosmap_mono	1877	628	{{TEXT-NKDZ}} [gene identifier]	{{VALUE-UINA}} [decimal value]	below 0.50	78

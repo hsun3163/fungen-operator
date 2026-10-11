@@ -1,5 +1,63 @@
 # Librarian private execution and deterministic release
 
+## Live table contract — 11 October 2026
+
+Start with a structure probe, then hand a plain Python or configured R script to
+`librarian --broker`. Counts and all whole numbers are always released; categories
+are shown, while gene identifiers and fractional decimals use stable placeholders.
+Code and the staff identifier check protect against accidental leakage. An operator
+heading whitelist keeps schema names readable; gene/protected column headings are
+also shown. Source cell values retain their own masking decisions.
+
+One generated sentence template explains each masked item and its available
+stand-ins. Probability columns get policy bins and percentiles; other decimals get
+direction, percentile and absolute-value percentile. Percentiles use an inclusive
+empirical CDF rounded to whole percentiles, referenced to the named returned or
+selected source column. Linked rephrase requests keep the original table and audit.
+The main librarian is the review backend under its existing shared lock and resident
+model check. Routine staff use backend 4; transports close after each request.
+
+Simple no-script questions use the local agent. Requests exceeding 180 words or
+40 clause marks are handed back before inference; two failed computed attempts
+also trigger “Send it as a script, or ask one part at a time.” Two independent tries
+must agree on the table (row order normalized, duplicate rows retained); differing
+tries get the same advice. **Being measured:** two-tries agreement and temperature
+0.2 with fixed seeds 11 and 23, in `runs/temp-bench-*`. Those settings are current
+code decisions under measurement, rather than established reliability claims.
+
+The archive qualification report separates completion, correctness and usefulness;
+`real-final-002` recorded zero disclosures and did not pass all targets. Live table
+installation and the supervised request have their own metadata-only report in
+`temp_reference/live-tables/REPORT.md`. The results document for Hao is titled
+**Librarian results**, in the existing **Librarian/results** Drive folder.
+
+### Installed live policy and structure path
+
+The installed wrapper defaults to `~/sunh14/librarian_agent/operator/broker-policy.json`.
+That operator-owned file contains the complete catalog and release settings, outside
+frontier-writable workspaces. `live_inventory.py` selects the named candidate IDs
+into the private wrapper run, preserving every release setting; `policy_file` checks
+that request-scoped policy. This supports a catalog larger than the unchanged core
+loader's 64 KiB artifact limit. Linked requests reuse their original admitted IDs.
+
+Installed `action: probe` is a fixed code calculation of headings and logical row
+counts. It releases no sample cells, infers no scalar values, makes no model calls
+and records a private audit. Analysis/rephrase/review keep the core broker path.
+Structure metadata stays in the native reply rather than filling Hao's results Doc.
+
+Rebuild and validate headers:
+```bash
+python3 data_guard/live_inventory.py --output temp_reference/live-tables/headers-live.tsv \
+  --policy ~/sunh14/librarian_agent/operator/broker-policy.json
+python3 data_guard/live_inventory.py --validate-probes --output temp_reference/live-tables \
+  --policy ~/sunh14/librarian_agent/operator/broker-policy.json
+```
+The inventory covers exported paper data, nested analysis results, figure source data,
+and the handoff's gene/locus, judge, role-atlas, interactome and sensor/machinery layers.
+Raw workflow data, downloaded references and staged annotation work remain outside
+this live export catalog. Every listed column has one explicit gene/protected/shown
+classification; a new input or header causes the inventory check to fail.
+
 ## Who does what
 
 You hand your code to the librarian, and the librarian runs it. The librarian is the service and the one name people deal with; current receipts, audits and results documents carry that name.
@@ -7,7 +65,7 @@ You hand your code to the librarian, and the librarian runs it. The librarian is
 - **Frontier model (Claude or Codex):** writes an analysis script from the named inputs and their structure, works with the masked return and placeholders, and asks for a stand-in when needed; it chooses the computation, while input access, execution and release stay with the librarian.
 - **The librarian:** admits the request, routes its staff, executes and delivers it through one command; it owns that service sequence, while Hao owns its policy and the independent test oracle judges correctness.
 - **Scribes (Laguna XS, the librarian's staff):** two fresh conversations independently choose inputs and parameters during bounded agreement attempts; one chooses run or a fixed decline reason, and the first unmask scribe may set aside text containing a missed identifier; a no-script scribe chooses private steps and snippets, while code retains execution and release authority. Backend 4 currently serves these conversations sequentially under its lock; additional configured endpoints can add capacity.
-- **Code (the librarian's hands and limits):** pins and executes the script in the sandbox, masks cells and embedded protected tokens into the local dictionary, releases every whole number and permitted text, attaches stand-ins, generates the reply, restores Hao's table, sends it to the scratch Google document and writes the audit; it supplies the outgoing table bytes, while the analysis script determines their scientific meaning.
+- **Code (the librarian's hands and limits):** pins and executes the script in the sandbox, masks cells and embedded protected tokens into the local dictionary, releases every whole number and permitted text, attaches stand-ins, generates the reply, restores Hao's table, sends it to the operator-selected Google document and writes the audit; it supplies the outgoing table bytes, while the analysis script determines their scientific meaning.
 - **Large librarian model (Laguna S):** answers Hao's open `--me` questions through the existing full-agent path, reviews eligible staff-set-aside text, and resolves bindings or local steps after bounded scribe attempts remain unresolved; it stays off the routine broker path and leaves gene/decimal release decisions to code. In an escalation it may resolve a binding without a matching scribe pair.
 - **Hao:** receives broker tables unmasked through `--me` and Google Docs and owns gene columns, protected columns, labels, bins, caps and backends; his settings define the service contract, while test completion and correctness remain separate evidence.
 
@@ -92,7 +150,7 @@ The bounded campaign is completed and qualification failed. Three owned rounds r
 
 Historical evidence retains 211 scanner detections: seven round-001 frontier cases with seven gene-identifier detections each in broker bytes, and two round-002 cases with 81 detections each in tool output. Every event and every mismatch has its own sanitized line in the final report; protected token/result values are not reproduced. Latest mismatches are Q009 frontier/local (one numeric-summary cell each), Q025 frontier (four count cells), Q026 frontier (two count cells), and Q019 local (one metric label). No oracle precision, disclosure check, ceiling, target or attempt cap was weakened. Zero final detections do not imply successful coverage in blocked cases.
 
-Repairs were confined to the test harness: broker interface access in the nested tool sandbox, an explicit parameter-file contract and asynchronous wait instruction, idempotent identical completed probes, atomic score writes, serialized reference writes, stable report columns, pre-execution-only guard retries, and native scratch Google delivery with the companion external configuration/shared document lock. All 119 scored attempts have cleanup records with no nonzero tunnel-close status. Recent retained scheduler records are DONE; older records are no longer returned by bjobs, so their terminal evidence is bsub -K/controller completion and native cleanup. Both backend jobs remain RUN and no review case was skipped for backend loss.
+Repairs were confined to the test harness: broker interface access in the nested tool sandbox, an explicit parameter-file contract and asynchronous wait instruction, idempotent identical completed probes, atomic score writes, serialized reference writes, stable report columns, pre-execution-only guard retries, and native operator-selected Google delivery with the companion external configuration/shared document lock. All 119 scored attempts have cleanup records with no nonzero tunnel-close status. Recent retained scheduler records are DONE; older records are no longer returned by bjobs, so their terminal evidence is bsub -K/controller completion and native cleanup. Both backend jobs remain RUN and no review case was skipped for backend loss.
 
 Only both file-shape/completeness instances are fully served. Other patterns have partial permitted successes, intentional protected-encoding/nonliteral-header withholding, or execution/final-answer/correctness gaps. Original archive dates and compressed byte sizes are an interface gap. Protected names/decimals remain intentionally unavailable to the frontier. Collected production candidates include premature local-agent answers before a computed result and unmarked truncation of large private previews. The companion job 274954094 was still RUN at the final production-edit gate; this campaign made no broker/wrapper code change. These candidates remain unapplied and unqualified under the three-round budget. Shared code changed in the companion campaign; per-case source fingerprints preserve that drift, so this is not a frozen-code comparison.
 

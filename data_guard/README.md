@@ -1,8 +1,66 @@
 # Data librarian
 
+## Live table contract — 11 October 2026
+
+Start with a structure probe, then hand a plain Python or configured R script to
+`librarian --broker`. Counts and all whole numbers are always released; categories
+are shown, while gene identifiers and fractional decimals use stable placeholders.
+Code and the staff identifier check protect against accidental leakage. An operator
+heading whitelist keeps schema names readable; gene/protected column headings are
+also shown. Source cell values retain their own masking decisions.
+
+One generated sentence template explains each masked item and its available
+stand-ins. Probability columns get policy bins and percentiles; other decimals get
+direction, percentile and absolute-value percentile. Percentiles use an inclusive
+empirical CDF rounded to whole percentiles, referenced to the named returned or
+selected source column. Linked rephrase requests keep the original table and audit.
+The main librarian is the review backend under its existing shared lock and resident
+model check. Routine staff use backend 4; transports close after each request.
+
+Simple no-script questions use the local agent. Requests exceeding 180 words or
+40 clause marks are handed back before inference; two failed computed attempts
+also trigger “Send it as a script, or ask one part at a time.” Two independent tries
+must agree on the table (row order normalized, duplicate rows retained); differing
+tries get the same advice. **Being measured:** two-tries agreement and temperature
+0.2 with fixed seeds 11 and 23, in `runs/temp-bench-*`. Those settings are current
+code decisions under measurement, rather than established reliability claims.
+
+The archive qualification report separates completion, correctness and usefulness;
+`real-final-002` recorded zero disclosures and did not pass all targets. Live table
+installation and the supervised request have their own metadata-only report in
+`temp_reference/live-tables/REPORT.md`. The results document for Hao is titled
+**Librarian results**, in the existing **Librarian/results** Drive folder.
+
+### Installed live policy and structure path
+
+The installed wrapper defaults to `~/sunh14/librarian_agent/operator/broker-policy.json`.
+That operator-owned file contains the complete catalog and release settings, outside
+frontier-writable workspaces. `live_inventory.py` selects the named candidate IDs
+into the private wrapper run, preserving every release setting; `policy_file` checks
+that request-scoped policy. This supports a catalog larger than the unchanged core
+loader's 64 KiB artifact limit. Linked requests reuse their original admitted IDs.
+
+Installed `action: probe` is a fixed code calculation of headings and logical row
+counts. It releases no sample cells, infers no scalar values, makes no model calls
+and records a private audit. Analysis/rephrase/review keep the core broker path.
+Structure metadata stays in the native reply rather than filling Hao's results Doc.
+
+Rebuild and validate headers:
+```bash
+python3 data_guard/live_inventory.py --output temp_reference/live-tables/headers-live.tsv \
+  --policy ~/sunh14/librarian_agent/operator/broker-policy.json
+python3 data_guard/live_inventory.py --validate-probes --output temp_reference/live-tables \
+  --policy ~/sunh14/librarian_agent/operator/broker-policy.json
+```
+The inventory covers exported paper data, nested analysis results, figure source data,
+and the handoff's gene/locus, judge, role-atlas, interactome and sensor/machinery layers.
+Raw workflow data, downloaded references and staged annotation work remain outside
+this live export catalog. Every listed column has one explicit gene/protected/shown
+classification; a new input or header causes the inventory check to fail.
+
 ## Who does what
 
-You hand your code to the librarian, and the librarian runs it. The frontier writes the script and works with placeholders. Two Laguna XS scribe conversations on backend 4 choose bindings; one issues the run and checks text for missed identifiers. Code owns sandbox execution, masking, whole-number release, bins, percentiles, directions, positive rephrase replies, unmasked table restoration, scratch Google delivery and the audit. Laguna S on Hao's main librarian resolves eligible text reviews and bounded escalation under Hao's existing lock; it leaves gene and decimal release decisions to code. Hao owns the policy and receives unmasked broker tables through `--me` and Google. Open `--me` investigations remain model-written. Escalation may resolve a binding after the scribe agreement budget expires.
+You hand your code to the librarian, and the librarian runs it. The frontier writes the script and works with placeholders. Two Laguna XS scribe conversations on backend 4 choose bindings; one issues the run and checks text for missed identifiers. Code owns sandbox execution, masking, whole-number release, bins, percentiles, directions, positive rephrase replies, unmasked table restoration, operator-selected Google delivery and the audit. Laguna S on Hao's main librarian resolves eligible text reviews and bounded escalation under Hao's existing lock; it leaves gene and decimal release decisions to code. Hao owns the policy and receives unmasked broker tables through `--me` and Google. Open `--me` investigations remain model-written. Escalation may resolve a binding after the scribe agreement budget expires.
 
 Current role limits and the operator policy are documented in [~/sunh14/fungen-operator-data-guard/data_guard/BROKER.md](http://127.0.0.1:8548/lab/tree/sunh14/fungen-operator-data-guard/data_guard/BROKER.md). The main job and resident model keep their existing launch settings. The broker targets accidental leakage; deliberate encoded leakage is outside Hao's current threat model.
 

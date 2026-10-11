@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "question": "Using only the live COSI main results table, count all rows and distinct nonmissing gene IDs per eqtl dataset, without a significance filter. Return columns eqtl,row_count,distinct_genes,gene,distinct_gene_fraction, sorted by eqtl; integer counts. The gene column retains one representative key and distinct_gene_fraction is distinct_genes divided by row_count, solely to exercise placeholder masking for Hao. Coding-agent audience receives the masked table; Hao receives the unmasked table in Librarian results. Stop if a named column or input is unavailable.",
+  "script": {
+    "path": "/sc/arion/work/sunh14/fungen-operator-data-guard/temp_reference/live-tables/count_by_eqtl.py",
+    "sha256": "d331f542d245d440dbdaa5bd53b5c39bb8108afee9eef93afe31084ab37e3062",
+    "runtime": "python"
+  },
+  "inputs": {
+    "table": [
+      "live_cf02f058e45eb684"
+    ]
+  },
+  "parameters": {},
+  "output": {
+    "columns": [
+      "eqtl",
+      "row_count",
+      "distinct_genes",
+      "gene",
+      "distinct_gene_fraction"
+    ]
+  }
+}

@@ -1,0 +1,7 @@
+{
+  "backend": 4,
+  "socket": "/tmp/sunh14/ollama-tunnels/lh05g22/lg03e18_11444_8894.sock",
+  "status": "closed",
+  "owned_tunnel": true,
+  "exit_code": 0
+}

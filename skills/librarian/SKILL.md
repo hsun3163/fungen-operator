@@ -1,85 +1,62 @@
 ---
 name: librarian
-description: "Ask the local-model data librarian for scientific results in protected files instead of reading them yourself. Use when the user asks to check, inspect, list, interpret or compare scientific results (which genes/variants pass, hit counts, effect sizes, context comparisons)."
+description: "Use the local librarian to execute scripts on protected results and return masked tables, or deliver Hao's open scientific questions with --me."
 ---
 
 # Librarian
 
-Unpublished results are read by a local Qwen model (`codex exec --oss`), not by you. You operate the project;
-the librarian reads the archive and answers.
+Apply human-runner, then [query](../query/SKILL.md): name exact inputs, operation,
+counting unit, audience, limits and completion. Compare resolved paths against the
+colon-separated `$LIBRARIAN_PROTECTED`; result figures are protected too. Inspect
+filenames, sizes, schemas, headers, counts and QC pass/fail directly. Keep source
+cell values, effect sizes, P/FDR, gene lists and result figures with the librarian.
+Keep private dictionaries, human manuscripts, logs, answers and sessions under
+`$LIBRARIAN_HOME` private unless Hao explicitly authorizes inspection.
 
-## Protected paths
-
-`$LIBRARIAN_PROTECTED` is a colon-separated list of protected result paths. Folders have several names on
-Minerva (`~/...` symlinks and `/sc/arion/...`), so compare with resolved paths (`realpath`); anything under a
-protected folder is protected, including result figures.
-
-- QC is your job: metadata, schemas, headers, identifiers, row/sample counts, missingness, joins, file sizes and
-  checks that code ran correctly. Do these yourself.
-- Scientific results are the librarian's job: do not print effect sizes, p/FDR values, significance calls, hit
-  counts or ranked gene/variant lists from protected files into your context. Write QC so it reports pass/fail
-  and structure, not those values.
-- Running workflows that produce or update those files is fine.
-
-Do not read anything under `$LIBRARIAN_HOME` (logs, answers, sessions, run directories, notebooks, `latest.md`)
-unless the user explicitly tells you to.
-
-## Calls
-
-Before every request, follow [Query the librarian](../query/SKILL.md) to name the exact inputs, question,
-operation, output audience and missing-input action. This includes follow-ups, retries and tasks sent through
-LSF. The hosted agent selects and bounds the work; the librarian receives a concrete lookup to perform.
-
-```bash
-librarian "<task>"        # answer comes back to you on stdout
-librarian --me "<task>"   # answer goes to the user's latest.md; you get only "Done"
+Read input IDs and headers from `~/sunh14/fungen-operator-data-guard/temp_reference/live-tables/headers-live.tsv`.
+Start with structure. Use an installed policy input ID in `probe.json`:
+```json
+{"action":"probe","inputs":{"table":"LIVE_INPUT_ID"}}
 ```
+Run `librarian --broker probe.json`; read its headings and counts.
+Then write ordinary Python or R using that schema. The script reads the parameter
+JSON at its first argument (`inputs` maps roles to sandbox paths) and writes UTF-8
+TSV at its second argument. Choose an installed runtime. For example, Python:
+```python
+import csv, json, sys
+p = json.load(open(sys.argv[1]))
+rows = list(csv.DictReader(open(p['inputs']['table']), delimiter='	'))
+with open(sys.argv[2], 'w') as f:
+    f.write('row_count\n' + str(len(rows)) + '\n')
+```
+Hand it to the librarian with this short `request.json` (substitute the absolute
+script path, its `sha256sum` hash and the input ID):
+```json
+{"version":1,"question":"Count all rows; return row_count.","script":{"path":"/approved/count.py","sha256":"EXACT_SHA256","runtime":"python"},"inputs":{"table":["LIVE_INPUT_ID"]},"parameters":{},"output":{"columns":["row_count"]}}
+```
+Run `librarian --broker request.json` for the coding-agent audience. Counts,
+whole numbers and categories return in clear. Gene identifiers and fractional
+decimals return as stable placeholders, with probability bins, whole-number
+percentiles and directions. Preserve placeholders exactly in code, tables and
+text; use them as opaque labels or join keys. Use attached categories and ranks
+for comparisons and keep the complete returned table.
 
-Use `librarian "<task>"` when debugging genuinely needs result values you should not see (e.g. why a specific
-result looks wrong).
+A generated sentence explains each placeholder and available stand-ins. Rephrase
+what you need using that placeholder, then submit a linked request, for example:
+```json
+{"action":"rephrase","run":"ORIGINAL_RUN_ID","question":"Where does {{TEXT-ABCD}} rank?","operations":[{"operation":"rank","item":"{{TEXT-ABCD}}","reference":{"kind":"returned","column":"gene"}}]}
+```
+Use `librarian --broker rephrase.json`. Available operations include counts,
+rank, group, same-gene match, decimal comparison, direction, percentile,
+absolute_percentile and bin. Keep supplemental replies beside the original table.
 
-Use `librarian --me "<task>"` when the user asks to check a result, inspect findings, see which genes/variants
-passed, interpret the final analysis or compare scientific findings. Tell the user the answer is in `latest.md`; the
-wrapper also publishes it as the README of their private answers repo.
+For a simple lookup, use `{"action":"question","question":"Count all rows; return columns row_count.","inputs":{"table":"LIVE_INPUT_ID"}}`.
+Larger or unsuccessful questions return a sentence ending **“Send it as a script,
+or ask one part at a time.”** Follow that instruction with the named inputs.
 
-If the librarian replies "This is a scientific-result question. Re-ask it with `librarian --me`", re-ask with
-`--me`; don't rephrase to get the result yourself.
-
-To have the librarian run code you wrote, give it the script path and say what to check:
-`librarian "Run /path/check_merge.py against <protected file> and tell me what is wrong with the code."`
-
-A call can take minutes. A failure prints one line naming what failed and the run log; report it to the user
-rather than reading the log or falling back to reading the data yourself.
-
-## Scribes and concurrency
-
-At most **one librarian call at a time**: its GPU serves one active call. The wrapper holds a lock across
-execution and resume; use that wrapper rather than starting raw Codex calls on the librarian endpoint.
-
-Use `librarian --scribe "<bounded operational task>"` to move a small lookup to an extra local-model worker
-on its own GPU. Use `librarian --scribe --me "<bounded scientific task>"` for user-facing results and
-`librarian --scribe --check --me "<task defining a result table>"` for two independent parallel computations.
-On mismatch, invalid tables or no defined table, a fresh reviewer reads both private answers and scripts.
-Scribes follow the same named-input, read-only source-data, 1 GiB and audience rules as the librarian.
-No healthy scribe is a failure; callers may set one up through `scribes up N` and test it when ready.
-Scribe calls always use scribe endpoints, never the librarian endpoint.
-
-Run librarian and scribe **agent calls** from the login/session host, or in an LSF job with
-`-R "$(data_guard/codex_lsf_select)"`: the `ondemand` nodes (`lh06c*`) disable user namespaces, so Codex's sandbox fails there. See [SCRIBES.md](../../data_guard/SCRIBES.md) for setup,
-lifecycle, explicit endpoint isolation, normalization, resource sizing, relaunch and debugging.
-
-## LSF
-
-Keep heavy jobs away from the librarian: anything expected to read more than 1 GiB or need more than 1 GiB of
-memory goes through LSF from your side, and the librarian gets only the small derived output.
-
-You own LSF submission, monitoring, reruns and workflow operation; the librarian never submits jobs. When it
-returns a >1 GiB handoff, turn the requested reduction into the project's normal code or workflow target, submit
-it through the standard LSF path, monitor as appropriate, then call the librarian again on the small output with
-the follow-up question it gave you.
-
-## Permissions
-
-The librarian writes to `$LIBRARIAN_HOME`, contacts the local Qwen endpoint and runs its own Codex, so it may need
-to run outside your ordinary sandbox. Request that permission in the normal way; never substitute direct
-inspection of protected data.
+`librarian --me "<Hao's exact open scientific question>"` keeps its existing
+full-answer path and user delivery. Use the existing wrapper and shared locks;
+a call may wait for minutes. Run calls outside the sandbox when needed. The
+coding agent owns LSF and project workflows; reductions reading or using more
+than 1 GiB go through the project's normal LSF path, followed by a bounded request
+on the small output. Retain `codex_lsf_select` for agent jobs and the namespace guard.
