@@ -858,18 +858,39 @@ def review_prompt(script, raw, dictionary, document, rules, items, reason):
             'Give a short private reason per choice.\nRequest reason: '+reason+'\nRetained script:\n'+script+'\nPrivate table:\n'+raw.decode()+'\nRequested items and code checks:\n'+json.dumps(facts))
 
 
-def first_unmask_prompt(script, raw, dictionary, document, rules, *, input_columns=()):
+def first_unmask_units(dictionary, document, rules, limit=24, sample=12):
+    """What the scribe is asked about in the first unmask pass. A small table is asked cell by cell; a larger
+    one is asked column by column with a sample of values, so the reply stays short whatever the table size."""
+    record = dictionary['documents'][document]
+    tokens = [t for t,r in rules.items() if r['allowed'] and r['rule'] not in ('allowed-integer','allowed-heading')]
+    if len(tokens) <= limit: return None
+    units = {}; members = {}
+    for t in tokens:
+        cells = record['positions'][t]; value = rules[t].get('released_value', dictionary['entries'][t]['value'])
+        if any(i == 0 for i,j in cells):
+            units[t] = dict(value=value, is_output_header=True, code_rule=rules[t]['rule']); members[t] = [t]
+        for j in sorted({j for i,j in cells if i > 0}):
+            key = 'column '+str(j+1)+': '+str(record['columns'][j])[:60]
+            unit = units.setdefault(key, dict(column=record['columns'][j], distinct_values=0, sample_values=[], code_rule='allowed-text'))
+            unit['distinct_values'] += 1
+            if len(unit['sample_values']) < sample: unit['sample_values'].append(value)
+            members.setdefault(key, []).append(t)
+    return units, members
+
+
+def first_unmask_prompt(script, raw, dictionary, document, rules, *, input_columns=(), units=None):
     record = dictionary['documents'][document]
     items = {token:dict(value=rule.get('released_value',dictionary['entries'][token]['value']),
                        columns=sorted({record['columns'][j] for i,j in record['positions'][token]}),
                        is_output_header=any(i==0 for i,j in record['positions'][token]), code_rule=rule['rule'])
              for token,rule in rules.items() if rule['allowed'] and rule['rule'] not in ('allowed-integer','allowed-heading')}
+    if units is not None: items = units
     return ('Text identifier safety net for the librarian first unmask pass. Code already releases all whole numbers and all permitted text. '
             'Whole numbers cannot be withheld. Gene identifiers and decimals are already masked. '
             'For each listed text item choose unmask, with a short reason. Choose keep masked ONLY for a concrete missed identifier, '
             'such as a variant ID or a locus label built from gene names, and record that specific identifier concern. '
             'Schema headings, dataset/study/context names, categories, flags and ordinary words are permitted. Known genes and decimals in this evidence are already redacted. Do not withhold them out of caution. '
-            'You may withhold a text column containing missed identifiers by choosing keep masked for its listed cells. '
+            'You may withhold a text column containing missed identifiers by choosing keep masked for its listed cells. An item named "column N: name" stands for every text cell of that column, shown by a sample of its values; one choice covers the whole column. '
             'A data-derived heading stays shown unless it itself contains a missed gene identifier. Return decisions and reasons, never replacement values. Retained script: '+script+chr(10)+'Text evidence: '+json.dumps(items))
 
 
@@ -929,12 +950,17 @@ def mask_run(request_path, policy, agents=None, executor=execute, audience='the 
         m.save_dictionary(rd/'dict.json.zst',dictionary)
         items=[t for t,r in rules.items() if r['allowed'] and r['rule'] not in ('allowed-integer','allowed-heading')]
         input_columns={c for ident in catalog for c in next(csv.reader(io.StringIO((snapshot/'inputs'/ident).read_text()),delimiter='\t'),[])}
-        prompt=first_unmask_prompt(script.decode(),raw,dictionary,document,rules,input_columns=input_columns)
-        schema=review_schema(items) if items else object_schema(dict(status=dict(type='string',enum=['reviewed','unresolved'])))
+        grouped=first_unmask_units(dictionary,document,rules)
+        prompt=first_unmask_prompt(script.decode(),raw,dictionary,document,rules,input_columns=input_columns,units=grouped[0] if grouped else None)
+        schema=review_schema(list(grouped[0]) if grouped else items) if items else object_schema(dict(status=dict(type='string',enum=['reviewed','unresolved'])))
         if not items:
             prompt+='\nNo private placeholders require a decision. Return status reviewed, or unresolved if the evidence cannot be reviewed. Empty results are valid; their literal headers and row count are permitted metadata.'
         first=agents.call('first-unmask',prompt,rd/'first-unmask',policy['scribes'][0],schema)
         choices={t:v['decision'] if v['decision']!='keep masked' or re.search(r'\b(?:gene|variant|locus|identifier)\b',v['reason'],re.I) else 'unmask' for t,v in first.items()} if items else {}
+        if grouped:
+            # One choice per column covers each of that column's text cells.
+            choices={t:c for unit,c in choices.items() for t in grouped[1][unit]}
+            first={t:first[unit] for unit in grouped[1] for t in grouped[1][unit]}
         withheld_columns={j for t,choice in choices.items() if choice=='keep masked' for i,j in dictionary['documents'][document]['positions'][t] if i>0}
         for token,positions in dictionary['documents'][document]['positions'].items():
             if rules[token]['allowed'] and rules[token]['rule'] not in ('allowed-integer','allowed-heading') and all(i>0 for i,j in positions) and any(j in withheld_columns for i,j in positions): choices[token]='keep masked'

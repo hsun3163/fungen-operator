@@ -803,3 +803,22 @@ def test_chain_agent_hands_back_a_request_that_names_two_tables(case,tmp_path):
     with pytest.raises(b.Pushback) as info:b.local_question(dict(action='question',question='Compare genes.',inputs={'a':'toy','b':'other'}),policy,Agent(),rd)
     assert str(info.value)=='This request combines 2 tables. Send it as a script, or ask one part at a time.'
     assert not re.search(BAD_WORDS,str(info.value),re.I)
+
+
+def test_large_table_is_reviewed_column_by_column_in_the_first_unmask_pass(case,monkeypatch):
+    rp,_,_,policy=case
+    rows=''.join(f'ctx{i}\tnote {i}\t{i}\n' for i in range(60))
+    raw=('context\tnote\tn\n'+rows).encode()
+    monkeypatch.setattr(g,'send_result',lambda *a:dict(status='retained'))
+    asked=[]
+    class StaffNet(Staff):
+        def call(self,role,prompt,rd,scribe_id=None,schema=None):
+            if role=='first-unmask':
+                asked.append(sorted(schema['properties']))
+                return {k:dict(decision='keep masked' if k.startswith('column 2') else 'unmask',reason='locus identifier column' if k.startswith('column 2') else 'ordinary labels') for k in schema['properties']}
+            return super().call(role,prompt,rd,scribe_id,schema)
+    receipt=b.mask_run(rp,policy,StaffNet(),lambda *a:(raw,[]));assert receipt['status']=='completed'
+    out=(Path(policy['private_root'])/receipt['run_id']/'answer.md').read_text().splitlines()
+    assert len(asked[0])<=6 and any(k.startswith('column 1: context') for k in asked[0])
+    cells=[l.split('\t') for l in out[1:61]]
+    assert all(c[0]==f'ctx{i}' for i,c in enumerate(cells)) and all('[withheld by staff]' in c[1] for c in cells) and all(c[2]==str(i) for i,c in enumerate(cells))
