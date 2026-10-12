@@ -977,7 +977,8 @@ def mask_run(request_path, policy, agents=None, executor=execute, audience='the 
         # Hosted error path contains only a fixed code; traceback and logs stay private.
         audit['events'].append(dict(reason=str(exc) if isinstance(exc,Rejected) else type(exc).__name__))
         safe_codes={'execution-failed','result-columns','result-shape','script-hash','staff-declined','agent-turn-limit','agent-failed','binding-disagreement'}
-        receipt['failure_code']=str(exc) if isinstance(exc,Rejected) and str(exc) in safe_codes else type(exc).__name__
+        # Every Rejected code is a fixed literal from this file (lower-case words and hyphens), so it is safe to name.
+        receipt['failure_code']=str(exc) if isinstance(exc,Rejected) and (str(exc) in safe_codes or re.fullmatch(r'[a-z0-9]+(?:-[a-z0-9]+){0,5}',str(exc))) else type(exc).__name__
         if (rd/'execution/execution_error.json').exists(): receipt['execution_error']=read_json(rd/'execution/execution_error.json')
         if isinstance(exc,Rejected) and str(exc).startswith('main-'): receipt['reason']=str(exc)
         save(rd/'error.json',dict(type=type(exc).__name__,line=(traceback.extract_tb(exc.__traceback__)[-1].lineno if exc.__traceback__ else 0)))

@@ -151,7 +151,7 @@ if [ -n "$broker_request" ]; then
     # Deliver the reviewed answer through the unchanged audience branches below.
     if ! broker_route=$(python3 "$here/live_inventory.py" --policy "$LIBRARIAN_BROKER_POLICY" \
         --request "$broker_request" --output "$run/operator-policy.json" --probe-answer "$run/answer.md" 2> "$run/log"); then
-        echo "Librarian failed: withheld by staff. Log: $run/log"; exit 1
+        echo "Librarian failed: withheld by staff; reason: request or named inputs not accepted. Log: $run/log"; exit 1
     fi
     if [ "$broker_route" = analysis ]; then
         LIBRARIAN_BROKER_POLICY="$run/operator-policy.json" \
@@ -162,7 +162,14 @@ if [ -n "$broker_request" ]; then
         rc=0
     fi
     if [ "$rc" != 0 ]; then
-        echo "Librarian failed: withheld by staff. Log: $run/log"; exit 1
+        # Name the fixed reason code (and, for a crashed script, the error type and line); never any data.
+        why=$(python3 -c 'import json,sys
+try:
+    r=json.load(open(sys.argv[1])); e=r.get("execution_error") or {}
+    print(str(r.get("failure_code") or r.get("status") or "no receipt")+(" ("+str(e.get("exception"))+" at script line "+str(e.get("script_line"))+")" if e else ""))
+except Exception:
+    print("no receipt")' "$run/broker-receipt.json" 2>/dev/null)
+        echo "Librarian failed: withheld by staff; reason: ${why:-no receipt}. Log: $run/log"; exit 1
     fi
     python3 - "$run/broker-receipt.json" <<'DELIVERY' >&2
 import json,sys
