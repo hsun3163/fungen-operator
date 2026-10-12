@@ -151,7 +151,7 @@ if [ -n "$broker_request" ]; then
     # Deliver the reviewed answer through the unchanged audience branches below.
     if ! broker_route=$(python3 "$here/live_inventory.py" --policy "$LIBRARIAN_BROKER_POLICY" \
         --request "$broker_request" --output "$run/operator-policy.json" --probe-answer "$run/answer.md" 2> "$run/log"); then
-        echo "Librarian failed: withheld by staff; reason: request or named inputs not accepted. Log: $run/log"; exit 1
+        echo "Librarian failed: the request file or one of its named inputs was not accepted. Check the request format and the input IDs against the header list [code: request-not-accepted]. Log: $run/log"; exit 1
     fi
     if [ "$broker_route" = analysis ]; then
         LIBRARIAN_BROKER_POLICY="$run/operator-policy.json" \
@@ -162,14 +162,33 @@ if [ -n "$broker_request" ]; then
         rc=0
     fi
     if [ "$rc" != 0 ]; then
-        # Name the fixed reason code (and, for a crashed script, the error type and line); never any data.
-        why=$(python3 -c 'import json,sys
+        # Say in plain words why the request stopped and what to do next: a fixed sentence per reason code,
+        # plus the error type and line for a crashed script; never any data.
+        why=$(python3 - "$run/broker-receipt.json" <<'WHY' 2>/dev/null
+import json,sys
+plain={
+ 'execution-failed':'the script stopped with an error{where}. Correct the script and send it again',
+ 'result-columns':'the header the script wrote differs from output.columns in the request. Make the two match',
+ 'result-shape':'the rows the script wrote have differing numbers of cells. Write one rectangular table',
+ 'script-hash':'the script file changed after its sha256 was taken. Recompute the hash and send again',
+ 'sandbox-unavailable':'this machine cannot start the sandbox. Send the request from another cluster node',
+ 'binding-disagreement':'the scribes chose different inputs or parameters. Name the input and each parameter value plainly in the question',
+ 'binding-unresolved':'the scribes could not tell which input or parameter the question means. Name them plainly in the question',
+ 'staff-declined':'the scribe declined to start this script. Check that the script matches the question and the named inputs',
+ 'scribe-unavailable':'a scribe model server could not be reached. Try again in a minute',
+ 'main-tunnel-unavailable':'the main librarian model could not be reached. Try again in a minute',
+ 'TimeoutError':'a step ran past its time limit. Reduce the work in one request or try again',
+ 'reply-unreadable':'a scribe reply could not be read after three sends. Try again',
+}
 try:
-    r=json.load(open(sys.argv[1])); e=r.get("execution_error") or {}
-    print(str(r.get("failure_code") or r.get("status") or "no receipt")+(" ("+str(e.get("exception"))+" at script line "+str(e.get("script_line"))+")" if e else ""))
+    r=json.load(open(sys.argv[1])); code=str(r.get('failure_code') or r.get('status') or 'no receipt'); e=r.get('execution_error') or {}
+    where=(' ('+str(e.get('exception'))+' at script line '+str(e.get('script_line'))+')') if e else ''
+    print(plain.get(code,'reason code '+code).format(where=where)+' [code: '+code+']')
 except Exception:
-    print("no receipt")' "$run/broker-receipt.json" 2>/dev/null)
-        echo "Librarian failed: withheld by staff; reason: ${why:-no receipt}. Log: $run/log"; exit 1
+    print('the request stopped before a receipt was written [code: no receipt]')
+WHY
+)
+        echo "Librarian failed: ${why:-the request stopped before a receipt was written}. Log: $run/log"; exit 1
     fi
     python3 - "$run/broker-receipt.json" <<'DELIVERY' >&2
 import json,sys

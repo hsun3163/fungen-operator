@@ -217,12 +217,12 @@ def test_policy_missing_and_malformed_request_cli_never_echo_values(case):
         env.pop(key, None)
     env.pop('LIBRARIAN_BROKER_POLICY', None)
     p = subprocess.run([str(ROOT / 'librarian'), '--broker', 'SECRET_0_654321'], env=env, capture_output=True, text=True)
-    assert p.returncode == 1 and p.stdout.startswith('Librarian failed: withheld by staff') and p.stderr == ''
+    assert p.returncode == 1 and p.stdout.startswith('Librarian failed: ') and '[code: ' in p.stdout and 'withheld by staff' not in p.stdout and p.stderr == ''
     assert 'SECRET' not in p.stdout
     env['LIBRARIAN_BROKER_POLICY'] = str(case[1])
     case[0].write_text('invalid SECRET_0_654321')
     p = subprocess.run([str(ROOT / 'librarian'), '--broker', str(case[0])], env=env, capture_output=True, text=True)
-    assert p.returncode == 1 and p.stdout.startswith('Librarian failed: withheld by staff')
+    assert p.returncode == 1 and p.stdout.startswith('Librarian failed: ') and '[code: ' in p.stdout and 'withheld by staff' not in p.stdout
     assert p.stderr == '' and 'SECRET' not in p.stdout
 
 
@@ -456,7 +456,7 @@ print('PRIVATE_MODEL_OUTPUT_0_654321')
         if mode == 'receipt':
             assert json.loads(p.stdout) == json.loads(expected)
         elif mode == 'withhold':
-            assert p.stdout.startswith('Librarian failed: withheld by staff') and 'SECRET' not in p.stdout
+            assert p.stdout.startswith('Librarian failed: ') and '[code: ' in p.stdout and 'withheld by staff' not in p.stdout and 'SECRET' not in p.stdout
             assert not (wrapper_run/'answer.md').exists()
         else:
             assert p.stdout == expected + ('\n' if format == 'json' else '')

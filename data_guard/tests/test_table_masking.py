@@ -434,7 +434,9 @@ def test_gene_columns_override_ambiguous_stop_list_and_long_text_masks_in_place(
     out,_,_=m.release_table(d,'run',{},rules)
     import re
     assert re.search(rb'Support \{\{TEXT-[A-Z0-9]+\}\} \[gene identifier\] in peripheral tissue at \{\{VALUE-[A-Z0-9]+\}\} \[decimal value\]',out)
-    assert b'SET' not in out and b'BIN1' not in out and b'0.8123' not in out
+    # Placeholder IDs are random letters and can spell a gene symbol by chance; check the text around them.
+    shown=re.sub(rb'\{\{(?:TEXT|VALUE)-[A-Z0-9]+\}\}',b'',out)
+    assert b'SET' not in shown and b'BIN1' not in shown and b'0.8123' not in shown
 
 
 def test_staff_can_withhold_text_with_reason_and_review_cannot_touch_absolute_cells(case,monkeypatch):
