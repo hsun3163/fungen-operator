@@ -199,8 +199,7 @@ Logs and answers are private; inspect only your synthetic probe logs when debugg
 
 ## Free-GPU admission and minimum resources
 
-Hao's decision, **2026-10-05**: scribes are opportunistic helpers. `scribes up N` starts only the missing ids
-that fit currently free resources. When no GPU is free now, the server job is submitted to the `gpu` queue and waits there like any other job (Hao, 2026-10-13); `scribes up` never cancels a job it submitted.
+Hao's decision, **2026-10-05**, revised **2026-10-13**: `scribes up N` starts the missing ids on GPUs that are free now. When no GPU is free now, the server job is submitted to the `gpu` queue and waits there like any other job (Hao, 2026-10-13); `scribes up` never cancels a job it submitted.
 
 | Resource | Default minimum |
 |---|---|
@@ -235,11 +234,7 @@ A snapshot cannot guarantee immediate dispatch: other jobs may win the GPU, and 
 GPU allocation plus CPU/GPU core affinity. This explains why throwaway jobs can pend even when GPU memory
 looks unused or the host has spare aggregate cores. LSF remains responsible for affinity placement.
 
-Every submission includes `bsub -ptl 10080` (one week) by default, so a scribe job stays queued until a GPU is free. The installed LSF help says pending-limit alarm/control
-requires LSF RTM; the flag alone does not guarantee cancellation. Therefore `up` also checks the submitted job
-once, verifies its exact id/name, and immediately cancels it if still PEND/WAIT/PSUSP. It never loops waiting
-for capacity. `status` displays pending jobs and their cumulative pending age (`pend_time`, seconds), including
-older submissions. Existing active jobs remain untouched by `up`.
+Every submission includes `bsub -ptl 10080` (one week) by default, so a scribe job stays queued until a GPU is free. `scribes up` reports each submitted job as running or waiting and leaves a waiting job in the queue; `scribes down [id]` is the way to remove one.
 
 ```bash
 SCRIBE_MAX_PENDING=2 scribes up 1
