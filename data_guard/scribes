@@ -46,9 +46,11 @@ up)
     valid_id "$1"
     gpu=${SCRIBE_GPU_MODEL:-}
     [[ -z $gpu || $gpu =~ ^[A-Za-z0-9_]+$ ]] || fail 'invalid GPU model selector'
-    pending=${SCRIBE_MAX_PENDING:-5}
+    # A scribe job waits in the queue like any other job until a GPU is free (Hao, 2026-10-13: "The queue
+    # jobs can and should wait"). The pending limit is a week unless SCRIBE_MAX_PENDING says otherwise.
+    pending=${SCRIBE_MAX_PENDING:-10080}
     [[ $pending =~ ^([0-9]+:)?[0-9]+$ && $pending =~ [1-9] ]] || fail 'pending limit must be positive [hour:]minute'
-    wall=${SCRIBE_WALLTIME:-04:00}
+    wall=${SCRIBE_WALLTIME:-24:00}
     [[ $wall =~ ^[0-9]+:[0-5][0-9]$ ]] || fail 'walltime must be HH:MM'
     parallel=${SCRIBE_PARALLEL:-1}
     [[ $parallel =~ ^[1-9][0-9]*$ ]] && (( parallel <= 8 )) || fail 'parallel must be 1..8'
@@ -66,27 +68,29 @@ up)
             if [[ -n $free ]]; then mapfile -t candidates <<< "$free"; fi
             checked=1
         fi
-        if (( next >= ${#candidates[@]} )); then
-            if (( next == 0 )); then echo 'no free GPU; no scribe started'; else echo 'no more free GPUs; no additional scribe submitted'; fi
-            break
+        # Use a GPU that is free now when there is one; otherwise queue on the GPU queue and wait.
+        if (( next < ${#candidates[@]} )); then
+            read -r host queue found_model <<< "${candidates[next]}"
+            next=$((next + 1)); place=(-q "$queue" -m "$host")
+        else
+            place=(-q "${SCRIBE_QUEUE:-gpu}")
         fi
-        read -r host queue found_model <<< "${candidates[next]}"
-        next=$((next + 1))
-        export SCRIBE_ID=$id SCRIBE_MODEL=${SCRIBE_MODEL:-qwen3.8:27b-262k} SCRIBE_PARALLEL=$parallel
+        export SCRIBE_ID=$id SCRIBE_MODEL=${SCRIBE_MODEL:-laguna-xs-2.1:q4_K_M-256k-t2} SCRIBE_PARALLEL=$parallel
+        # Laguna XS and Nemotron Lightning are staged in the work store, the Qwen aliases in the shared store.
+        if [[ -z ${SCRIBE_MODELS_DIR:-} && $SCRIBE_MODEL =~ ^(laguna-xs|nemotron-3\.5) ]]; then export SCRIBE_MODELS_DIR=$HOME/sunh14/ollama-staging/models; fi
         request='num=1:gmem=32G:mode=exclusive_process:j_exclusive=yes'
         [[ -z $gpu ]] || request+=":gmodel=$gpu"
-        submitted=$(bsub -J "$name" -q "$queue" -m "$host" -W "$wall" -ptl "$pending" -gpu "$request" -oo "$root/%J.log" -env all < "$here/scribe_server.lsf")
+        submitted=$(bsub -J "$name" "${place[@]}" -W "$wall" -ptl "$pending" -gpu "$request" -oo "$root/%J.log" -env all < "$here/scribe_server.lsf")
         echo "$submitted"
         [[ $submitted =~ Job\ \<([0-9]+)\> ]] || fail 'cannot identify submitted scribe job'
         submitted_id=${BASH_REMATCH[1]}
-        # Allocation snapshots race with dispatch. Check once; never leave our job waiting.
+        # Report where the job stands; a pending job stays in the queue.
         active=$(jobs "$name")
         while read -r job stat returned_name node age; do
             [[ $job == "$submitted_id" ]] || continue
-            [[ $returned_name == "$name" ]] || fail 'unexpected submitted job name; refusing cancellation'
+            [[ $returned_name == "$name" ]] || continue
             if [[ $stat =~ ^(PEND|WAIT|PSUSP)$ ]]; then
-                bkill "$submitted_id"
-                echo "Scribe $id did not start immediately; removed from queue"
+                echo "Scribe $id: waiting in the queue (job $submitted_id)"
             else
                 echo "Scribe $id: $stat on $node"
             fi

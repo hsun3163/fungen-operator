@@ -6,7 +6,6 @@
 #BSUB -R "rusage[mem=32G] span[hosts=1]"
 #BSUB -gpu "num=1:gmem=32G:mode=exclusive_process:j_exclusive=yes"
 #BSUB -W 04:00
-#BSUB -ptl 5
 
 set -euo pipefail
 id=${SCRIBE_ID:?set SCRIBE_ID}

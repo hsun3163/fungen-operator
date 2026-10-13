@@ -214,11 +214,13 @@ def test_parser_rejects_small_cards_full_cores_and_bad_schema():
         helper.free_gpu_slots('unexpected output', FIXTURE['lsload_gpuload'], slots)
 
 
-def test_up_no_free_gpu_does_not_submit(tmp_path):
+def test_up_with_no_free_gpu_queues_the_scribes_and_lets_them_wait(tmp_path):
     env, trace = lifecycle_env(tmp_path)
     p = subprocess.run([str(ROOT / 'scribes'), 'up', '3'], env=env, capture_output=True, text=True)
-    assert p.returncode == 0 and p.stdout == 'no free GPU; no scribe started\n'
-    assert 'bsub' not in trace.read_text()
+    assert p.returncode == 0, p.stderr
+    lines = [line for line in trace.read_text().splitlines() if '/bsub ' in line]
+    assert len(lines) == 3 and all(' -q gpu -W 24:00 -ptl 10080 ' in line and ' -m ' not in line for line in lines)
+    assert 'bkill' not in trace.read_text()
 
 
 def test_up_caps_submissions_and_uses_small_defaults(tmp_path):
@@ -227,26 +229,26 @@ def test_up_caps_submissions_and_uses_small_defaults(tmp_path):
     p = subprocess.run([str(ROOT / 'scribes'), 'up', '3'], env=env, capture_output=True, text=True)
     assert p.returncode == 0, p.stderr
     lines = trace.read_text().splitlines()
-    assert len([line for line in lines if '/bsub ' in line]) == 1
-    assert '-W 04:00 -ptl 5 -gpu num=1:gmem=32G:mode=exclusive_process:j_exclusive=yes' in trace.read_text()
+    assert len([line for line in lines if '/bsub ' in line]) == 3
+    assert '-W 24:00 -ptl 10080 -gpu num=1:gmem=32G:mode=exclusive_process:j_exclusive=yes' in trace.read_text()
     assert 'parallel=1' in trace.read_text()
     server = (ROOT / 'scribe_server.lsf').read_text()
-    assert '#BSUB -n 2' in server and 'rusage[mem=32G]' in server and '#BSUB -ptl 5' in server
+    assert '#BSUB -n 2' in server and 'rusage[mem=32G]' in server and '#BSUB -ptl' not in server
 
 
-def test_submission_race_cancels_only_exact_pending_scribe(tmp_path):
+def test_a_pending_scribe_is_left_waiting_in_the_queue(tmp_path):
     env, trace = lifecycle_env(tmp_path)
     env.update(FAKE_ALLOCATION=available_allocation(), FAKE_AFTER_SUBMIT='123 PEND codex-ollama-scribe-1 - 1')
     p = subprocess.run([str(ROOT / 'scribes'), 'up', '1'], env=env, capture_output=True, text=True)
-    assert p.returncode == 0 and 'removed from queue' in p.stdout
-    assert 'bkill 123' in trace.read_text()
+    assert p.returncode == 0 and 'waiting in the queue' in p.stdout
+    assert 'bkill' not in trace.read_text()
 
 
-def test_submission_race_refuses_unexpected_identity(tmp_path):
+def test_up_never_touches_a_job_with_another_name(tmp_path):
     env, trace = lifecycle_env(tmp_path)
     env.update(FAKE_ALLOCATION=available_allocation(), FAKE_AFTER_SUBMIT='123 PEND codex-ollama-flash-next - 1')
     p = subprocess.run([str(ROOT / 'scribes'), 'up', '1'], env=env, capture_output=True, text=True)
-    assert p.returncode != 0 and 'bkill' not in trace.read_text()
+    assert p.returncode == 0 and 'bkill' not in trace.read_text()
 
 
 def test_status_shows_pending_age(tmp_path):
