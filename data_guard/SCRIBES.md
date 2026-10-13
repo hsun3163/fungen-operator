@@ -199,7 +199,7 @@ Logs and answers are private; inspect only your synthetic probe logs when debugg
 
 ## Free-GPU admission and minimum resources
 
-Hao's decision, **2026-10-05**, revised **2026-10-13**: `scribes up N` starts the missing ids on GPUs that are free now. When no GPU is free now, the server job is submitted to the `gpu` queue and waits there like any other job (Hao, 2026-10-13); `scribes up` never cancels a job it submitted.
+Hao's decision, **2026-10-05**, revised **2026-10-13**: `scribes up N` starts the missing ids on GPUs that are free now. When no GPU is free now, the server job is submitted to the express GPU queue (`gpuexpress`, 15-hour run time by default; `SCRIBE_QUEUE` and `SCRIBE_WALLTIME` change them) and waits there like any other job (Hao, 2026-10-13); `scribes up` never cancels a job it submitted.
 
 | Resource | Default minimum |
 |---|---|

@@ -50,7 +50,8 @@ up)
     # jobs can and should wait"). The pending limit is a week unless SCRIBE_MAX_PENDING says otherwise.
     pending=${SCRIBE_MAX_PENDING:-10080}
     [[ $pending =~ ^([0-9]+:)?[0-9]+$ && $pending =~ [1-9] ]] || fail 'pending limit must be positive [hour:]minute'
-    wall=${SCRIBE_WALLTIME:-24:00}
+    # The express GPU queue starts jobs soonest and allows 15 hours; both are the defaults (Hao, 2026-10-13).
+    wall=${SCRIBE_WALLTIME:-15:00}
     [[ $wall =~ ^[0-9]+:[0-5][0-9]$ ]] || fail 'walltime must be HH:MM'
     parallel=${SCRIBE_PARALLEL:-1}
     [[ $parallel =~ ^[1-9][0-9]*$ ]] && (( parallel <= 8 )) || fail 'parallel must be 1..8'
@@ -81,7 +82,7 @@ up)
         elif (( waiting > 0 )); then
             echo "Scribe $id: waiting in the queue; no free GPU now"; continue
         else
-            place=(-q "${SCRIBE_QUEUE:-gpu}")
+            place=(-q "${SCRIBE_QUEUE:-gpuexpress}")
         fi
         export SCRIBE_ID=$id SCRIBE_MODEL=${SCRIBE_MODEL:-laguna-xs-2.1:q4_K_M-256k-t2} SCRIBE_PARALLEL=$parallel
         # Laguna XS and Nemotron Lightning are staged in the work store, the Qwen aliases in the shared store.

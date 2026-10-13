@@ -219,7 +219,7 @@ def test_up_with_no_free_gpu_queues_the_scribes_and_lets_them_wait(tmp_path):
     p = subprocess.run([str(ROOT / 'scribes'), 'up', '3'], env=env, capture_output=True, text=True)
     assert p.returncode == 0, p.stderr
     lines = [line for line in trace.read_text().splitlines() if '/bsub ' in line]
-    assert len(lines) == 3 and all(' -q gpu -W 24:00 -ptl 10080 ' in line and ' -m ' not in line for line in lines)
+    assert len(lines) == 3 and all(' -q gpuexpress -W 15:00 -ptl 10080 ' in line and ' -m ' not in line for line in lines)
     assert 'bkill' not in trace.read_text()
 
 
@@ -230,7 +230,7 @@ def test_up_caps_submissions_and_uses_small_defaults(tmp_path):
     assert p.returncode == 0, p.stderr
     lines = trace.read_text().splitlines()
     assert len([line for line in lines if '/bsub ' in line]) == 3
-    assert '-W 24:00 -ptl 10080 -gpu num=1:gmem=32G:mode=exclusive_process:j_exclusive=yes' in trace.read_text()
+    assert '-W 15:00 -ptl 10080 -gpu num=1:gmem=32G:mode=exclusive_process:j_exclusive=yes' in trace.read_text()
     assert 'parallel=1' in trace.read_text()
     server = (ROOT / 'scribe_server.lsf').read_text()
     assert '#BSUB -n 2' in server and 'rusage[mem=32G]' in server and '#BSUB -ptl' not in server
