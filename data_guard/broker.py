@@ -1396,9 +1396,80 @@ def local_try(request,policy,agents,rd,seed):
     raise Rejected('agent-turn-limit')
 
 
+def safe_diagnostic_text(text, script, genes):
+    """Error text made safe for a hosted model: gene identifiers and decimals become labels (the release
+    rules), and a quoted string is kept only when the requester's own script contains it."""
+    import masking as m
+    def quoted(match):
+        inner = match.group(2)
+        return match.group(0) if inner and inner in script else match.group(1)+'[value]'+match.group(1)
+    lines = []
+    for line in text.splitlines():
+        line = re.sub(r"""(['"])((?:(?!\1).){0,200})\1""", quoted, line)
+        lines.append(m.redacted_text(line, genes)[0])
+    return lines
+
+
+def diagnose(wrapper_run):
+    """Debugging view of one librarian request for the model that sent it (Hao: the frontier model must
+    have a way to debug the librarian). It reports where the request stopped, why, the failing line of
+    the requester's own script, the error message under the release rules, and what each scribe call did.
+    It never shows table cells, scribe replies or private logs as written."""
+    wrapper_run = Path(wrapper_run); out = []
+    receipt = read_json(wrapper_run/'broker-receipt.json') if (wrapper_run/'broker-receipt.json').is_file() else {}
+    policy = read_json(wrapper_run/'operator-policy.json') if (wrapper_run/'operator-policy.json').is_file() else {}
+    out.append('Librarian request diagnosis: '+wrapper_run.name)
+    out.append('status: '+str(receipt.get('status','no receipt written'))+'; reason code: '+str(receipt.get('failure_code','none')))
+    private = Path(policy['private_root'])/receipt['run_id'] if policy.get('private_root') and receipt.get('run_id') else None
+    genes = set(Path(policy.get('gene_vocabulary', HERE/'gene_symbols.txt')).read_text().splitlines()) if (Path(policy.get('gene_vocabulary', HERE/'gene_symbols.txt'))).is_file() else set()
+    script = ''
+    own = (wrapper_run/'request.json').read_text(errors='replace') if (wrapper_run/'request.json').is_file() else ''
+    if private and private.is_dir():
+        if (private/'snapshot/analysis').is_file(): script = (private/'snapshot/analysis').read_text(errors='replace')
+        gene_cols = set(policy.get('gene_columns', ['gene','gene_id','symbol']))
+        for table in sorted((private/'snapshot/inputs').glob('*')) if (private/'snapshot/inputs').is_dir() else []:
+            raw = table.read_bytes(); rows = list(csv.DictReader(io.StringIO(raw.decode(errors='replace')), delimiter='\t'))
+            for row in rows: genes.update(v for k,v in row.items() if k in gene_cols and v)
+            out.append('input '+table.name+': '+str(len(rows))+' rows, '+str(len(rows[0]) if rows else 0)+' columns, '+str(len(raw))+' bytes')
+        steps = [('binding', 'scribes chose inputs and parameters'), ('run-action', 'a scribe issued the run'), ('execution', 'the script ran'),
+                 ('first-unmask', 'first unmask pass'), ('answer.md', 'the masked answer was written')]
+        reached = [label for name,label in steps if any(private.glob(name+'*'))]
+        out.append('steps reached: '+('; '.join(reached) if reached else 'none'))
+        audit = read_json(private/'audit.json') if (private/'audit.json').is_file() else {}
+        for event in audit.get('events', []): out.append('event: '+str(event.get('reason')))
+        for call in audit.get('calls', []):
+            out.append('model call: '+str(call.get('role'))+' on backend '+str(call.get('backend'))+', '+str(round(call.get('seconds') or 0,1))+' s'
+                       +(', resent after: '+', '.join(call['repeats']) if call.get('repeats') else ''))
+        for response in sorted(private.glob('**/response*.json')):
+            data = read_json(response); message = data.get('message') or {}
+            out.append('reply '+str(response.relative_to(private))+': ended by '+str(data.get('done_reason'))+', '+str(data.get('eval_count'))+' tokens, '
+                       +str(len(message.get('content') or ''))+' characters of answer')
+        error = read_json(private/'execution/execution_error.json') if (private/'execution/execution_error.json').is_file() else receipt.get('execution_error') or {}
+        log = private/'execution/execution.log'
+        if error:
+            line = int(error.get('script_line') or 0); source = script.splitlines()
+            out.append('script error: '+str(error.get('exception'))+' at line '+str(line))
+            if 0 < line <= len(source): out.append('your line '+str(line)+': '+source[line-1].strip()[:300])
+        if log.is_file() and log.stat().st_size:
+            tail = [l for l in log.read_text(errors='replace').splitlines() if l.strip()][-6:]
+            out.append('last lines of the script log, under the release rules:')
+            out.extend('  '+l[:400] for l in safe_diagnostic_text('\n'.join(tail), script+own, genes))
+    else:
+        log = wrapper_run/'log'
+        if log.is_file() and log.stat().st_size:
+            tail = [l for l in log.read_text(errors='replace').splitlines() if l.strip()][-6:]
+            out.append('the request stopped before a private run began; last lines of the request check, under the release rules:')
+            out.extend('  '+l[:400] for l in safe_diagnostic_text('\n'.join(tail), own, genes))
+    limits = {k: policy[k] for k in ('execution_timeout_seconds','agent_timeout_seconds','max_input_bytes','max_output_bytes','max_attempts') if k in policy}
+    if limits: out.append('limits: '+', '.join(k+'='+str(v) for k,v in limits.items()))
+    return '\n'.join(out)+'\n'
+
+
 def main(argv=None):
     os.umask(0o077)
     args = list(sys.argv[1:] if argv is None else argv)
+    if len(args) == 2 and args[0] == '--diagnose':
+        sys.stdout.write(diagnose(args[1])); return 0
     try:
         require(len(args) == 1, 'usage')
         # Policy is installation configuration, never a field accepted from the request.

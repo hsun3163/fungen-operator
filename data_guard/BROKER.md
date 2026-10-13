@@ -67,6 +67,19 @@ Raw workflow data, downloaded references and staged annotation work remain outsi
 this live export catalog. Every listed column has one explicit gene/protected/shown
 classification; a new input or header causes the inventory check to fail.
 
+## Debugging a request
+
+A request that stops prints one plain sentence with the cause, the next step and a code, and the command to
+run for more: `librarian debug RUN`. `RUN` is the run name in that message (a run folder name under
+`$LIBRARIAN_HOME/runs`) or the "Librarian run" ID of a completed request. The debug view is made for the model
+that sent the request. It reports the status and reason code, the steps reached, the size of each input, the
+error type and line of a crashed script with that line of the requester's own script, the last lines of the
+script log under the release rules (gene identifiers and decimals labelled; a quoted string shown only when the
+requester's own script or request contains it), each scribe call with its duration and resends, how each scribe
+reply ended (finished or cut off, tokens, characters) and the limits in force. It shows no table cells and no
+scribe reply text. The private logs under `$LIBRARIAN_HOME` and the private run folders stay unread by hosted
+models; this command is the supported way to diagnose.
+
 ## Who does what
 
 You hand your code to the librarian, and the librarian runs it. The librarian is the service and the one name people deal with; current receipts, audits and results documents carry that name.

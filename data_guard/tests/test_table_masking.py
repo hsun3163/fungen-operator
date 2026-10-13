@@ -822,3 +822,33 @@ def test_large_table_is_reviewed_column_by_column_in_the_first_unmask_pass(case,
     assert len(asked[0])<=6 and any(k.startswith('column 1: context') for k in asked[0])
     cells=[l.split('\t') for l in out[1:61]]
     assert all(c[0]==f'ctx{i}' for i,c in enumerate(cells)) and all('[withheld by staff]' in c[1] for c in cells) and all(c[2]==str(i) for i,c in enumerate(cells))
+
+
+def test_debug_view_names_the_cause_and_keeps_data_out(tmp_path):
+    run=tmp_path/'runs'/'20261012-agent-1';private=tmp_path/'private';pr=private/'run-abc'
+    for d in (run,pr/'snapshot/inputs',pr/'execution',pr/'first-unmask'):d.mkdir(parents=True)
+    script='import csv\nrows=list(csv.DictReader(open(p)))\nx=[r["gene_idd"] for r in rows]\n'
+    (pr/'snapshot/analysis').write_text(script)
+    (pr/'snapshot/inputs/toy').write_text('gene_id\tscore\nBIN1\t0.654321\n')
+    (pr/'execution/execution_error.json').write_text(json.dumps(dict(exception='KeyError',script_line=3)))
+    (pr/'execution/execution.log').write_text('Traceback (most recent call last):\n  File "/job/analysis", line 3, in <module>\n'
+        "KeyError: 'gene_idd'\nrow was {'gene_id': 'BIN1', 'score': '0.654321', 'note': 'SECRETVALUE'} with 3 rows\n")
+    (pr/'first-unmask/response.json').write_text(json.dumps(dict(done_reason='length',eval_count=3000,message=dict(content='PRIVATE REPLY TEXT'))))
+    (pr/'audit.json').write_text(json.dumps(dict(events=[dict(reason='execution-failed')],calls=[dict(role='binding',backend=4,seconds=1.2,repeats=['reply-cut-off'])])))
+    (run/'broker-receipt.json').write_text(json.dumps(dict(status='needs-local-review',failure_code='execution-failed',run_id='run-abc')))
+    (run/'operator-policy.json').write_text(json.dumps(dict(private_root=str(private),gene_columns=['gene_id'],execution_timeout_seconds=30)))
+    text=b.diagnose(run)
+    for wanted in ('reason code: execution-failed','script error: KeyError at line 3','your line 3: x=[r["gene_idd"] for r in rows]',"KeyError: 'gene_idd'",
+                   'input toy: 1 rows, 2 columns','model call: binding on backend 4','resent after: reply-cut-off','ended by length, 3000 tokens','3 rows','execution_timeout_seconds=30'):
+        assert wanted in text, wanted
+    for private_text in ('BIN1','0.654321','SECRETVALUE','PRIVATE REPLY TEXT'):
+        assert private_text not in text, private_text
+
+
+def test_debug_view_of_a_request_that_stopped_at_the_request_check(tmp_path):
+    run=tmp_path/'runs'/'r1';run.mkdir(parents=True);(run/'log').write_text("ValueError: input 'not_an_input' is absent from the policy at 0.123456\n")
+    text=b.diagnose(run)
+    assert 'no receipt written' in text and 'request check' in text and 'not_an_input' not in text and '0.123456' not in text
+    (run/'request.json').write_text(json.dumps(dict(action='probe',inputs=dict(table='not_an_input'))))
+    text=b.diagnose(run)
+    assert "input 'not_an_input' is absent" in text and '0.123456' not in text

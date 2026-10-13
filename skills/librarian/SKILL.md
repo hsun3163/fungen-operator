@@ -62,6 +62,15 @@ or multi-part request, one needing loops, branches or several differently built
 sections, and one whose two runs differ. Follow the sentence: write the script
 yourself with the named inputs, or ask a single part.
 
+When a request stops, the message states the cause, the next step and a code, for
+example `Librarian failed: the script stopped with an error (KeyError at script
+line 12). Correct the script and send it again [code: execution-failed].` For
+more, run `librarian debug RUN` with the run name printed in that message (or the
+"Librarian run" ID of a completed request). It reports where the request stopped,
+your failing script line, the error text with gene identifiers and decimals
+labelled, input sizes, each scribe call and the limits. That is the way to debug;
+the private logs under `$LIBRARIAN_HOME` stay unread.
+
 `librarian --me "<Hao's exact open scientific question>"` keeps its existing
 full-answer path and user delivery. Use the existing wrapper and shared locks;
 a call may wait for minutes. Run calls outside the sandbox when needed. The
