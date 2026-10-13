@@ -397,3 +397,31 @@ def test_candidate_count_is_capped_by_free_cores():
 
 def test_closed_hosts_never_admit_scribes():
     assert helper.free_gpu_slots(available_allocation(host='lg05g29'), FIXTURE['lsload_gpuload'], FIXTURE['bhosts_slots']) == []
+
+
+def test_up_adds_a_job_on_a_free_node_for_a_waiting_scribe_and_removes_nothing(tmp_path):
+    env, trace = lifecycle_env(tmp_path)
+    env.update(FAKE_ALLOCATION=available_allocation(), FAKE_JOBS='122 PEND codex-ollama-scribe-1 - 600')
+    p = subprocess.run([str(ROOT / 'scribes'), 'up', '1'], env=env, capture_output=True, text=True)
+    assert p.returncode == 0, p.stderr
+    lines = [line for line in trace.read_text().splitlines() if '/bsub ' in line]
+    assert len(lines) == 1 and ' -m ' in lines[0] and 'adding one on free node' in p.stdout
+    assert 'bkill' not in trace.read_text()
+
+
+def test_up_leaves_a_waiting_scribe_alone_when_no_gpu_is_free_or_two_jobs_already_wait(tmp_path):
+    env, trace = lifecycle_env(tmp_path)
+    env.update(FAKE_JOBS='122 PEND codex-ollama-scribe-1 - 600')
+    p = subprocess.run([str(ROOT / 'scribes'), 'up', '1'], env=env, capture_output=True, text=True)
+    assert p.returncode == 0 and 'no free GPU now' in p.stdout and (not trace.exists() or 'bsub' not in trace.read_text())
+    env.update(FAKE_ALLOCATION=available_allocation(), FAKE_JOBS='122 PEND codex-ollama-scribe-1 - 600\n123 PEND codex-ollama-scribe-1 - 5')
+    p = subprocess.run([str(ROOT / 'scribes'), 'up', '1'], env=env, capture_output=True, text=True)
+    assert p.returncode == 0 and 'none added' in p.stdout and (not trace.exists() or 'bsub' not in trace.read_text())
+
+
+def test_running_server_removes_waiting_twins_only_after_it_is_up():
+    server = (ROOT / 'scribe_server.lsf').read_text()
+    ready = server.index("kill -0 \"$server\" || { echo 'Server exited during warmup'; exit 1; }")
+    twin = server.index('removed waiting twin job')
+    state = server.index('mv "$state.${LSB_JOBID}.tmp" "$state"')
+    assert ready < twin < state and 'this job steps aside' in server

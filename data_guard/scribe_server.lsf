@@ -59,6 +59,16 @@ curl -sf --noproxy '*' --max-time 5 "$url/api/ps" |
     python3 -c 'import json,sys; m=next(m for m in json.load(sys.stdin)["models"] if m["name"]==sys.argv[1]); print("vram_GB=%.1f context=%s" % (m["size_vram"]/1e9,m.get("context_length"))); assert m.get("context_length")==262144' "$model"
 nvidia-smi --query-gpu=name,memory.used,memory.total --format=csv,noheader
 kill -0 "$server" || { echo 'Server exited during warmup'; exit 1; }
+# This server is up. Any other job for the same scribe is now surplus: a twin that is still waiting is
+# removed, and if a twin with a lower job ID is already running, this job steps aside for it.
+# (Hao, 2026-10-13: submit a new scribe to an empty node; delete the old one only after the new one runs.)
+while read -r twin twin_stat twin_name; do
+    [[ $twin =~ ^[0-9]+$ && $twin != "$LSB_JOBID" && $twin_name == "$name" ]] || continue
+    case $twin_stat in
+        PEND|PSUSP|WAIT) bkill "$twin" >/dev/null 2>&1 && echo "removed waiting twin job $twin" ;;
+        RUN) if (( twin < LSB_JOBID )); then echo "twin job $twin is already running; this job steps aside"; exit 0; fi ;;
+    esac
+done < <(bjobs -u "$USER" -J "$name" -o 'jobid stat job_name' -noheader 2>/dev/null || true)
 mkdir -p "$HOME/.codex"
 umask 077
 cat > "$state.${LSB_JOBID}.tmp" <<STATE

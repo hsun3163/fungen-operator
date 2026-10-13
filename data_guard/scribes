@@ -60,9 +60,14 @@ up)
     for ((id=1; id<=$1; id++)); do
         name=codex-ollama-scribe-$id
         active=$(jobs "$name")
-        if awk -v name="$name" '$3==name && $2 ~ /^(RUN|PEND|PSUSP|USUSP|SSUSP|WAIT)$/ {found=1} END {exit !found}' <<< "$active"; then
+        if awk -v name="$name" '$3==name && $2 ~ /^(RUN|USUSP|SSUSP)$/ {found=1} END {exit !found}' <<< "$active"; then
             echo "Scribe $id already active"; continue
         fi
+        # A scribe whose job is still waiting keeps that job. When a GPU is free now, a second job is
+        # submitted to that node; whichever of the two starts first removes the other (scribe_server.lsf),
+        # so the old job is deleted only after the new one runs (Hao, 2026-10-13).
+        waiting=$(awk -v name="$name" '$3==name && $2 ~ /^(PEND|PSUSP|WAIT)$/ {n++} END {print n+0}' <<< "$active")
+        if (( waiting >= 2 )); then echo "Scribe $id: $waiting jobs already waiting; none added"; continue; fi
         if (( checked == 0 )); then
             free=$(python3 "$here/scribe_support.py" free-gpus "$gpu" "$wall")
             if [[ -n $free ]]; then mapfile -t candidates <<< "$free"; fi
@@ -72,6 +77,9 @@ up)
         if (( next < ${#candidates[@]} )); then
             read -r host queue found_model <<< "${candidates[next]}"
             next=$((next + 1)); place=(-q "$queue" -m "$host")
+            (( waiting == 0 )) || echo "Scribe $id: a job is waiting; adding one on free node $host"
+        elif (( waiting > 0 )); then
+            echo "Scribe $id: waiting in the queue; no free GPU now"; continue
         else
             place=(-q "${SCRIBE_QUEUE:-gpu}")
         fi
