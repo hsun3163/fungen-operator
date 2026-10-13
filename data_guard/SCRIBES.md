@@ -208,7 +208,7 @@ Hao's decision, **2026-10-05**, revised **2026-10-13**: `scribes up N` starts th
 | CPU | 2 host cores / scheduler slots |
 | Host RAM | 32 GB |
 | Parallel sessions | `SCRIBE_PARALLEL=1` |
-| Walltime | `SCRIBE_WALLTIME=04:00` (4 hours) |
+| Walltime | `SCRIBE_WALLTIME=15:00` (15 hours, the express queue maximum) |
 | Pending limit | `SCRIBE_MAX_PENDING=10080` (minutes; accepts `[hour:]minute`) |
 | Context / cache | 262,144 tokens, flash attention, q8_0 KV, model kept loaded |
 
