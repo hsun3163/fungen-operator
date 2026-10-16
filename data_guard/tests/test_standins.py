@@ -135,7 +135,7 @@ def test_main_model_pin_stops_before_inference(tmp_path):
 def test_main_resident_pin_lock_and_constrained_payload(tmp_path,resident_ok):
  import fcntl,threading
  from http.server import BaseHTTPRequestHandler,ThreadingHTTPServer
- pin='laguna-s-2.1:q8_0-256k-t2';lock=tmp_path/'librarian.lock';lock.touch();payloads=[]
+ pin=s.DEFAULTS['review_model'];lock=tmp_path/'librarian.lock';lock.touch();payloads=[]
  class Handler(BaseHTTPRequestHandler):
   def do_GET(self):
    body=json.dumps(dict(models=[dict(name=pin if resident_ok else 'different')])).encode()

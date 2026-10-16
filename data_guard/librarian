@@ -237,19 +237,22 @@ elif [ "$scribe" = 1 ]; then
     fi
 else
 
+# Use the same main model as broker review, independent of inherited scribe defaults.
+main_model=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["review_model"])' "$here/standin_policy.json") || exit 1
+
 # Jupyter writes to its config and runtime dirs, which the sandbox makes read-only.
 export JUPYTER_CONFIG_DIR="$run/.jupyter"
 export JUPYTER_RUNTIME_DIR="$run/.jupyter/runtime"
 export IPYTHONDIR="$run/.jupyter/ipython"
 
-session_instruction="Before answering, execute pwd in this run directory to verify commands work."
+session_instruction="Before answering, execute pwd in this run directory to verify commands work. The caller's working directory is $(pwd -P). Resolve relative input paths against that directory."
 [ "$private_mode" = 1 ] && session_instruction="The task contains private binding or review evidence. No command is needed when that evidence is sufficient."
 
 # stdin from /dev/null: codex exec appends piped stdin to the prompt and would
 # otherwise wait on a caller's open pipe.
 timeout -k 30 "$timeout_s" \
     env CODEX_HOME="$L/codex" \
-    codex-oss "${codex_dirs[@]}" exec --oss --json "${network_args[@]}" \
+    codex-oss "${codex_dirs[@]}" exec --oss --json --model "$main_model" "${network_args[@]}" \
         "${response_args[@]}" \
         --skip-git-repo-check \
         -s workspace-write \
@@ -276,7 +279,7 @@ while [ $log_rc != 0 ] && [ "$reason" = 'ended on a failed tool call' ] && [ -n 
     hint=$(python3 "$here/scribe_support.py" guidance "$run/log")
     timeout -k 30 "$timeout_s" \
         env CODEX_HOME="$L/codex" \
-        codex-oss "${codex_dirs[@]}" exec --oss --json "${network_args[@]}" -s workspace-write \
+        codex-oss "${codex_dirs[@]}" exec --oss --json --model "$main_model" "${network_args[@]}" -s workspace-write \
             resume "${response_args[@]}" --skip-git-repo-check \
             -o "$run/answer.md" \
             "$sid" \
@@ -293,7 +296,7 @@ notes=$(python3 "$here/scribe_support.py" notes "$run/log")
 if [ $rc -eq 0 ] && [ ! -s "$run/answer.md" ] && [ -n "$sid" ]; then
     timeout -k 30 "$timeout_s" \
         env CODEX_HOME="$L/codex" \
-        codex-oss "${codex_dirs[@]}" exec --oss --json "${network_args[@]}" -s workspace-write -c 'model_reasoning_effort="none"' \
+        codex-oss "${codex_dirs[@]}" exec --oss --json --model "$main_model" "${network_args[@]}" -s workspace-write -c 'model_reasoning_effort="none"' \
             resume "${response_args[@]}" --skip-git-repo-check \
             -o "$run/answer.md" \
             "$sid" \

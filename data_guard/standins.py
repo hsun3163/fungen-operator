@@ -286,7 +286,7 @@ def resident_main(policy, rd):
         if '=' in line and not line.startswith('#'):
             key,value = line.split('=',1)
             if key.startswith('MINERVA_OLLAMA_'): state[key] = shlex.split(value)[0] if shlex.split(value) else ''
-    pinned = policy.get('review_model','laguna-s-2.1:q8_0-256k-t2')
+    pinned = policy.get('review_model', DEFAULTS['review_model'])
     b.require(state.get('MINERVA_OLLAMA_DEFAULT_MODEL') == pinned,'main-model-pin')
     b.require(state.get('MINERVA_OLLAMA_JOB_NAME','codex-ollama-flash-next')=='codex-ollama-flash-next','main-job-identity')
     queued = time.monotonic()

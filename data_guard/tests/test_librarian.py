@@ -8,6 +8,15 @@ import pytest
 LIBRARIAN = Path(__file__).resolve().parents[1] / "librarian"
 
 STUB = """#!/bin/sh
+if [ -n "$STUB_AVAILABLE_MODEL" ]; then
+    selected=${CODEX_OLLAMA_MODEL:-${MINERVA_OLLAMA_DEFAULT_MODEL:-}}
+    prev=
+    for arg do
+        [ "$prev" = --model ] && selected=$arg
+        prev=$arg
+    done
+    [ "$selected" = "$STUB_AVAILABLE_MODEL" ] || { echo 'Pull failed: pull model manifest: file does not exist'; exit 1; }
+fi
 echo "NOISY tool output: secret-row-42"
 echo "NOISY stderr" >&2
 [ -z "$STUB_NO_COMMAND" ] && echo '{"type":"item.completed","item":{"type":"command_execution","exit_code":0}}'
@@ -56,6 +65,27 @@ def test_network_override_is_an_exec_argument(tmp_path):
     # uses that subcommand override list, so a global-only network flag is lost.
     setting = args.index('sandbox_workspace_write.network_access=false')
     assert setting > args.index('exec') and args[setting - 1] == '-c'
+
+
+@pytest.mark.parametrize('slips', [0, 1])
+def test_me_pins_installed_main_model_despite_inherited_defaults(tmp_path, slips):
+    # The deployed main store has only Qwen; the old state and scribe model are absent.
+    installed = "qwen3.8-flash-next:125b-a6b-q4_K_M"
+    trace = tmp_path / 'args.txt'
+    p = run(tmp_path, '--me', 'synthetic task', STUB_AVAILABLE_MODEL=installed,
+            MINERVA_OLLAMA_DEFAULT_MODEL='laguna-s-2.1:q8_0-256k-t2',
+            CODEX_OLLAMA_MODEL='laguna-xs-2.1:q4_K_M-256k-t2',
+            STUB_ARGS=str(trace), STUB_SLIP_TIMES=str(slips),
+            STUB_SLIP_COUNT=str(tmp_path / 'slips'))
+    assert p.returncode == 0 and p.stdout.startswith('Done')
+    args = trace.read_text().splitlines()
+    assert args[args.index('--model') + 1] == installed
+    assert ('resume' in args) == bool(slips)
+    if not slips:
+        assert f"The caller's working directory is {Path.cwd()}." in args[-1]
+        assert 'Resolve relative input paths against that directory.' in args[-1]
+    policy = json.loads(LIBRARIAN.with_name('standin_policy.json').read_text())
+    assert policy['review_model'] == installed
 
 
 def test_default_mode_prints_only_answer(tmp_path):

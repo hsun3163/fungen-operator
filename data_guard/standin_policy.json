@@ -20,7 +20,7 @@
     ]
   },
   "threshold_cap": 3,
-  "review_model": "laguna-s-2.1:q8_0-256k-t2",
+  "review_model": "qwen3.8-flash-next:125b-a6b-q4_K_M",
   "pushback": {
     "words": 115,
     "marks": 24,
