@@ -115,6 +115,9 @@ class Harness:
 
     def _run_fingerprint(self, args, identity, config_text):
         values = args.model_dump()
+        # Keep pre-option recipes/fingerprints stable when the option is absent.
+        if values.get("rerun_triggers") is None:
+            values.pop("rerun_triggers", None)
         for key in ("job_name", "walltime_minutes", "phase", "log_dir"):
             values.pop(key, None)
         return digest({"arguments": values, "identity": identity, "config": config_text})

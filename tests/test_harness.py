@@ -361,3 +361,57 @@ def test_stdio_tools_and_scientific_approval(setup, tmp_path, mode):
     assert active(nb)[0].metadata.fungen.approval.channel == "mcp_human_elicitation"
     assert not Path(args["configfile"]).exists()
     assert not Path(deployment.conda_env, "scheduler.json").exists()
+
+
+@pytest.mark.parametrize("action,model", [("check_readiness", CheckReadiness),
+                                         ("initiate_run", InitiateRun)])
+def test_rerun_triggers_render_only_when_selected(setup, action, model):
+    deployment, args = setup
+    values = model(**run_args(deployment, args))
+    bindings = {"snakefile": deployment.snakefile, "profile_path": deployment.profile_path,
+                "conda_sh": deployment.conda_sh, "conda_env": deployment.conda_env,
+                "log_stem": str(Path(deployment.run_root, "logs/attempt"))}
+    arguments = values.model_dump()
+    legacy = {k: v for k, v in arguments.items() if k != "rerun_triggers"}
+    original = render(action, {"arguments": legacy, "bindings": bindings})
+    assert render(action, {"arguments": arguments, "bindings": bindings}) == original
+    assert "--rerun-triggers" not in original
+    arguments["rerun_triggers"] = ["mtime", "input", "code", "software-env"]
+    selected = render(action, {"arguments": arguments, "bindings": bindings})
+    option = "  --rerun-triggers mtime input code software-env " + "\\\n"
+    assert selected == original.replace("  --printshellcmds", option + "  --printshellcmds")
+    arguments["rerun_triggers"] = ["mtime", "params", "input", "software-env", "code"]
+    assert "--rerun-triggers mtime params input software-env code" in render(
+        action, {"arguments": arguments, "bindings": bindings})
+
+
+@pytest.mark.parametrize("value", [[], ["mtime", "mtime"], ["--forceall"],
+    ["mtime; id"], ["input\n--forceall"], "mtime input", [True], {"mtime": True},
+    ["mtime", "params", "input", "software-env", "code", "mtime"]])
+@pytest.mark.parametrize("model", [CheckReadiness, InitiateRun])
+def test_invalid_rerun_triggers_rejected(setup, value, model):
+    deployment, args = setup
+    with pytest.raises(ValidationError):
+        model(**run_args(deployment, args), rerun_triggers=value)
+
+
+def test_rerun_triggers_require_matching_readiness_and_preserve_legacy_fingerprint(setup):
+    harness, executor, kwargs = unit_harness(setup)
+    args = InitiateRun(**kwargs)
+    legacy = args.model_dump()
+    legacy.pop("rerun_triggers")
+    for key in ("job_name", "walltime_minutes", "phase", "log_dir", "depends_on", "defer_readiness"):
+        legacy.pop(key, None)
+    assert harness._run_fingerprint(args, {}, "config") == digest(
+        {"arguments": legacy, "identity": {}, "config": "config"})
+    harness.run("check_readiness", CheckReadiness(**kwargs))
+    selected = {**kwargs, "rerun_triggers": ["mtime", "input", "code", "software-env"]}
+    with pytest.raises(ValueError, match="matching"):
+        harness.run("initiate_run", InitiateRun(**selected))
+    harness.run("check_readiness", CheckReadiness(**selected))
+    for different in (kwargs, {**selected, "rerun_triggers": ["mtime", "params"]}):
+        with pytest.raises(ValueError, match="matching"):
+            harness.run("initiate_run", InitiateRun(**different))
+    result = harness.run("initiate_run", InitiateRun(**selected))
+    assert result["status"] == "submitted"
+    verify(Notebook(kwargs["notebook"]).read())

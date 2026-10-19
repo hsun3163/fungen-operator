@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Annotated, Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, JsonValue, AfterValidator
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, AfterValidator, field_validator
 
 VERSION = "1"
 
@@ -65,7 +65,19 @@ class RunSlots(Model):
     memory_gb: Annotated[int, Field(ge=32, le=1000)] = 40
     jobs: Annotated[int, Field(ge=1, le=1000)] = 100
     latency_wait: Annotated[int, Field(ge=1, le=3600)] = 120
+    # Execution policy only; scientific inputs and targets remain in the recipe.
+    rerun_triggers: Annotated[
+        list[Literal["mtime", "params", "input", "software-env", "code"]],
+        Field(min_length=1, max_length=5),
+    ] | None = None
     walltime_minutes: Annotated[int, Field(ge=1, le=8640)] = 8640
+
+    @field_validator("rerun_triggers")
+    @classmethod
+    def unique_rerun_triggers(cls, value):
+        if value is not None and len(value) != len(set(value)):
+            raise ValueError("rerun_triggers must be unique")
+        return value
 
 
 class CheckReadiness(RunSlots):
@@ -274,6 +286,8 @@ def render(action: str, slots: dict) -> str:
     wait = " -K" if action == "check_readiness" else ""
     hours, minutes = divmod(args.walltime_minutes, 60)
     tail = " --dry-run" if action == "check_readiness" else ""
+    execution_options = ("  --rerun-triggers " + " ".join(args.rerun_triggers) + " \\\n"
+                         if args.rerun_triggers is not None else "")
     return f'''%%bash
 set -eo pipefail
 mkdir -p {q(args.log_dir)} {q(args.workdir)}
@@ -300,7 +314,7 @@ python -m snakemake \\
   --profile {q(b['profile_path'])} \\
   --cores {args.workflow_cores} --jobs {args.jobs} \\
   --latency-wait {args.latency_wait} \\
-  --printshellcmds{tail} \\
+{execution_options}  --printshellcmds{tail} \\
   {' '.join(q(t) for t in args.targets)}
 LSF
 '''
