@@ -289,3 +289,52 @@ def test_task_directory_symlink_outside_run_root_is_refused(native_run):
         "rule": "otters_test", "unit": {}, "task_directory": alias}
     evidence, _ = _evidence(run.deployment, run.nb)
     assert set(evidence) == {"100", "101"}
+
+
+_NATIVE_CONTROLLER_HISTORY = """Job <100>, Job Name <controller>, User <operator>, Status <DONE>
+Mon Oct 19 00:01:01: Submitted from host <login>, to Queue <premium>;
+Mon Oct 19 00:01:02: Done successfully. The CPU time used is 1 seconds.
+Summary of time in seconds spent in various states by Mon Oct 19 00:01:02
+  PEND     PSUSP    RUN      USUSP    SSUSP    UNKWN    TOTAL
+  0        0        1        0        0        0        1
+"""
+
+
+def _mixed_history_report(run, body, code=0, diagnostic=""):
+    run.records[:] = [record for record in run.records if record["JOBID"] not in {"100", "102"}]
+    def runner(command, **kwargs):
+        run.calls.append(command)
+        if command[0] == "bjobs":
+            return SimpleNamespace(returncode=0, stdout=json.dumps({"RECORDS": run.records}), stderr="")
+        return SimpleNamespace(returncode=code, stdout=body, stderr=diagnostic)
+    return inspect_jobs(run.deployment, run.nb, runner=runner, now=run.now)
+
+
+def test_successful_native_history_batch_can_silently_omit_absent_child(native_run):
+    run = native_run
+    report = _mixed_history_report(run, _NATIVE_CONTROLLER_HISTORY)
+    assert run.calls[-1] == ["bhist", "-a", "-l", "100", "102"]
+    assert report["count"] == 1
+    child = report["dead_children"][0]
+    assert child["lsf_job_id"] == "102" and child["wrapper_job_id"] == "101"
+    assert child["lsf_state"] == "NOT_FOUND" and child["exit_reason"] == "LSF has no record"
+    assert report["jobs"]["100"]["status"] == "DONE"
+
+
+@pytest.mark.parametrize("body,code,diagnostic", [
+    (_NATIVE_CONTROLLER_HISTORY, 0, "Network is unreachable"),
+    (_NATIVE_CONTROLLER_HISTORY, 1, ""),
+    (_NATIVE_CONTROLLER_HISTORY.split("Summary of time")[0], 0, ""),
+    (_NATIVE_CONTROLLER_HISTORY + "Job <102>, Job Name <child>\n", 0, ""),
+    (_NATIVE_CONTROLLER_HISTORY + "scheduler query failed\n", 0, ""),
+    ("malformed response\n", 0, ""),
+])
+def test_partial_error_or_truncated_history_does_not_imply_absent_child(native_run, body, code, diagnostic):
+    report = _mixed_history_report(native_run, body, code, diagnostic)
+    assert report["count"] == 0
+    assert "102" not in report["jobs"] or report["jobs"]["102"]["status"] != "NOT_FOUND"
+    if "102" not in report["jobs"]:
+        assert any(entry == {"job_id": "102", "status": "history_query_unresolved"}
+                   for entry in report["observations"])
+    else:
+        assert report["jobs"]["102"]["status"] == "UNKNOWN"

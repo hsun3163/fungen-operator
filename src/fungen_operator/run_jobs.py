@@ -188,6 +188,27 @@ def _history(text, ids):
     return records
 
 
+
+def _complete_history_batch(proc, requested, records):
+    """Only complete native records permit inference from silently omitted IDs."""
+    if proc.returncode != 0 or proc.stderr.strip() or not records:
+        return False
+    blocks = list(re.finditer(r"(?ms)^Job <(\d+)>.*?(?=^Job <|\Z)", proc.stdout))
+    if not blocks or proc.stdout[:blocks[0].start()].strip():
+        return False
+    if {block.group(1) for block in blocks} != set(records):
+        return False
+    # bhist -l terminates every native record with its complete state-duration
+    # table. A header or terminal event alone can also be a truncated response.
+    footer = re.compile(
+        r"(?m)^\s*PEND\s+PSUSP\s+RUN\s+USUSP\s+SSUSP\s+UNKWN\s+TOTAL\s*\n"
+        r"[ \t]*[0-9]+(?:\.[0-9]+)?(?:[ \t]+[0-9]+(?:\.[0-9]+)?){6}[ \t\r\n]*\Z")
+    for block in blocks:
+        if (block.group(1) not in requested or not footer.search(block.group(0))
+                or records[block.group(1)]["status"] == "UNKNOWN"):
+            return False
+    return True
+
 def _lineage(child, evidence, jobs):
     candidates = child["wrapper_candidates"]
     if len(candidates) == 1:
@@ -350,7 +371,8 @@ def inspect_jobs(deployment, nb, *, grace_minutes=10, runner=subprocess.run, now
         history = _history(proc.stdout, missing)
         # bhist's explicit per-ID absence is distinct from command/network errors.
         absent = {m.group(1) for m in re.finditer(r"Job <(\d+)> is not found", proc.stdout + proc.stderr)}
-        if re.fullmatch(r"\s*No matching job found\.?\s*", proc.stdout + proc.stderr):
+        if (re.fullmatch(r"\s*No matching job found\.?\s*", proc.stdout + proc.stderr)
+                or _complete_history_batch(proc, missing, history)):
             absent.update(set(missing) - set(history))
         for job in missing:
             if job in history:
