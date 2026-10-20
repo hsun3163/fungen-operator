@@ -1,4 +1,0 @@
-interface:
-  display_name: "xQTL Snakemake Analysis"
-  short_description: "Run and debug xQTL Snakemake workflows"
-  default_prompt: "Use $xqtl-snakemake-analysis to inspect, run, or repair this xQTL workflow, launching the furthest authorized scientific endpoint and fanning out independent LSF work as much as reasonable by default."

@@ -11,18 +11,10 @@ from pathlib import Path
 
 import yaml
 
-from .actions import Deployment, PrepareConfig, RunSlots, MODELS, digest, inside
+from .actions import Deployment, PrepareConfig, RunSlots, digest, inside
 from .execution import Executor
 from .notebook import Notebook, active, now, recipe_key, verify
 from .live_control import ControlRun, command, commands, approval_fingerprint
-
-
-def resource_path(path):
-    """Only three-component scheduler resource leaves qualify for live edits."""
-    return (len(path) == 3 and all(isinstance(p, str) for p in path)
-            and re.fullmatch(r"[A-Za-z0-9_-]+", path[1]) is not None
-            and ((path[0] == "sos_tasks" and path[2] in {"mem", "walltime", "queue"})
-                 or (path[0] == "jobs" and path[2] in {"mem_mb", "runtime", "queue"})))
 
 
 def changed_paths(before, after, prefix=()):
@@ -43,12 +35,18 @@ class Harness:
     def __init__(self, deployment: Deployment, executor=None, deployment_file=None):
         deployment.validate_layout()
         self.deployment = deployment
+        if deployment_file:
+            deployment._deployment_file = str(Path(deployment_file).resolve())
+        self.registry = deployment.registry
         self.executor = executor or Executor(deployment)
         self.deployment_file = deployment_file
 
     def _context(self, args):
         self.deployment.validate_arguments(args)
-        book = Notebook(args.notebook)
+        spec = next((s for s in self.registry.specs.values() if isinstance(args, s.model)), None)
+        if spec and spec.validate:
+            spec.validate(self.deployment, args)
+        book = Notebook(args.notebook, self.registry)
         nb = book.read()
         current = {recipe_key(c.metadata.fungen): c for c in active(nb)}
         if current:
@@ -66,7 +64,7 @@ class Harness:
         # Include historical cells: a superseded receipt does not make a job disappear.
         for cell in nb.cells:
             meta = cell.metadata.get("fungen", {})
-            if meta.get("action") not in {"initiate_run"}:
+            if meta.get("action") not in self.registry.specs or not self.registry.spec(meta["action"]).controller:
                 continue
             result = meta.get("result", {})
             if result.get("job_id"):
@@ -97,8 +95,8 @@ class Harness:
         actual = yaml.safe_load(Path(args.configfile).read_text()) if Path(args.configfile).exists() else None
         before = yaml.safe_load(baseline.metadata.fungen.slots.bindings.config_text) if baseline else actual
         paths = changed_paths(before, proposed)
-        resource_edit = bool(baseline and paths and all(resource_path(p) for p in paths)
-                             and all(resource_path(tuple(p.split("."))) for p in args.parameters))
+        resource_edit = bool(baseline and paths and all(self.deployment.is_operational(".".join(p), leaf_only=True) for p in paths)
+                             and all(self.deployment.is_operational(p, leaf_only=True) for p in args.parameters))
         if resource_edit:
             recorded = baseline.metadata.fungen.slots.arguments
             if any(recorded[k] != getattr(args, k) for k in ("notebook", "configfile", "workdir")):
@@ -138,7 +136,7 @@ class Harness:
         if proposal["scientific_changes"]:
             if not approval or approval.get("fingerprint") != proposal["fingerprint"]:
                 raise ValueError("scientific approval required before materialization")
-        book = Notebook(args.notebook)
+        book = Notebook(args.notebook, self.registry)
         with book.locked():
             # Recheck after acquiring the lock, including competing writers.
             if self.propose_config(args)["fingerprint"] != proposal["fingerprint"]:
@@ -163,7 +161,7 @@ class Harness:
     def _run_fingerprint(self, args, identity, config_text):
         values = args.model_dump()
         # Keep pre-option recipes/fingerprints stable when the option is absent.
-        for option in ("rerun_triggers", "sos_j", "sos_max_running_jobs", "sos_queue"):
+        for option in ("rerun_triggers",):
             if values.get(option) is None:
                 values.pop(option, None)
         for key in ("job_name", "walltime_minutes", "phase", "log_dir", "depends_on", "defer_readiness"):
@@ -171,10 +169,18 @@ class Harness:
         return digest({"arguments": values, "identity": identity, "config": config_text})
 
     def run(self, action: str, args: RunSlots):
+        spec = self.registry.spec(action)
+        if spec.refusal is not None:
+            args = spec.model.model_validate(args.model_dump())
+            if spec.validate:
+                spec.validate(self.deployment, args)
+            return {**spec.refusal, "action": action, "executed": False}
+        if action not in {"prepare_config", "check_readiness", "initiate_run", "control_run"}:
+            return self._provider_run(spec, args)
         if action not in {"check_readiness", "initiate_run"}:
             raise ValueError("unsupported run action")
-        args = MODELS[action].model_validate(args.model_dump())
-        book = Notebook(args.notebook)
+        args = self.registry.models[action].model_validate(args.model_dump())
+        book = Notebook(args.notebook, self.registry)
         # Validate before even creating a lock outside permitted paths.
         self._context(args)
         with book.locked():
@@ -197,6 +203,22 @@ class Harness:
             if action == "initiate_run" and args.defer_readiness:
                 cell.metadata.fungen["readiness_policy"] = "canonical_dry_run_at_controller_start"
             cell.metadata.fungen["run_fingerprint"] = fingerprint
+            book.save(nb)
+            return self._execute(book, nb, cell)
+
+    def _provider_run(self, spec, args):
+        args = spec.model.model_validate(args.model_dump())
+        book, _, _ = self._context(args)
+        with book.locked():
+            _, nb, _ = self._context(args)
+            self._idle(nb)
+            config = spec.config_text(self.deployment, args) if spec.config_text else ""
+            identity = self.deployment.identity()
+            cell_id = uuid.uuid4().hex
+            slots = {"arguments": args.model_dump(), "bindings":
+                     spec.bindings(self.deployment, args, cell_id) if spec.bindings else {}}
+            cell = book.append(nb, spec.name, slots, identity, cell_id)
+            cell.metadata.fungen["run_fingerprint"] = self._run_fingerprint(args, identity, config)
             book.save(nb)
             return self._execute(book, nb, cell)
 
@@ -228,14 +250,14 @@ class Harness:
 
     def execute_pending(self, notebook, cell_id):
         self.deployment.validate_write_path(notebook)
-        book = Notebook(notebook)
+        book = Notebook(notebook, self.registry)
         with book.locked():
             nb = book.read()
             cell = next((c for c in active(nb) if c.id == cell_id), None)
             if cell is None or cell.metadata.fungen.status not in {"prepared", "host_approval_required"}:
                 raise ValueError("only an unexecuted active cell can be executed here")
             meta = cell.metadata.fungen
-            args = MODELS[meta.action].model_validate(meta.slots.arguments)
+            args = self.registry.models[meta.action].model_validate(meta.slots.arguments)
             if meta.action == "control_run":
                 self.validate_control_cell(nb, cell)
                 return self._execute(book, nb, cell)
@@ -265,7 +287,9 @@ class Harness:
                 self._config_idle(nb, args, proposed)
                 return self._execute(book, nb, cell)
             self._idle(nb)
-            cfg = self._matching_config(args, current)
+            spec = self.registry.spec(meta.action)
+            cfg = (spec.config_text(self.deployment, args) if spec.config_text
+                   else self._matching_config(args, current))
             if self._run_fingerprint(args, identity, cfg) != meta.run_fingerprint:
                 raise ValueError("implementation or configuration changed; repeat readiness")
             if meta.action == "initiate_run" and not args.defer_readiness:
@@ -277,7 +301,7 @@ class Harness:
     def replay(self, notebook):
         """Replay a snapshot of active intent through the same action gates."""
         self.deployment.validate_write_path(notebook)
-        nb = Notebook(notebook).read()
+        nb = Notebook(notebook, self.registry).read()
         self._idle(nb)
         remaining = nb.metadata.fungen.get("replay_remaining")
         recipe = copy.deepcopy([c for c in active(nb) if c.id in remaining] if remaining else active(nb))
@@ -288,7 +312,7 @@ class Harness:
             if meta.identity != self.deployment.identity():
                 raise ValueError("implementation identity changed; rebind the recipe")
             action = meta.action
-            args = MODELS[action].model_validate(meta.slots.arguments)
+            args = self.registry.models[action].model_validate(meta.slots.arguments)
             if action == "prepare_config":
                 # Replay the complete recorded configuration, including approved science.
                 recorded = yaml.safe_load(meta.slots.bindings.config_text)
@@ -308,7 +332,7 @@ class Harness:
                 if state not in {"DONE", "EXIT"}:
                     # Keep the unexecuted suffix active and resume it on the next
                     # replay call, rather than submitting another controller.
-                    book = Notebook(notebook)
+                    book = Notebook(notebook, self.registry)
                     with book.locked():
                         nb = book.read()
                         pending = []
@@ -323,12 +347,12 @@ class Harness:
                         nb.metadata.fungen["replay_remaining"] = pending
                         book.save(nb)
                     return results
-        book = Notebook(notebook)
+        book = Notebook(notebook, self.registry)
         with book.locked():
             nb = book.read()
             nb.metadata.fungen.pop("replay_remaining", None)
             book.save(nb)
-        verify(Notebook(notebook).read())
+        verify(Notebook(notebook, self.registry).read(), self.registry)
         return results
 
     def _control_notebook(self, notebook):
@@ -336,7 +360,7 @@ class Harness:
             raise ValueError("notebook must belong to run_root")
         if hasattr(self.deployment, "validate_write_path"):
             self.deployment.validate_write_path(notebook)
-        return Notebook(notebook)
+        return Notebook(notebook, self.registry)
 
     def _job_snapshot(self, nb, grace_minutes=10, job_ids=None):
         from .run_jobs import inspect_jobs
@@ -350,12 +374,11 @@ class Harness:
         nb = book.read()
         if request.operation == "sweep":
             from .sweep_cell import sweep_bindings
-            from .actions import render
             bindings = sweep_bindings(self.deployment, request, nb)
             slots = {"arguments": request.model_dump(), "bindings": bindings}
             proposal = {"status": "approval_required", **slots, "job_ids": [],
                         "command": ["bsub"], "sweep_spec": request.sweep.model_dump(),
-                        "source": render("control_run", slots),
+                        "source": self.registry.render("control_run", slots),
                         "notebook_hash": digest(nb) if book.path.exists() else None}
             proposal["fingerprint"] = approval_fingerprint(proposal["arguments"], bindings)
             return proposal
@@ -451,7 +474,8 @@ class Harness:
         if request.operation == "sweep":
             from .sweep import SweepPlan
             plan = SweepPlan.model_validate_json(meta.slots.bindings.plan_text)
-            if plan.run_root != self.deployment.run_root or plan.snakefile != self.deployment.snakefile:
+            if (plan.run_root != self.deployment.run_root or plan.snakefile != self.deployment.snakefile
+                    or plan.deployment_file != self.deployment._deployment_file):
                 raise ValueError("sweep plan differs from the registered deployment")
             return
         snapshot = self._job_snapshot(nb, request.dead_child_grace_minutes, meta.slots.bindings.job_ids)
@@ -463,7 +487,7 @@ class Harness:
         self._control_resources(meta.slots.bindings, snapshot)
 
     def inspect(self, request):
-        nb = Notebook(request.notebook).read()
+        nb = Notebook(request.notebook, self.registry).read()
         snapshot = (self._job_snapshot(nb, request.dead_child_grace_minutes)
                     if self.deployment.backend == "lsf" else
                     {"count": 0, "dead_children": [], "jobs": {}, "scheduler_ok": True})

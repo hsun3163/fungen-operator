@@ -46,7 +46,10 @@ def native_run(tmp_path):
     def runner(command, **kwargs):
         calls.append(command)
         return SimpleNamespace(returncode=0, stdout=json.dumps({"RECORDS": records}), stderr="")
-    return SimpleNamespace(root=root, deployment=SimpleNamespace(run_root=str(root), snakefile=str(snakefile)),
+    return SimpleNamespace(root=root, deployment=SimpleNamespace(run_root=str(root), snakefile=str(snakefile),
+                               registry=SimpleNamespace(task_layout=lambda workdir,config,log_path: {
+                                   "rule": "otters_test", "unit": {"gwas": "study", "eqtl": "dataset"},
+                                   "task_kind": "otters_test", "task_directory": task_dir})),
                            nb=nb, records=records, runner=runner, calls=calls, task=task, task_dir=task_dir,
                            submitted=submitted, now=submitted + 3600)
 

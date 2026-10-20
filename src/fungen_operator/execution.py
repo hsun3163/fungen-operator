@@ -13,7 +13,7 @@ from pathlib import Path
 import nbformat
 from nbclient import NotebookClient
 
-from .actions import Deployment, MODELS, inside, render
+from .actions import Deployment, inside
 
 
 class Executor:
@@ -83,19 +83,24 @@ class Executor:
 
     def execute(self, cell, folder):
         meta = cell.metadata.fungen
-        if cell.source != render(meta.action, meta.slots):
+        registry = self.deployment.registry
+        spec = registry.spec(meta.action)
+        if cell.source != registry.render(meta.action, meta.slots, meta.template_version):
             raise ValueError("executor refused a cell that does not re-render")
-        args = MODELS[meta.action].model_validate(meta.slots.arguments)
+        args = registry.models[meta.action].model_validate(meta.slots.arguments)
         if meta.action == "control_run":
             from .harness import Harness
             from .notebook import Notebook
-            Harness(self.deployment, self).validate_control_cell(Notebook(args.notebook).read(), cell)
+            Harness(self.deployment, self).validate_control_cell(Notebook(args.notebook, registry).read(), cell)
         else:
             self.deployment.validate_arguments(args)
-        if meta.action not in {"prepare_config", "control_run"}:
+            if spec.validate:
+                spec.validate(self.deployment, args)
+        if spec.validate_bindings:
+            spec.validate_bindings(self.deployment, args, meta.slots.bindings)
+        elif meta.action in {"check_readiness", "initiate_run"}:
             b = meta.slots.bindings
-            keys = ("snakefile", "profile_path", "conda_sh", "conda_env")
-            for key in keys:
+            for key in ("snakefile", "profile_path", "conda_sh", "conda_env"):
                 if b[key] != getattr(self.deployment, key):
                     raise ValueError(f"recorded {key} differs from the registered deployment")
             if not inside(b.log_stem, args.log_dir):
@@ -112,6 +117,10 @@ class Executor:
         # The harness interpreter owns notebook execution. Do not accidentally use
         # a user's globally registered kernel or the workflow's shell `python`.
         client.km.kernel_spec.argv = [sys.executable, "-m", "ipykernel_launcher", "-f", "{connection_file}"]
+        submitted_at_ns = time.time_ns()
+        previous_outputs = ({name: self._output_stamp(Path(getattr(args, name)))
+                             for name in spec.output_fields}
+                            if spec.output_fields else {})
         client.execute(env=self.environment())
         cell.outputs = one.cells[0].outputs
         cell.execution_count = one.cells[0].execution_count
@@ -140,17 +149,27 @@ class Executor:
             return {**result, "status": "unknown", "diagnostic": "No retained scheduler receipt"}
         job_id = receipt.group(1)
         result["job_id"] = job_id
-        if meta.action == "check_readiness":
+        if spec.reconcile:
+            result["submitted_at_ns"] = submitted_at_ns
+            result.update(spec.reconcile(self, args, meta.slots.bindings, job_id, error, previous_outputs))
+        elif meta.action == "check_readiness":
             result.update(self._reconcile_readiness(job_id, meta.slots.bindings.log_stem, error))
         else:
             result.update(status="submitted", scheduler=self.scheduler(job_id),
                           logs=self.logs(meta.slots.bindings.log_stem, job_id))
-            if args.defer_readiness:
+            if getattr(args, "defer_readiness", False):
                 result["readiness_policy"] = "canonical_dry_run_at_controller_start"
         for name, body in result["logs"].items():
             cell.outputs.append(nbformat.v4.new_output("stream", name="stdout",
                                 text=f"\n--- scheduler {name}: job {job_id} ---\n{body}"))
         return result
+
+    @staticmethod
+    def _output_stamp(path):
+        if not path.is_file():
+            return None
+        stat = path.stat()
+        return [stat.st_mtime_ns, stat.st_ctime_ns, stat.st_size, stat.st_ino]
 
     def _reconcile_readiness(self, job_id, stem, error):
         # bsub -K has returned, but bjobs and shared-filesystem logs can lag it.

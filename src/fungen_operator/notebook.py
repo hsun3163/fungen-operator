@@ -12,7 +12,7 @@ from pathlib import Path
 
 import nbformat
 
-from .actions import VERSION, render
+from .providers import builtin_registry
 
 
 def now():
@@ -23,13 +23,14 @@ def active(nb):
     return [c for c in nb.cells if c.cell_type == "code" and "superseded" not in c.metadata.get("tags", [])]
 
 
-def verify(nb):
+def verify(nb, registry=None):
+    registry = registry or builtin_registry()
     seen = set()
     for cell in active(nb):
         meta = cell.metadata.get("fungen", {})
-        if meta.get("template_version") != VERSION:
+        if not isinstance(meta.get("template_version"), str):
             raise ValueError(f"unknown template version in cell {cell.id}")
-        if cell.source != render(meta["action"], meta["slots"]):
+        if cell.source != registry.render(meta["action"], meta["slots"], meta.get("template_version")):
             raise ValueError(f"cell {cell.id} does not re-render exactly")
         key = recipe_key(meta)
         if key in seen:
@@ -52,13 +53,14 @@ ORDER = {"prepare_config": 0, "check_readiness:before_run": 1,
 
 
 class Notebook:
-    def __init__(self, path: str):
+    def __init__(self, path: str, registry=None):
         self.path = Path(path)
+        self.registry = registry or builtin_registry()
 
     def read(self):
         if self.path.exists():
             nb = nbformat.read(self.path, as_version=4)
-            verify(nb)
+            verify(nb, self.registry)
             return nb
         return nbformat.v4.new_notebook(metadata={
             "kernelspec": {"display_name": "Python 3", "language": "python", "name": "python3"},
@@ -78,7 +80,7 @@ class Notebook:
             yield
 
     def save(self, nb):
-        verify(nb)
+        verify(nb, self.registry)
         nbformat.validate(nb)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         fd, tmp = tempfile.mkstemp(dir=self.path.parent, prefix=".notebook-")
@@ -93,7 +95,7 @@ class Notebook:
                 os.unlink(tmp)
 
     def append(self, nb, action, slots, identity, cell_id, approval=None):
-        meta = {"action": action, "template_version": VERSION, "slots": copy.deepcopy(slots),
+        meta = {"action": action, "template_version": self.registry.version(action), "slots": copy.deepcopy(slots),
                 "identity": identity, "created": now(), "status": "prepared",
                 "approval": approval, "sequence": 1 + max(
                     (c.metadata.get("fungen", {}).get("sequence", 0) for c in nb.cells), default=0)}
@@ -111,11 +113,11 @@ class Notebook:
                 p["superseded_by"] = cell_id
                 superseded.append(prior.id)
         meta["supersedes"] = superseded
-        cell = nbformat.v4.new_code_cell(render(action, slots), metadata={
+        cell = nbformat.v4.new_code_cell(self.registry.render(action, slots), metadata={
             "tags": ["fungen-action"], "fungen": meta}, id=cell_id)
         nb.cells.append(cell)
         intro = [c for c in nb.cells if c.cell_type != "code" and not c.metadata.get("fungen_history_heading")]
-        current = sorted(active(nb), key=lambda c: ORDER.get(recipe_key(c.metadata.fungen), 2.5))
+        current = sorted(active(nb), key=lambda c: ORDER.get(recipe_key(c.metadata.fungen), self.registry.order(c.metadata.fungen.action)))
         history = sorted([c for c in nb.cells if c.cell_type == "code" and c not in current],
                          key=lambda c: c.metadata.fungen.sequence)
         heading = nbformat.v4.new_markdown_cell("## Superseded attempts\n\nRetained history; excluded from replay.",

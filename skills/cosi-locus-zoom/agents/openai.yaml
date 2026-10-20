@@ -1,4 +1,0 @@
-interface:
-  display_name: "COSI Locus Zoom"
-  short_description: "Build COSI locus-zoom and LD triangle plots."
-  default_prompt: "Use this skill when creating or revising COSI locus-zoom plots or LD triangle plots."

@@ -24,13 +24,10 @@ def test_execution_defaults_and_upper_bounds(slots, model):
     args = dict(slots["arguments"])
     args.pop("jobs")
     assert model(**args).jobs == 2000
-    values = model(**args, jobs=10000, sos_j=10000, sos_max_running_jobs=10000,
-                   sos_queue="express")
-    assert values.sos_j == values.sos_max_running_jobs == values.jobs == 10000
-    assert model(**args).sos_queue is None
+    assert model(**args, jobs=10000).jobs == 10000
 
 
-@pytest.mark.parametrize("field", ["jobs", "sos_j", "sos_max_running_jobs"])
+@pytest.mark.parametrize("field", ["jobs"])
 @pytest.mark.parametrize("value", [0, 10001, True, "100"])
 def test_typed_execution_bounds(slots, field, value):
     args = {**slots["arguments"], field: value}
@@ -51,16 +48,9 @@ def test_omitted_settings_keep_legacy_cell_bytes(slots, action, expected):
     # Frozen from the pre-feature renderer with the retained explicit jobs value.
     source = render(action, slots)
     assert hashlib.sha256(source.encode()).hexdigest() == expected
-    slots["arguments"].update(sos_j=None, sos_max_running_jobs=None, sos_queue=None)
-    assert render(action, slots) == source
 
 
-@pytest.mark.parametrize("action", ["initiate_run", "check_readiness"])
-def test_sos_settings_render_in_native_command(slots, action):
-    slots["arguments"].update(sos_j=8000, sos_max_running_jobs=9000, sos_queue="premium")
-    source = render(action, slots)
-    assert ("  --config fungen_sos_j=8000 fungen_sos_max_running_jobs=9000 "
-            "fungen_sos_queue=premium "
-            "fungen_sos_config=/tmp/fungen-sos-settings/run/logs/attempt.sos.yml \\\n") in source
-    assert "python -m snakemake" in source
-    assert "--configfile /tmp/fungen-sos-settings/run/config.yml" in source
+@pytest.mark.parametrize("field,value", [("sos_j",10000),("sos_max_running_jobs",10000),("sos_queue","express")])
+def test_sos_request_slots_are_retired(slots, field, value):
+    with pytest.raises(ValidationError):
+        InitiateRun(**slots["arguments"], **{field:value})

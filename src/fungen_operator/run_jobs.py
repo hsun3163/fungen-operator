@@ -18,9 +18,6 @@ import yaml
 
 _FIELDS = "jobid stat exit_code queue submit_time pend_time sub_cwd command job_name user exit_reason output_file error_file combined_resreq"
 _SUBMISSION = re.compile(r"Job (\d+) has been submitted with LSF jobid (\d+) \(log: (.+?)\)\.")
-_STAGE = {"coloc_abf": "coloc", "otters_test": "twas", "susie_coloc_gene": "susie_coloc",
-          "intact_pair": "intact", "otters_weights": "weights",
-          "univariate_rss_gwas": "fine_mapped", "univariate_rss_eqtl": "fine_mapped"}
 _TERMINAL = {"EXIT", "DONE", "NOT_FOUND"}
 
 
@@ -67,50 +64,23 @@ def _header(path):
         return None
 
 
-def _unit(log_path):
-    parts = Path(log_path).parts
-    for index, part in enumerate(parts):
-        if part.startswith("rule_") and index + 1 < len(parts):
-            rule = part[5:]
-            values = dict(re.findall(r"(?:^|\.\.)([a-zA-Z_]+)=([^=]+?)(?=\.\.[a-zA-Z_]+=|$)", parts[index + 1]))
-            # Report pair/dataset identity, without regional gene wildcards.
-            values = {k: v for k, v in values.items() if k in {"gwas", "eqtl", "dataset", "pair"}}
-            return rule, values
-    return None, {}
-
-
-def _task_dir(workdir, config, rule, unit):
-    if rule not in _STAGE:
-        return None
-    output = Path(config.get("outdir", "."))
-    if not output.is_absolute():
-        output = Path(workdir, output)
-    root = output / "results"
-    suffix = Path(config.get("ld_meta_pair", "")).stem.replace(".LD_meta.tsv", "")
-    stage = _STAGE[rule]
-    if rule == "otters_weights" and unit.get("eqtl"):
-        runlog = root / "weights" / f"{unit['eqtl']}.{suffix}" / "runlog"
-    elif rule.startswith("univariate_rss_"):
-        dataset = unit.get("gwas") or unit.get("eqtl")
-        if not dataset:
-            return None
-        runlog = root / f"{dataset}.{suffix}" / "fine_mapped/runlog"
-    elif unit.get("gwas") and unit.get("eqtl"):
-        runlog = root / f"{unit['gwas']}.{suffix}" / f"{unit['eqtl']}.{suffix}" / stage / "runlog"
-    else:
-        return None
-    return runlog.resolve() / "sos_runtime/home/.sos/tasks"
+def _controller_actions(deployment):
+    registry = getattr(deployment, "registry", None)
+    return {"initiate_run", "check_readiness"} | {
+        name for name, spec in getattr(registry, "specs", {}).items() if spec.controller}
 
 
 def _evidence(deployment, nb):
     evidence, homes, observations = {}, {}, []
     task_dirs = {}
     run_root = Path(deployment.run_root).resolve()
-    exported = "sos_runtime" in _text(deployment.snakefile) and "COSI_SOS_EXEC_HOME" in _text(deployment.snakefile)
+    registry = getattr(deployment, "registry", None)
+    layout = registry.task_layout if registry else None
+    controllers = _controller_actions(deployment)
     for cell in nb.cells:
         meta = cell.metadata.get("fungen", {})
         is_sweep = meta.get("action") == "control_run" and meta.get("slots", {}).get("arguments", {}).get("operation") == "sweep"
-        if meta.get("action") not in {"initiate_run", "check_readiness"} and not is_sweep:
+        if meta.get("action") not in controllers and not is_sweep:
             continue
         slots, result = meta.get("slots", {}), meta.get("result", {})
         args, bindings = slots.get("arguments", {}), slots.get("bindings", {})
@@ -147,14 +117,17 @@ def _evidence(deployment, nb):
                     internal, wrapper, log_path = match.groups()
                     if ".." in Path(log_path).parts or not Path(log_path).is_relative_to(workdir):
                         continue
-                    rule, unit = _unit(log_path)
-                    evidence[wrapper] = {"job_id": wrapper, "kind": "wrapper", "controller_job_id": job_id,
-                                         "snakemake_job_id": internal, "rule": rule, "unit": unit, "scheduled_time": scheduled_time,
-                                         "log_path": log_path, "workdir": workdir}
-                    key = (workdir, config.get("outdir"), config.get("ld_meta_pair"), rule, tuple(sorted(unit.items())))
+                    key = (workdir, args.get("configfile"), log_path)
                     if key not in task_dirs:
-                        task_dirs[key] = _task_dir(workdir, config, rule, unit) if exported else None
-                    task_dir = task_dirs[key]
+                        task_dirs[key] = layout(workdir, config, log_path) if layout else None
+                    descriptor = task_dirs[key] or {}
+                    rule, unit = descriptor.get("rule"), descriptor.get("unit", {})
+                    evidence[wrapper] = {"job_id": wrapper, "kind": "wrapper", "controller_job_id": job_id,
+                                         "snakemake_job_id": internal, "rule": rule, "unit": unit,
+                                         "task_kind": descriptor.get("task_kind", rule), "scheduled_time": scheduled_time,
+                                         "log_path": log_path, "workdir": workdir}
+                    task_dir = descriptor.get("task_directory")
+                    task_dir = Path(task_dir).resolve() if task_dir else None
                     if task_dir and task_dir.is_relative_to(run_root):
                         homes.setdefault(task_dir, []).append(evidence[wrapper])
     for task_dir, wrappers in homes.items():
@@ -185,7 +158,7 @@ def _evidence(deployment, nb):
             evidence[child] = {"job_id": child, "kind": "child", "task_id": task_id,
                                **header, "task_dir": str(task_dir), "runlog": str(task_dir.parents[3]),
                                "wrapper_job_id": wrapper["job_id"], "wrapper_candidates": list(dict.fromkeys(w["job_id"] for w in wrappers)),
-                               "rule": wrapper["rule"], "unit": wrapper["unit"], "workdir": wrapper["workdir"]}
+                               "rule": wrapper["rule"], "unit": wrapper["unit"], "task_kind": wrapper.get("task_kind"), "workdir": wrapper["workdir"]}
     return evidence, observations
 
 
@@ -312,7 +285,7 @@ def inspect_jobs(deployment, nb, *, grace_minutes=10, runner=subprocess.run, now
     # controller receipt. Refuse these live outsiders before scanning task homes.
     controllers = {str(c.metadata.get("fungen", {}).get("result", {}).get("job_id"))
                    for c in nb.cells if c.metadata.get("fungen", {}).get("action") in
-                   {"initiate_run", "check_readiness"} or
+                   _controller_actions(deployment) or
                    (c.metadata.get("fungen", {}).get("action") == "control_run" and
                     c.metadata.get("fungen", {}).get("slots", {}).get("arguments", {}).get("operation") == "sweep")}
     if requested_ids and all(job not in controllers for job in requested_ids):
@@ -344,8 +317,6 @@ def inspect_jobs(deployment, nb, *, grace_minutes=10, runner=subprocess.run, now
             record["memory_reservation_gb"] = value * factors[unit] if unit in factors else None
         else:
             record["memory_reservation_gb"] = None
-        record["task_kind"] = ("univariate_rss" if str(record.get("rule", "")).startswith("univariate_rss_")
-                               else record.get("rule"))
         if state in {"EXIT", "DONE"} and not record.get("exit_reason"):
             code = str(record.get("exit_code", "")).strip()
             record["exit_reason"] = (f"Exited with exit code {code}" if code not in {"", "-", "None"}

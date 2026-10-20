@@ -8,7 +8,7 @@ import yaml
 from test_harness import setup, LocalExecution, run_args
 from fungen_operator.actions import PrepareConfig, CheckReadiness, InitiateRun, set_parameter
 from fungen_operator.execution import Executor
-from fungen_operator.harness import Harness, resource_path
+from fungen_operator.harness import Harness
 from fungen_operator.notebook import Notebook, active
 
 
@@ -105,8 +105,10 @@ def test_other_fixture_fields_and_mixed_edits_blocked(setup, key, value, mixed, 
     ('sos_tasks','rss.extra','mem'), ('sos_tasks','','mem'),
     ('sos_tasks','rss\n','mem'), ('sos_tasks','rss;echo','mem'),
     ('jobs','rss','runtime\n'), ('resources','rss','mem_mb')])
-def test_strict_resource_path(path):
-    assert not resource_path(path)
+def test_strict_resource_path(setup, path):
+    d, _ = setup
+    d.operational_parameters = list(RESOURCES)
+    assert not d.is_operational(".".join(path), leaf_only=True)
 
 
 @pytest.mark.parametrize('params', [

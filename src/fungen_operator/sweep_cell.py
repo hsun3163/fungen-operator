@@ -22,7 +22,8 @@ def sweep_bindings(deployment, request, nb):
     stem = str(Path(request.notebook).parent / "logs" / ("sweep-" + attempt))
     plan = SweepPlan(version=1, spec=request.sweep, notebook=request.notebook,
                      run_root=deployment.run_root, snakefile=deployment.snakefile,
-                     log_path=stem + ".sweep.log", jq_path=jq)
+                     log_path=stem + ".sweep.log", jq_path=jq,
+                     deployment_file=getattr(deployment, "_deployment_file", None))
     return {"plan_text": json.dumps(plan.model_dump(), indent=2, sort_keys=True) + "\n",
             "plan_path": stem + ".sweep.json", "log_stem": stem,
             "operator_python": sys.executable, "job_ids": []}

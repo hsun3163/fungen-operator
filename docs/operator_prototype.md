@@ -55,13 +55,10 @@ memory 32–1000 GB, latency 1–3600 seconds, and walltime 1–8640 minutes. Ex
 Defaults follow the retained practice: premium, 40 GB, one controller core, 72 workflow cores,
 2000 jobs, 60-minute readiness and 8640-minute production. Runtime is rendered as explicit HH:MM.
 
-Optional execution settings `sos_j` and `sos_max_running_jobs` accept integers 1–10000;
-`sos_queue` accepts `premium` or `express`. They travel in the literal Snakemake command and
-a per-cell host YAML inside the run's log directory. The canonical workflow copies its host
-configuration and applies the overrides there. Omitted settings keep existing cell text and
-fingerprints unchanged. J limits each SoS engine, including pending children; it is not a
-run-wide scheduler ceiling. Explicit J takes precedence over the host limit; a host-only
-override leaves J unset. These settings apply to newly started engines.
+Workflow execution settings belong to the canonical configuration schema registered by its
+deployment. Operational parameter patterns, such as `hosts.*.queue`, match one complete path
+segment per wildcard; unrelated scientific parameters retain the approval gate. The general
+run slots carry scheduler controls for the controller and workflow concurrency.
 
 `inspect_run` reads per-unit exported SoS task directories and submission headers without
 executing SoS or changing task records. It joins child job files, controller submission logs,
@@ -153,7 +150,7 @@ The SDK version range is MCP 2.2–2.x; the server uses resolver-based elicitati
 negotiated modern and legacy clients. A client without human elicitation can still use the
 operational path, but scientific changes fail closed.
 
-`deployments/xqtl.example.json` supplies the actual xQTL/MESA runtime locations. Inspect it and
+`DEPLOYMENT.json` supplies the actual xQTL/MESA runtime locations. Inspect it and
 the canonical config before use: the canonical sample still contains legacy MWE input paths.
 Supply the intended harmonized inputs through `prepare_config`. This file is an example
 deployment, not a claim that its inputs or all optional parameter metadata are production-ready.
@@ -266,7 +263,7 @@ in both protocol modes. The clients discover all four tools, reject an injected 
 decline then accept a simulated scientific approval, stage a notebook cell, and inspect it.
 The tests use the live backend's staging path with synthetic files; they submit no jobs.
 The actual restricted `serve` invocation also returned the expected startup diagnostic.
-An external client using `deployments/xqtl.example.json` also discovered all four tools and
+An external client using `DEPLOYMENT.json` also discovered all four tools and
 successfully called `inspect_run` without creating a notebook or submitting work.
 
 On 2026-09-24, the full 44-test suite passed, including 14 readiness regression cases. Live
@@ -337,8 +334,8 @@ Configuration preparation binds `cwd` only when the canonical config exposes it.
 Configuration preparation and approved host materialization permit a resource edit
 while an existing controller is RUN or PEND. The full saved proposal is compared
 with the last materialized configuration, including superseded history. Every
-changed leaf must be exactly `sos_tasks.<component>.{mem,walltime,queue}` or
-`jobs.<component>.{mem_mb,runtime,queue}`; typed leaf overrides retain independent
+changed leaf must match a complete declared `operational_parameters` pattern; wildcard
+segments match one identifier. Typed leaf overrides retain independent
 schema/catalog and scientific approval checks. Parent overrides, mixed changes,
 external configuration drift and source identity changes retain their gates.
 The accepted notebook, configuration path and working directory remain bound.
@@ -348,3 +345,31 @@ resources; new processes read the updated YAML. Changes represented as rule
 parameters can trigger native re-execution at the next controller restart.
 
 Deployment JSON files may live beside their workflows. Pass their paths with `--deployment` to `serve`, `action`, `execute`, `replay` or `inspect`; `verify NOTEBOOK --deployment FILE` also checks the notebook against that deployment.
+
+
+## Deployment-owned actions
+
+A deployment may name `action_provider: "../provider.py:create_provider"`. The file path is
+resolved against the deployment JSON file. The developer-owned factory receives the validated
+deployment and returns `Provider`, containing fixed `ActionSpec` contracts and an optional
+workflow task-layout resolver. `provider_options` holds workflow-owned metadata. Without a
+provider, the four built-in actions and read-only `inspect_run` form the complete tool surface.
+
+Each action specification supplies a strict Pydantic request model, versioned renderers,
+recipe order, argument and binding validation, optional configuration identity, declared
+output fields and native receipt reconciliation, or a typed refusal. The general harness
+owns notebook locking, host approval, execution and receipts. Duplicate built-in names,
+unknown template versions and non-strict request models fail validation. The CLI, MCP server,
+executor and notebook verifier use the same deployment-local registry; providers cannot leak
+into another deployment. `schemas --deployment FILE` exports that deployment's action schemas.
+
+Provider source and explicitly declared supporting files join the implementation-identity
+catalog. A changed provider invalidates pending execution through the existing identity gate.
+Existing cells retain their saved template version and re-render through its registered
+renderer. Workflow-owned renderers can retain historical entrypoints during migration while
+new versions use the owning repository's program.
+
+The optional `task_layout(workdir, config, log_path)` callback returns a rule, unit, task kind
+and exported SoS task directory from the workflow's exact wrapper log. The generic operator
+retains native SoS header parsing, scheduler reconciliation, grace handling and live membership.
+The sweep's approved plan records the deployment path so its worker loads the same resolver.

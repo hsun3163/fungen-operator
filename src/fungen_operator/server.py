@@ -138,4 +138,16 @@ def create_server(harness: Harness):
         """Read action history, scheduler states, logs, and requested file observations."""
         return await invoke(harness.inspect, request)
 
+    for name, spec in harness.registry.specs.items():
+        if name in {"prepare_config", "check_readiness", "initiate_run", "control_run"}:
+            continue
+        def make_action(action, contract):
+            async def provided_action(request):
+                return await invoke(harness.run, action, request)
+            provided_action.__name__ = action
+            provided_action.__doc__ = contract.description or action.replace("_", " ")
+            provided_action.__annotations__ = {"request": contract.model, "return": dict[str, Any]}
+            return provided_action
+        server.tool(name=name)(make_action(name, spec))
+
     return server

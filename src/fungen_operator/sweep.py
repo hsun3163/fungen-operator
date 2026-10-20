@@ -72,6 +72,7 @@ class SweepPlan(_Model):
     snakefile: str
     log_path: str
     jq_path: str = "jq"
+    deployment_file: str | None = None
 
     @field_validator("notebook", "run_root", "snakefile", "log_path")
     @classmethod
@@ -213,7 +214,13 @@ def run_sweep(plan, *, snapshotter=None, runner=subprocess.run, sleeper=time.sle
     if snapshotter is None:
         from .run_jobs import inspect_jobs
         metadata = NotebookMetadata(plan.notebook, plan.jq_path, runner)
-        deployment = SimpleNamespace(run_root=plan.run_root, snakefile=plan.snakefile)
+        if plan.deployment_file:
+            from .actions import Deployment
+            deployment = Deployment.load(plan.deployment_file)
+            if deployment.run_root != plan.run_root or deployment.snakefile != plan.snakefile:
+                raise ValueError("sweep deployment differs from its approved run")
+        else:
+            deployment = SimpleNamespace(run_root=plan.run_root, snakefile=plan.snakefile)
         snapshotter = lambda: inspect_jobs(deployment, metadata.read(), runner=runner)
     clock = clock or (lambda: datetime.now(timezone.utc).isoformat())
     Path(plan.log_path).parent.mkdir(parents=True, exist_ok=True)

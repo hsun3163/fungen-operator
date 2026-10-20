@@ -1,4 +1,0 @@
-interface:
-  display_name: "xQTL Runner"
-  short_description: "Run xQTL datasets through the shared DAG"
-  default_prompt: "Use $xqtl-runner to maintain this dataset's single operator notebook and canonical-style YAMLs, submit the literal bsub plus Snakemake commands, require the exact production dry-run to pass, and continue through the existing shared xQTL DAG to the furthest authorized endpoint."

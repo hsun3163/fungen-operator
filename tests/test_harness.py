@@ -517,7 +517,7 @@ def test_rerun_triggers_require_matching_readiness_and_preserve_legacy_fingerpri
     harness, executor, kwargs = unit_harness(setup)
     args = InitiateRun(**kwargs)
     legacy = args.model_dump()
-    for option in ("rerun_triggers", "sos_j", "sos_max_running_jobs", "sos_queue"):
+    for option in ("rerun_triggers",):
         legacy.pop(option, None)
     for key in ("job_name", "walltime_minutes", "phase", "log_dir", "depends_on", "defer_readiness"):
         legacy.pop(key, None)

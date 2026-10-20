@@ -20,48 +20,28 @@ Overlapping instructions are historical design material, not an instruction to c
 |---|---|
 | [human-runner](human-runner/SKILL.md) | Main source for shared native-execution, scope, recovery, evidence, and handoff behavior. |
 
-## Domain runners and workflow ownership
+## Workflow ownership
 
-| Skill | Role in migration |
-|---|---|
-| [xqtl-runner](xqtl-runner/SKILL.md) | Primary current xQTL runner reference: shared DAG, runtime ownership, scientific semantics, materialized-task recovery. |
-| [xqtl-snakemake-analysis](xqtl-snakemake-analysis/SKILL.md) | Additional xQTL operating/editing knowledge to reconcile with the replacement. |
-| [cosi-runner](cosi-runner/SKILL.md) | Current minimal/native COSI runner reference. |
-| [cosi-run](cosi-run/SKILL.md) | Richer COSI run-packet and validation procedure; overlaps with and sometimes conflicts with `cosi-runner`. Preserve unique domain knowledge while resolving policy conflicts. |
-| [cosi-workflow-edit](cosi-workflow-edit/SKILL.md) | COSI workflow-edit behavior and validation obligations. |
-
-The replacement should expose one coherent operating procedure for each supported intent. The existence of two historical procedures is not itself a desired routing mechanism.
+Workflow-specific skills live with their deployment providers in the owning workflow repository. COSI owns its run, edit, data and locus procedures; xQTL owns its runner and Snakemake procedures. Load the workflow's deployment by path to select its operator capabilities. Existing local transition links preserve the paths held by running processes.
 
 ## Diagnosis and execution-state utilities
 
 | Skill | Role in migration |
 |---|---|
-| [debug-pipeline](debug-pipeline/SKILL.md) | Decisive-error tracing and recovery ideas; review manual-marker/completion shortcuts before reuse. |
 | [snakemake-sos-parser](snakemake-sos-parser/SKILL.md) | Parse Snakemake/SoS structure and execution evidence. |
 | [sos-status-sampler](sos-status-sampler/SKILL.md) | Focused SoS task-state sampling. |
 | [lsf-queue-move](lsf-queue-move/SKILL.md) | Scoped scheduler queue intervention. |
 
 These capabilities should support the native workflow rather than become a second completion or orchestration system.
 
-## Scientific and data utilities
+## Protected data
 
 | Skill | Role in migration |
 |---|---|
-| [sumstat-munger](sumstat-munger/SKILL.md) | Summary-statistic preparation through the maintained conversion path. |
-| [cosi-sketch-ld](cosi-sketch-ld/SKILL.md) | Regional LD generation and provenance. |
-| [cosi-weight-scan](cosi-weight-scan/SKILL.md) | Targeted weight/result scanning. |
-| [intact-gene-query](intact-gene-query/SKILL.md) | Freshness-aware INTACT result queries. |
 | [librarian](librarian/SKILL.md) | Route protected-result questions to the local-model data librarian (`data_guard/`). |
+| [query](query/SKILL.md) | Compose bounded requests to that librarian. |
 
-These are examples of the mini-protocol/capability model: retain their scientific contracts and implementation where useful rather than re-expressing them as generic prose.
-
-## Scientific notebooks and figures
-
-| Skill | Role in migration |
-|---|---|
-| [cosi-notebook](cosi-notebook/SKILL.md) | Executable scientific notebook conventions. |
-| [cosi-locus-zoom](cosi-locus-zoom/SKILL.md) | Locus zoom construction and requested-window fidelity. |
-| [cosi-locus-case-study](cosi-locus-case-study/SKILL.md) | Multi-track locus interpretation, allele/CS/LD provenance, and figure contract. |
+Scientific data preparation, result queries and locus notebooks remain owned by their workflows.
 
 ## Handoff and external coordination
 

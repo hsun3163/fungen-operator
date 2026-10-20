@@ -1,5 +1,0 @@
-interface:
-  display_name: "COSI Run"
-  short_description: "Run COSI workflows through verified completion"
-  default_prompt: "Use $cosi-run to prepare, submit, monitor, and verify this COSI Snakemake analysis."
-

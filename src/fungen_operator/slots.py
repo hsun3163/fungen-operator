@@ -1,4 +1,4 @@
-"""Shared strict field types used by canonical and joint action schemas."""
+"""Shared strict field types used by built-in and deployment-provided action schemas."""
 
 import re
 from pathlib import Path

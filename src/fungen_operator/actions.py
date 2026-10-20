@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Annotated, Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, JsonValue, AfterValidator, field_validator
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, AfterValidator, field_validator, PrivateAttr
 
 from .live_control import ControlRun, render_control
 
@@ -45,9 +45,6 @@ class RunSlots(Model):
     workflow_cores: Annotated[int, Field(ge=1, le=512)] = 72
     memory_gb: Annotated[int, Field(ge=32, le=1000)] = 40
     jobs: Annotated[int, Field(ge=1, le=10000)] = 2000
-    sos_j: Annotated[int, Field(ge=1, le=10000)] | None = None
-    sos_max_running_jobs: Annotated[int, Field(ge=1, le=10000)] | None = None
-    sos_queue: Literal["premium", "express"] | None = None
     latency_wait: Annotated[int, Field(ge=1, le=3600)] = 120
     # Execution policy only; scientific inputs and targets remain in the recipe.
     rerun_triggers: Annotated[
@@ -84,8 +81,6 @@ class InspectRun(Model):
     dead_child_grace_minutes: Annotated[int, Field(ge=0, le=10080)] = 10
 
 
-# Loaded after base slot types so capability schemas share the same validation.
-
 MODELS = {"prepare_config": PrepareConfig, "check_readiness": CheckReadiness,
           "initiate_run": InitiateRun, "control_run": ControlRun}
 
@@ -109,6 +104,24 @@ class Deployment(Model):
     conda_env: PathSlot
     run_root: PathSlot
     backend: Literal["lsf", "fixture"] = "lsf"
+    action_provider: str | None = None
+    provider_options: dict[str, JsonValue] = Field(default_factory=dict)
+    _deployment_file: str | None = PrivateAttr(default=None)
+
+    @classmethod
+    def load(cls, path):
+        deployment = cls.model_validate_json(Path(path).read_text())
+        deployment._deployment_file = str(Path(path).resolve())
+        # Validate the provider at startup; every deployment owns its registry.
+        deployment.registry
+        return deployment
+
+    @property
+    def registry(self):
+        from .providers import load_registry
+        return load_registry(self, self._deployment_file)
+
+    operator_python: ExecutableSlot | None = None
     # Optional canonical fields absent from the example YAML can be registered here.
     parameter_defaults: dict[str, JsonValue] = Field(default_factory=dict)
     operational_parameters: list[str] = Field(default_factory=lambda: ["cwd", "resources"])
@@ -122,7 +135,7 @@ class Deployment(Model):
 
     def source_paths(self):
         return [self.snakefile, self.default_config, self.profile_path,
-                str(Path(self.repository, ".git")), *self.canonical_source_paths]
+                str(Path(self.repository, ".git")), *self.canonical_source_paths, *self.registry.source_paths]
 
     def validate_write_path(self, path):
         if (not any(inside(path, root) for root in [self.run_root, *self.native_run_paths])
@@ -153,7 +166,7 @@ class Deployment(Model):
                 if name == "workdir" and self.native_run_paths and value == self.repository:
                     continue
                 self.validate_write_path(value)
-        if args.notebook == args.configfile:
+        if args.notebook == getattr(args, "configfile", None):
             raise ValueError("notebook and configfile must differ")
         if isinstance(args, RunSlots):
             if isinstance(args, InitiateRun) and args.defer_readiness and not args.depends_on:
@@ -212,9 +225,19 @@ class Deployment(Model):
             "configuration." + key: schema for key, schema in self.mapping_parameters.items()
         })
 
+    def is_operational(self, path, *, leaf_only=False):
+        parts = path.split(".") if path else []
+        for pattern in self.operational_parameters:
+            registered = pattern.split(".")
+            if (len(parts) == len(registered) if leaf_only else len(parts) >= len(registered)) and all(
+                    expected == actual or (expected == "*" and re.fullmatch(r"[A-Za-z0-9_-]+", actual))
+                    for expected, actual in zip(registered, parts)):
+                return True
+        return False
+
     def scientific_diff(self, before, after, prefix=""):
         changes = {}
-        if any(prefix == p or prefix.startswith(p + ".") for p in self.operational_parameters):
+        if self.is_operational(prefix):
             return changes
         if isinstance(before, dict) and isinstance(after, dict):
             for key in sorted(before.keys() | after.keys()):
@@ -232,6 +255,8 @@ class Deployment(Model):
         # when its pathspec looks bounded. Never use it for implementation identity.
         repository = Path(self.repository)
         interfaces = {Path(self.snakefile), Path(self.default_config)}
+        provider_sources = self.registry.source_paths
+        interfaces.update(Path(path) for path in provider_sources)
         interfaces.update(p for p in Path(self.profile_path).rglob("*") if p.is_file())
         interfaces.update(p for p in (repository / "pipeline").glob("*.ipynb") if p.is_symlink())
         sources = {str(p): p for p in interfaces}
@@ -269,7 +294,10 @@ class Deployment(Model):
                 "source_hashes": fingerprints, "snakefile": self.snakefile,
                 "profile": self.profile_path, "runtime": self.conda_env,
                 "runtime_activation_sha256": hashlib.sha256(Path(self.conda_sh).read_bytes()).hexdigest(),
-                "backend": self.backend, "mapping_parameters": copy.deepcopy(self.mapping_parameters)}
+                "backend": self.backend, "mapping_parameters": copy.deepcopy(self.mapping_parameters),
+                "operator_python": self.operator_python,
+                **({"provider_options": copy.deepcopy(self.provider_options),
+                    "provider_sources": list(provider_sources)} if self.action_provider else {})}
 
 
 def get_parameter(cfg: dict, key: str):
@@ -351,15 +379,6 @@ def render(action: str, slots: dict) -> str:
     tail = " --dry-run" if action == "check_readiness" else ""
     execution_options = ("  --rerun-triggers " + " ".join(args.rerun_triggers) + " \\\n"
                          if args.rerun_triggers is not None else "")
-    # Keep omitted options absent so every retained cell keeps its exact source.
-    sos_settings = {name: getattr(args, name) for name in
-                    ("sos_j", "sos_max_running_jobs", "sos_queue")
-                    if getattr(args, name) is not None}
-    if sos_settings:
-        sos_settings["sos_config"] = b["log_stem"] + ".sos.yml"
-        execution_options += ("  --config " + " ".join(
-            q(f"fungen_{name}={value}") for name, value in sos_settings.items()
-        ) + " \\\n")
     dependency = ("\n#BSUB -w \"" + " && ".join(f"done({job})" for job in args.depends_on) + "\""
                   if isinstance(args, InitiateRun) and args.depends_on else "")
     workflow_command = f'''python -m snakemake \\
