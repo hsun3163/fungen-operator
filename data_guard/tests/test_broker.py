@@ -255,6 +255,7 @@ def test_native_agent_adapter_pins_local_endpoints_and_serializes_main(case, mon
     helpers = folder / 'native'; helpers.mkdir()
     for filename in ('librarian', 'scribe_support.py', 'live_inventory.py'):
         shutil.copy2(ROOT / filename, helpers / filename)
+    (helpers / 'standin_policy.json').write_text(json.dumps({'review_model': 'invented-main-model'}))
     endpoints = helpers / 'scribes'
     endpoints.write_text('''#!/bin/sh
 printf '%s\\n' '{"id":4,"host":"http://127.0.0.1:11444","model":"invented-local-model"}'
