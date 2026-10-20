@@ -1,0 +1,84 @@
+#!/bin/bash
+# Submit through data_guard/scribes up N; command-line bsub flags set name/GPU/walltime/log.
+#BSUB -P acc_LOAD
+#BSUB -q gpu
+#BSUB -n 2
+#BSUB -R "rusage[mem=32G] span[hosts=1]"
+#BSUB -gpu "num=1:gmem=32G:mode=exclusive_process:j_exclusive=yes"
+#BSUB -W 04:00
+
+set -euo pipefail
+id=${SCRIBE_ID:?set SCRIBE_ID}
+[[ $id =~ ^[1-9][0-9]*$ ]] && (( id <= 100 )) || { echo 'Invalid scribe id'; exit 2; }
+name=codex-ollama-scribe-$id
+[[ ${LSB_JOBNAME:-} == "$name" ]] || { echo 'Exact scribe LSF job name required'; exit 2; }
+model=${SCRIBE_MODEL:-qwen3.8:27b-262k}
+[[ $model =~ ^[A-Za-z0-9_.:/-]+$ ]] || exit 2
+parallel=${SCRIBE_PARALLEL:-1}
+[[ $parallel =~ ^[1-9][0-9]*$ ]] && (( parallel <= 8 )) || exit 2
+port=$((8890 + id))
+state="$HOME/.codex/ollama-scribe-${id}.env"
+ollama_bin=${SCRIBE_OLLAMA_BIN:-$HOME/sunh14_project/conda/ollama-v0.34.4/bin/ollama}
+export OLLAMA_MODELS=${SCRIBE_MODELS_DIR:-$HOME/sunh14_project/OLLAMA/minerva_jobs/ollama_jobs/models}
+export OLLAMA_HOST="127.0.0.1:${port}"
+export OLLAMA_CONTEXT_LENGTH=262144 OLLAMA_FLASH_ATTENTION=1 OLLAMA_KV_CACHE_TYPE=q8_0
+export OLLAMA_NUM_PARALLEL=$parallel OLLAMA_KEEP_ALIVE=-1 OLLAMA_MAX_LOADED_MODELS=1
+unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY all_proxy ALL_PROXY
+url=http://127.0.0.1:$port
+# Never connect to an existing listener and falsely claim its state as our server.
+if ss -ltn | awk '{print $4}' | grep -q ":${port}$"; then echo "Port $port already busy"; exit 1; fi
+"$ollama_bin" serve &
+server=$!
+cleanup() {
+    # Only the process started by this job and state owned by this exact job.
+    kill "$server" 2>/dev/null || true
+    if [[ -f "$state" ]] && grep -qx "MINERVA_OLLAMA_JOB_ID='${LSB_JOBID}'" "$state"; then
+        rm -f -- "$state"
+    fi
+}
+trap cleanup EXIT
+trap 'exit 143' TERM INT HUP USR2
+ready=0
+for ((attempt=0; attempt<120; attempt++)); do
+    kill -0 "$server" || exit 1
+    if curl -sf --noproxy '*' --max-time 5 "$url/api/tags" >/dev/null; then ready=1; break; fi
+    sleep 5
+done
+[[ $ready == 1 ]] || { echo 'Server health timeout'; exit 1; }
+# A missing staged model fails here. serve/generate never pulls a model.
+curl -sf --noproxy '*' --max-time 5 "$url/api/tags" |
+    python3 -c 'import json,sys; assert any(m["name"] == sys.argv[1] for m in json.load(sys.stdin)["models"]), "model missing; stage it first"' "$model"
+body=$(python3 - "$model" <<'PY'
+import json,sys
+print(json.dumps(dict(model=sys.argv[1],prompt='Reply with OK.',stream=False,keep_alive=-1,options=dict(num_ctx=262144))))
+PY
+)
+curl -sf --noproxy '*' --max-time 900 "$url/api/generate" -d "$body" |
+    python3 -c 'import json,sys; d=json.load(sys.stdin); assert d.get("done"), d.get("error", "warmup incomplete"); print("warmup eval_rate_tok_s=%.1f" % (d["eval_count"]/(d["eval_duration"]/1e9)))'
+curl -sf --noproxy '*' --max-time 5 "$url/api/ps" |
+    python3 -c 'import json,sys; m=next(m for m in json.load(sys.stdin)["models"] if m["name"]==sys.argv[1]); print("vram_GB=%.1f context=%s" % (m["size_vram"]/1e9,m.get("context_length"))); assert m.get("context_length")==262144' "$model"
+nvidia-smi --query-gpu=name,memory.used,memory.total --format=csv,noheader
+kill -0 "$server" || { echo 'Server exited during warmup'; exit 1; }
+# This server is up. Any other job for the same scribe is now surplus: a twin that is still waiting is
+# removed, and if a twin with a lower job ID is already running, this job steps aside for it.
+# (Hao, 2026-10-13: submit a new scribe to an empty node; delete the old one only after the new one runs.)
+while read -r twin twin_stat twin_name; do
+    [[ $twin =~ ^[0-9]+$ && $twin != "$LSB_JOBID" && $twin_name == "$name" ]] || continue
+    case $twin_stat in
+        PEND|PSUSP|WAIT) bkill "$twin" >/dev/null 2>&1 && echo "removed waiting twin job $twin" ;;
+        RUN) if (( twin < LSB_JOBID )); then echo "twin job $twin is already running; this job steps aside"; exit 0; fi ;;
+    esac
+done < <(bjobs -u "$USER" -J "$name" -o 'jobid stat job_name' -noheader 2>/dev/null || true)
+mkdir -p "$HOME/.codex"
+umask 077
+cat > "$state.${LSB_JOBID}.tmp" <<STATE
+MINERVA_OLLAMA_JOB_NAME='${name}'
+MINERVA_OLLAMA_JOB_ID='${LSB_JOBID}'
+MINERVA_OLLAMA_REMOTE_PORT='${port}'
+MINERVA_OLLAMA_LOCAL_PORT='$((11440 + id))'
+MINERVA_OLLAMA_DEFAULT_MODEL='${model}'
+MINERVA_OLLAMA_LAST_NODE='$(hostname -s)'
+STATE
+mv "$state.${LSB_JOBID}.tmp" "$state"
+echo "scribe $id ready on $(hostname -s):$port; parallel=$parallel"
+wait "$server"

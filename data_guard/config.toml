@@ -1,0 +1,24 @@
+# Librarian Codex config: copy to $LIBRARIAN_HOME/codex/config.toml.
+# Local model only. The endpoint is not set here: the `codex --oss` launcher
+# takes it from OLLAMA_HOST or finds the Ollama LSF job and tunnels to it.
+oss_provider = "ollama"
+model = "qwen3.8-flash-next:125b-a6b-q4_K_M"
+# Full reasoning for the work; `librarian` resumes at "none" only to write a
+# final message when Ollama returned the reply as reasoning.
+model_reasoning_effort = "xhigh"
+
+# Commands may read everything but write only the run directory (and /tmp).
+sandbox_mode = "workspace-write"
+approval_policy = "never"
+
+[sandbox_workspace_write]
+network_access = true
+
+# Read by `librarian mask`. Relative paths resolve beside this config file.
+# The dictionary must be beside the librarian's separate CODEX_HOME, outside Git.
+[masking]
+dictionary = "../dict.json.zst"
+# Existing rclone account; credentials stay in rclone's configuration.
+rclone_remote = "cosi_drive"
+# Set this to the private dictionary Google Doc ID for one-way publication.
+dictionary_doc = ""

@@ -51,6 +51,7 @@ These capabilities should support the native workflow rather than become a secon
 | [cosi-sketch-ld](cosi-sketch-ld/SKILL.md) | Regional LD generation and provenance. |
 | [cosi-weight-scan](cosi-weight-scan/SKILL.md) | Targeted weight/result scanning. |
 | [intact-gene-query](intact-gene-query/SKILL.md) | Freshness-aware INTACT result queries. |
+| [librarian](librarian/SKILL.md) | Route protected-result questions to the local-model data librarian (`data_guard/`). |
 
 These are examples of the mini-protocol/capability model: retain their scientific contracts and implementation where useful rather than re-expressing them as generic prose.
 

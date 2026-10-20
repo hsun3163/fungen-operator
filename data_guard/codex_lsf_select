@@ -1,0 +1,12 @@
+#!/bin/bash
+# Print an LSF select[] clause that keeps Codex/librarian jobs off hosts without user namespaces.
+# The `ondemand` host group (lh06c*) sets /proc/sys/user/max_user_namespaces=0, so Codex's bwrap sandbox fails
+# there with ENOSPC. Usage: bsub -R "rusage[mem=8G] $(data_guard/codex_lsf_select)" ...
+set -euo pipefail
+groups=${CODEX_LSF_EXCLUDE_GROUPS:-ondemand marketscannodes}
+pattern=${CODEX_LSF_EXCLUDE_PATTERN:-^(lh06c|lc06e|lc07e)}
+# Exclude the named groups plus every host matching the pattern (lh06c33 sits outside the ondemand group).
+hosts=$( { for g in $groups; do bmgroup -w "$g" | awk 'NR > 1 { for (i = 2; i <= NF; i++) print $i }'; done
+          bhosts -w | awk -v p="$pattern" 'NR > 1 && $1 ~ p { print $1 }'; } | sort -u)
+[[ -n $hosts ]] || { echo 'select[type==any]'; exit 0; }
+printf 'select[%s]\n' "$(printf 'hname!=%s\n' $hosts | paste -sd'&' | sed 's/&/ \&\& /g')"
