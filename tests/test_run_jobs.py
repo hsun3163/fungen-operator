@@ -255,3 +255,37 @@ def test_terminal_exit_reason_includes_native_exit_code(native_run):
     run.records[2].update(EXIT_REASON="", EXIT_CODE="1")
     report = inspect_jobs(run.deployment, run.nb, runner=run.runner, now=run.now)
     assert report['dead_children'][0]['exit_reason'] == 'Exited with exit code 1'
+
+
+def test_shared_task_directory_is_resolved_once_for_distinct_wrapper_logs(native_run, monkeypatch):
+    from fungen_operator.run_jobs import _evidence
+    run = native_run
+    path = Path(f"{run.root / 'controller'}.100.err")
+    line = path.read_text()
+    path.write_text(line + line.replace("jobid 101", "jobid 103").replace("token.log", "region.log"))
+    original = Path.resolve
+    calls = []
+    def counted(path, *args, **kwargs):
+        if path == run.task_dir:
+            calls.append(path)
+        return original(path, *args, **kwargs)
+    monkeypatch.setattr(Path, "resolve", counted)
+    evidence, _ = _evidence(run.deployment, run.nb)
+    assert set(evidence) == {"100", "101", "102", "103"}
+    assert evidence["102"]["wrapper_candidates"] == ["101", "103"]
+    assert calls == [run.task_dir]
+
+
+def test_task_directory_symlink_outside_run_root_is_refused(native_run):
+    from fungen_operator.run_jobs import _evidence
+    run = native_run
+    outside = run.root.parent / "outside_tasks"
+    outside.mkdir()
+    for path in run.task_dir.iterdir():
+        (outside / path.name).write_bytes(path.read_bytes())
+    alias = run.root / "exported_tasks"
+    alias.symlink_to(outside, target_is_directory=True)
+    run.deployment.registry.task_layout = lambda workdir, config, log_path: {
+        "rule": "otters_test", "unit": {}, "task_directory": alias}
+    evidence, _ = _evidence(run.deployment, run.nb)
+    assert set(evidence) == {"100", "101"}

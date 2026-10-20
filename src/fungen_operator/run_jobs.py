@@ -72,7 +72,7 @@ def _controller_actions(deployment):
 
 def _evidence(deployment, nb):
     evidence, homes, observations = {}, {}, []
-    task_dirs = {}
+    task_dirs, resolved_dirs = {}, {}
     run_root = Path(deployment.run_root).resolve()
     registry = getattr(deployment, "registry", None)
     layout = registry.task_layout if registry else None
@@ -127,7 +127,11 @@ def _evidence(deployment, nb):
                                          "task_kind": descriptor.get("task_kind", rule), "scheduled_time": scheduled_time,
                                          "log_path": log_path, "workdir": workdir}
                     task_dir = descriptor.get("task_directory")
-                    task_dir = Path(task_dir).resolve() if task_dir else None
+                    if task_dir:
+                        raw_path = str(task_dir)
+                        if raw_path not in resolved_dirs:
+                            resolved_dirs[raw_path] = Path(task_dir).resolve()
+                        task_dir = resolved_dirs[raw_path]
                     if task_dir and task_dir.is_relative_to(run_root):
                         homes.setdefault(task_dir, []).append(evidence[wrapper])
     for task_dir, wrappers in homes.items():
