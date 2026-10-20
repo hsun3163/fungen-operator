@@ -16,7 +16,7 @@ from pathlib import Path
 import yaml
 
 
-_FIELDS = "jobid stat queue submit_time pend_time sub_cwd command job_name user exit_reason output_file error_file"
+_FIELDS = "jobid stat exit_code queue submit_time pend_time sub_cwd command job_name user exit_reason output_file error_file combined_resreq"
 _SUBMISSION = re.compile(r"Job (\d+) has been submitted with LSF jobid (\d+) \(log: (.+?)\)\.")
 _STAGE = {"coloc_abf": "coloc", "otters_test": "twas", "susie_coloc_gene": "susie_coloc",
           "intact_pair": "intact", "otters_weights": "weights",
@@ -109,7 +109,8 @@ def _evidence(deployment, nb):
     exported = "sos_runtime" in _text(deployment.snakefile) and "COSI_SOS_EXEC_HOME" in _text(deployment.snakefile)
     for cell in nb.cells:
         meta = cell.metadata.get("fungen", {})
-        if meta.get("action") not in {"initiate_run", "check_readiness"}:
+        is_sweep = meta.get("action") == "control_run" and meta.get("slots", {}).get("arguments", {}).get("operation") == "sweep"
+        if meta.get("action") not in {"initiate_run", "check_readiness"} and not is_sweep:
             continue
         slots, result = meta.get("slots", {}), meta.get("result", {})
         args, bindings = slots.get("arguments", {}), slots.get("bindings", {})
@@ -122,9 +123,11 @@ def _evidence(deployment, nb):
         stem = bindings.get("log_stem", "")
         if not stem or not _inside(stem, deployment.run_root):
             continue
-        evidence[job_id] = {"job_id": job_id, "kind": "controller", "workdir": workdir,
+        evidence[job_id] = {"job_id": job_id, "kind": "sweep" if is_sweep else "controller", "workdir": workdir,
                             "log_stem": stem, "configfile": args.get("configfile", ""),
                             "rule": None, "unit": {}}
+        if is_sweep:
+            continue
         config = yaml.safe_load(_text(args.get("configfile", ""))) or {}
         # Controller LSF streams retain exact Snakemake submission lines, even
         # while the controller is running. Do not claim unrelated .snakemake logs.
@@ -262,10 +265,10 @@ def _membership(evidence, record):
     if not evidence:
         return False, "job ID is absent from this notebook's controller receipts, wrapper submissions and SoS task directories"
     cwd, command = record.get("sub_cwd", ""), record.get("command", "")
-    if evidence["kind"] != "controller" and (not cwd or not _inside(cwd, evidence["workdir"])):
+    if evidence["kind"] not in {"controller", "sweep"} and (not cwd or not _inside(cwd, evidence["workdir"])):
         return False, "live submission working directory differs from this run's recorded job evidence"
     output, error = record.get("output_file", ""), record.get("error_file", "")
-    if evidence["kind"] == "controller":
+    if evidence["kind"] in {"controller", "sweep"}:
         expected = f"{evidence['log_stem']}.{evidence['job_id']}.out"
         command_match = "snakemake" in command and evidence.get("configfile", "") in command and evidence["workdir"] in command
         matched = output == expected or command_match
@@ -299,7 +302,7 @@ def inspect_jobs(deployment, nb, *, grace_minutes=10, runner=subprocess.run, now
     try:
         raw = json.loads(proc.stdout)
         records = raw["RECORDS"]
-        if proc.returncode or not isinstance(records, list):
+        if proc.returncode or not isinstance(records, list) or any("ERROR" in row or "error" in row for row in records):
             raise ValueError("scheduler returned an unsuccessful response")
     except (ValueError, KeyError, TypeError):
         observations.append({"status": "scheduler_query_failed", "diagnostic": proc.stderr})
@@ -309,7 +312,9 @@ def inspect_jobs(deployment, nb, *, grace_minutes=10, runner=subprocess.run, now
     # controller receipt. Refuse these live outsiders before scanning task homes.
     controllers = {str(c.metadata.get("fungen", {}).get("result", {}).get("job_id"))
                    for c in nb.cells if c.metadata.get("fungen", {}).get("action") in
-                   {"initiate_run", "check_readiness"}}
+                   {"initiate_run", "check_readiness"} or
+                   (c.metadata.get("fungen", {}).get("action") == "control_run" and
+                    c.metadata.get("fungen", {}).get("slots", {}).get("arguments", {}).get("operation") == "sweep")}
     if requested_ids and all(job not in controllers for job in requested_ids):
         selected = {str(r.get("JOBID", r.get("jobid", ""))): r for r in records}
         if all(job not in selected or not _inside(str(selected[job].get("SUB_CWD", selected[job].get("sub_cwd", "/"))), deployment.run_root)
@@ -329,6 +334,22 @@ def inspect_jobs(deployment, nb, *, grace_minutes=10, runner=subprocess.run, now
         state = str(row.pop("stat", "UNKNOWN"))
         record = {**evidence.get(job, {}), **row, "job_id": job, "status": state,
                   "lsf_state": state, "live": True}
+        resource = row.get("combined_resreq", "")
+        memory = re.search(r"\brusage\[([^]]*)\]", resource)
+        memory = re.search(r"(?:^|[:,\s])mem=([0-9]+(?:\.[0-9]+)?)([A-Za-z]*)", memory.group(1)) if memory else None
+        if memory:
+            value, unit = float(memory.group(1)), memory.group(2).upper()
+            factors = {"": 1/1024, "M": 1/1024, "MB": 1/1024, "G": 1, "GB": 1,
+                       "K": 1/(1024*1024), "KB": 1/(1024*1024), "T": 1024, "TB": 1024}
+            record["memory_reservation_gb"] = value * factors[unit] if unit in factors else None
+        else:
+            record["memory_reservation_gb"] = None
+        record["task_kind"] = ("univariate_rss" if str(record.get("rule", "")).startswith("univariate_rss_")
+                               else record.get("rule"))
+        if state in {"EXIT", "DONE"} and not record.get("exit_reason"):
+            code = str(record.get("exit_code", "")).strip()
+            record["exit_reason"] = (f"Exited with exit code {code}" if code not in {"", "-", "None"}
+                                     else "LSF did not provide an exit reason")
         record["submit_time"] = _time(row.get("submit_time"), current)
         # LSF's accumulated pending seconds survive requeues; elapsed time
         # since initial submission can include earlier running intervals.
@@ -339,7 +360,7 @@ def inspect_jobs(deployment, nb, *, grace_minutes=10, runner=subprocess.run, now
         record["pending_minutes"] = max(0, pending_seconds / 60) if state == "PEND" else 0
         record["membership"], record["membership_reason"] = _membership(evidence.get(job), record)
         jobs[job] = record
-    history_ids = {job for job, ev in evidence.items() if ev["kind"] == "controller"}
+    history_ids = {job for job, ev in evidence.items() if ev["kind"] in {"controller", "sweep"}}
     for job, ev in evidence.items():
         if ev.get("sos_state") in {"submitted", "running"}:
             history_ids.add(job)

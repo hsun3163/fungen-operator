@@ -216,3 +216,39 @@ def test_same_timestamp_wrapper_candidates_remain_unresolved(native_run):
     report = inspect_jobs(run.deployment, run.nb, runner=run.runner, now=run.now)
     assert report["dead_children"][0]["wrapper_job_id"] is None
     assert report["observations"][-1]["status"] == "wrapper_lineage_unresolved"
+
+
+def test_sweep_receipt_is_a_live_run_member(native_run):
+    run = native_run
+    stem = str(run.root / 'sweep')
+    run.nb.cells.append(nbformat.v4.new_code_cell('', metadata={'fungen': {
+        'action': 'control_run', 'slots': {'arguments': {'operation': 'sweep'},
+        'bindings': {'log_stem': stem}}, 'result': {'job_id': '201'}}}))
+    run.records.append({'JOBID': '201', 'STAT': 'RUN', 'SUB_CWD': str(run.root.parent),
+                        'OUTPUT_FILE': stem + '.201.out', 'COMMAND': 'python -m fungen_operator.sweep'})
+    report = inspect_jobs(run.deployment, run.nb, runner=run.runner, now=run.now)
+    assert report['jobs']['201']['membership'] and report['jobs']['201']['kind'] == 'sweep'
+    selected = inspect_jobs(run.deployment, run.nb, runner=run.runner, now=run.now, requested_ids=['201'])
+    assert selected['jobs']['201']['membership']
+
+
+def test_native_resource_memory_and_step_kind_are_exposed(native_run):
+    run = native_run
+    run.records[2]['COMBINED_RESREQ'] = 'select[mem>0] rusage[mem=57344.00] span[hosts=1]'
+    report = inspect_jobs(run.deployment, run.nb, runner=run.runner, now=run.now)
+    assert report['jobs']['102']['memory_reservation_gb'] == 56
+    assert report['jobs']['102']['task_kind'] == 'otters_test'
+
+
+def test_json_scheduler_error_record_stays_unknown(native_run):
+    run = native_run
+    run.records[:] = [{'ERROR': 'scheduler query failed'}]
+    report = inspect_jobs(run.deployment, run.nb, runner=run.runner, now=run.now)
+    assert not report['scheduler_ok'] and report['count'] == 0
+
+
+def test_terminal_exit_reason_includes_native_exit_code(native_run):
+    run = native_run
+    run.records[2].update(EXIT_REASON="", EXIT_CODE="1")
+    report = inspect_jobs(run.deployment, run.nb, runner=run.runner, now=run.now)
+    assert report['dead_children'][0]['exit_reason'] == 'Exited with exit code 1'

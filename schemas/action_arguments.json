@@ -421,13 +421,91 @@
   },
   "control_run": {
     "$defs": {
+      "MemoryRemap": {
+        "additionalProperties": false,
+        "properties": {
+          "step": {
+            "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,63}$",
+            "title": "Step",
+            "type": "string"
+          },
+          "from_gb": {
+            "maximum": 1000,
+            "minimum": 1,
+            "title": "From Gb",
+            "type": "integer"
+          },
+          "to_gb": {
+            "maximum": 1000,
+            "minimum": 1,
+            "title": "To Gb",
+            "type": "integer"
+          },
+          "hard_limit_gb": {
+            "anyOf": [
+              {
+                "maximum": 1000,
+                "minimum": 1,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Hard Limit Gb"
+          }
+        },
+        "required": [
+          "step",
+          "from_gb",
+          "to_gb"
+        ],
+        "title": "MemoryRemap",
+        "type": "object"
+      },
+      "QueueMove": {
+        "additionalProperties": false,
+        "properties": {
+          "from_queue": {
+            "enum": [
+              "premium",
+              "express"
+            ],
+            "title": "From Queue",
+            "type": "string"
+          },
+          "to_queue": {
+            "enum": [
+              "premium",
+              "express"
+            ],
+            "title": "To Queue",
+            "type": "string"
+          },
+          "limit": {
+            "maximum": 20000,
+            "minimum": 1,
+            "title": "Limit",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "from_queue",
+          "to_queue",
+          "limit"
+        ],
+        "title": "QueueMove",
+        "type": "object"
+      },
       "Selector": {
         "additionalProperties": false,
         "properties": {
           "kind": {
             "enum": [
               "dead_child_wrappers",
-              "pending"
+              "pending",
+              "step"
             ],
             "title": "Kind",
             "type": "string"
@@ -461,12 +539,72 @@
             ],
             "default": null,
             "title": "Min Pending Minutes"
+          },
+          "step": {
+            "anyOf": [
+              {
+                "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.:-]{0,127}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Step"
+          },
+          "memory_reservation_gb": {
+            "anyOf": [
+              {
+                "maximum": 1000,
+                "minimum": 1,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Memory Reservation Gb"
           }
         },
         "required": [
           "kind"
         ],
         "title": "Selector",
+        "type": "object"
+      },
+      "SweepSpec": {
+        "additionalProperties": false,
+        "properties": {
+          "memory_remaps": {
+            "items": {
+              "$ref": "#/$defs/MemoryRemap"
+            },
+            "maxItems": 1000,
+            "title": "Memory Remaps",
+            "type": "array"
+          },
+          "queue_move": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/QueueMove"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "interval_seconds": {
+            "default": 300,
+            "maximum": 86400,
+            "minimum": 0,
+            "title": "Interval Seconds",
+            "type": "integer"
+          }
+        },
+        "title": "SweepSpec",
         "type": "object"
       }
     },
@@ -480,7 +618,9 @@
       "operation": {
         "enum": [
           "kill",
-          "switch_queue"
+          "switch_queue",
+          "modify",
+          "sweep"
         ],
         "title": "Operation",
         "type": "string"
@@ -529,6 +669,73 @@
         ],
         "default": null,
         "title": "Queue"
+      },
+      "memory_reservation_gb": {
+        "anyOf": [
+          {
+            "maximum": 1000,
+            "minimum": 1,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Memory Reservation Gb"
+      },
+      "memory_limit_gb": {
+        "anyOf": [
+          {
+            "maximum": 1000,
+            "minimum": 1,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Memory Limit Gb"
+      },
+      "walltime_minutes": {
+        "anyOf": [
+          {
+            "maximum": 8640,
+            "minimum": 1,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Walltime Minutes"
+      },
+      "cores": {
+        "anyOf": [
+          {
+            "maximum": 512,
+            "minimum": 1,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Cores"
+      },
+      "sweep": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/SweepSpec"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
       },
       "dead_child_grace_minutes": {
         "default": 10,

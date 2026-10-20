@@ -91,9 +91,17 @@ class Executor:
         if meta.action == "prepare_config":
             return result
         if meta.action == "control_run":
-            from .live_control import command
+            if args.operation == "sweep":
+                from .sweep_cell import sweep_result
+                receipt = sweep_result(self, args, meta.slots.bindings, text, error, result)
+                if receipt.get("last_pass"):
+                    cell.outputs.append(nbformat.v4.new_output("stream", name="stdout",
+                        text="\n--- sweep pass ---\n" + json.dumps(receipt["last_pass"], sort_keys=True) + "\n"))
+                return receipt
+            from .live_control import commands
+            literal = commands(args, meta.slots.bindings.job_ids, meta.slots.bindings.get("resource_requirements"))
             return {**result, "status": "failed" if error else "controlled",
-                    "command": command(args, meta.slots.bindings.job_ids),
+                    "command": literal[0], "commands": literal,
                     "job_ids": list(meta.slots.bindings.job_ids), "receipt": text}
         receipt = re.search(r"Job <(\d+)> is submitted", text)
         if not receipt:

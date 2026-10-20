@@ -31,7 +31,7 @@ retained action record; the adjacent empty `.lock` file coordinates writers. The
 | `check_readiness` | Run paths, targets, scheduler/resource slots, and `before_run` or `conclusion`; returns `ready`, `nothing_to_do`, `failed`, `unknown`, or a pending host command. |
 | `initiate_run` | The same run slots; returns the retained submission receipt. The same action handles initial submission and normal resume. |
 | `inspect_run` | Notebook, optional paths and `dead_child_grace_minutes` (default 10); returns history, scheduler observations, logs, and submitted/running SoS tasks whose children are terminal or missing in LSF. Read-only. |
-| `control_run` | `kill` or `switch_queue`, explicit job IDs or `dead_child_wrappers` / pending-queue-age selector; returns membership refusals, an exact-command approval exchange, then a visible executed cell and native receipt. |
+| `control_run` | `kill`, `switch_queue`, `modify` or `sweep`; explicit job IDs or dead-wrapper / pending-queue-age / step-and-memory selector; returns membership refusals, an exact-command approval exchange, then a visible executed cell and native receipt. |
 
 MCP arguments are nested under `request`. `python -m fungen_operator schemas` exports the input
 schemas (also retained in `schemas/action_arguments.json`); MCP `tools/list` supplies the actual tool envelopes. No tool takes source code,
@@ -55,7 +55,8 @@ Optional execution settings `sos_j` and `sos_max_running_jobs` accept integers 1
 a per-cell host YAML inside the run's log directory. The canonical workflow copies its host
 configuration and applies the overrides there. Omitted settings keep existing cell text and
 fingerprints unchanged. J limits each SoS engine, including pending children; it is not a
-run-wide scheduler ceiling. These settings apply to newly started engines.
+run-wide scheduler ceiling. Explicit J takes precedence over the host limit; a host-only
+override leaves J unset. These settings apply to newly started engines.
 
 `inspect_run` reads per-unit exported SoS task directories and submission headers without
 executing SoS or changing task records. It joins child job files, controller submission logs,
@@ -70,6 +71,28 @@ rechecked after approval and at host execution. Decline, cancel and unsupported 
 clients keep every job unchanged. The nbclient path executes the saved `bkill` or `bswitch`
 cell and retains its native receipt. `verify` re-renders control cells; replay skips them.
 Resume after a kill uses `initiate_run` and its existing matching readiness gate.
+
+`modify` accepts optional reservation and hard-limit memory (1–1000 GB), walltime
+(1–8640 minutes), cores (1–512), and queue. At least one field is required. Reservation
+changes preserve the native combined resource expression and replace only its single
+`rusage.mem` value. Different expressions produce separate literal commands. The expressions
+are frozen for approval and checked again before execution. The `step` selector combines
+an exact rule or task-kind identifier with its current reservation in GB.
+
+`sweep` accepts typed memory remaps by step and current reservation, an optional hard limit,
+queue moves with a 1–20000-job cap per pass, and an interval of 0–86400 seconds (default 300).
+One approval covers the rule set, cap, interval, and literal submission cell. That cell writes
+its hash-bound plan under the run logs and submits one 4 GB / one-core premium job. Interval
+0 uses one synchronous pass. The worker applies `bmod` only to live pending members, writes
+one JSON count line per pass, and stops when the workflow has no pending or running jobs.
+Sweep receipts are run members for kill; sweep jobs do not keep upkeep alive. Scheduler
+uncertainty stops mutation. Periodic passes record per-job failures and continue observing
+the remaining work. Replay skips every control cell.
+
+The worker uses the installed `jq --stream` to read receipt fields without loading notebook
+outputs into Python. Its cache refreshes when the notebook changes, so later controller
+receipts enter the same membership checks. The operator Python and jq paths are fixed in
+the approved run-local plan and visible cell.
 
 Configuration field types/structure come from the selected canonical default configuration.
 Any represented parameter can be changed; the prototype does not freeze scientific knobs.

@@ -79,9 +79,10 @@ def create_server(harness: Harness):
             return Confirmation(approve=True)
         import shlex
         return Elicit("Approve this exact run job control command and IDs:\n"
-                      + shlex.join(proposal["command"]) + "\n"
+                      + proposal.get("source", "\n".join(shlex.join(c) for c in proposal.get("commands", [proposal["command"]]))) + "\n"
                       + json.dumps({"job_ids": proposal["job_ids"],
-                                    "proposal_fingerprint": proposal["fingerprint"]}), Confirmation)
+                                    "proposal_fingerprint": proposal["fingerprint"],
+                                    "sweep_spec": proposal.get("sweep_spec")}), Confirmation)
 
     async def invoke(function, *args):
         try:

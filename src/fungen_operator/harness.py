@@ -13,7 +13,7 @@ import yaml
 from .actions import Deployment, PrepareConfig, RunSlots, MODELS, digest, inside, validate_value
 from .execution import Executor
 from .notebook import Notebook, active, now, recipe_key, verify
-from .live_control import ControlRun, command, approval_fingerprint
+from .live_control import ControlRun, command, commands, approval_fingerprint
 
 
 class Harness:
@@ -283,6 +283,17 @@ class Harness:
     def propose_control(self, request: ControlRun):
         book = self._control_notebook(request.notebook)
         nb = book.read()
+        if request.operation == "sweep":
+            from .sweep_cell import sweep_bindings
+            from .actions import render
+            bindings = sweep_bindings(self.deployment, request, nb)
+            slots = {"arguments": request.model_dump(), "bindings": bindings}
+            proposal = {"status": "approval_required", **slots, "job_ids": [],
+                        "command": ["bsub"], "sweep_spec": request.sweep.model_dump(),
+                        "source": render("control_run", slots),
+                        "notebook_hash": digest(nb) if book.path.exists() else None}
+            proposal["fingerprint"] = approval_fingerprint(proposal["arguments"], bindings)
+            return proposal
         snapshot = self._job_snapshot(nb, request.dead_child_grace_minutes, request.job_ids)
         if not snapshot["scheduler_ok"]:
             return {"status": "refused", "reason": "live run membership is unavailable",
@@ -292,6 +303,11 @@ class Harness:
         elif request.selector.kind == "dead_child_wrappers":
             ids = sorted({child["wrapper_job_id"] for child in snapshot["dead_children"]
                           if child.get("wrapper_job_id")}, key=int)
+        elif request.selector.kind == "step":
+            ids = sorted([job_id for job_id, job in snapshot["jobs"].items()
+                          if job.get("membership")
+                          and request.selector.step in {job.get("rule"), job.get("task_kind")}
+                          and job.get("memory_reservation_gb") == request.selector.memory_reservation_gb], key=int)
         else:
             ids = sorted([job_id for job_id, job in snapshot["jobs"].items()
                           if job.get("membership") and job.get("status", job.get("state")) == "PEND"
@@ -303,8 +319,12 @@ class Harness:
         if not ids:
             return {"status": "nothing_to_do", "job_ids": []}
         bindings = {"job_ids": ids}
+        if request.operation == "modify" and request.memory_reservation_gb is not None:
+            bindings["resource_requirements"] = {job_id: snapshot["jobs"][job_id].get("combined_resreq", "")
+                                                for job_id in ids}
+        literal_commands = commands(request, ids, bindings.get("resource_requirements"))
         proposal = {"status": "approval_required", "arguments": request.model_dump(),
-                    "bindings": bindings, "command": command(request, ids),
+                    "bindings": bindings, "command": literal_commands[0], "commands": literal_commands,
                     "job_ids": ids, "notebook_hash": digest(nb) if book.path.exists() else None}
         proposal["fingerprint"] = approval_fingerprint(proposal["arguments"], bindings)
         return proposal
@@ -330,7 +350,7 @@ class Harness:
             raise ValueError("job control approval required")
         request = ControlRun.model_validate(proposal["arguments"])
         bindings = proposal["bindings"]
-        if approval_fingerprint(request.model_dump(), bindings) != proposal["fingerprint"]:
+        if approval_fingerprint(proposal["arguments"], bindings) != proposal["fingerprint"]:
             raise ValueError("stale job control approval")
         book = self._control_notebook(request.notebook)
         with book.locked():
@@ -338,29 +358,44 @@ class Harness:
             if (digest(nb) if book.path.exists() else None) != proposal["notebook_hash"]:
                 raise ValueError("notebook changed while awaiting approval; request approval again")
             # Recheck the frozen list; a selector is never expanded after approval.
-            snapshot = self._job_snapshot(nb, request.dead_child_grace_minutes, bindings["job_ids"])
+            snapshot = (self._job_snapshot(nb, request.dead_child_grace_minutes, bindings["job_ids"])
+                        if request.operation != "sweep" else {"scheduler_ok": True, "jobs": {}})
             if not snapshot["scheduler_ok"]:
                 return {"status": "refused", "reason": "live run membership is unavailable"}
             refusals = self._control_refusals(request, bindings["job_ids"], snapshot)
             if refusals:
                 return {"status": "refused", "refusals": refusals}
-            cell = book.append(nb, "control_run", {"arguments": request.model_dump(), "bindings": bindings},
+            self._control_resources(bindings, snapshot)
+            cell = book.append(nb, "control_run", {"arguments": copy.deepcopy(proposal["arguments"]), "bindings": bindings},
                                self.deployment.identity(), uuid.uuid4().hex, approval=approval)
             return self._execute(book, nb, cell)
+
+    @staticmethod
+    def _control_resources(bindings, snapshot):
+        for job_id, original in bindings.get("resource_requirements", {}).items():
+            if snapshot["jobs"].get(job_id, {}).get("combined_resreq") != original:
+                raise ValueError("live resource requirements changed; request approval again")
 
     def validate_control_cell(self, nb, cell):
         meta = cell.metadata.fungen
         request = ControlRun.model_validate(meta.slots.arguments)
         self._control_notebook(request.notebook)
         if (meta.get("approval") or {}).get("fingerprint") != approval_fingerprint(
-                request.model_dump(), meta.slots.bindings):
+                meta.slots.arguments, meta.slots.bindings):
             raise ValueError("job control approval required for this exact command and IDs")
+        if request.operation == "sweep":
+            from .sweep import SweepPlan
+            plan = SweepPlan.model_validate_json(meta.slots.bindings.plan_text)
+            if plan.run_root != self.deployment.run_root or plan.snakefile != self.deployment.snakefile:
+                raise ValueError("sweep plan differs from the registered deployment")
+            return
         snapshot = self._job_snapshot(nb, request.dead_child_grace_minutes, meta.slots.bindings.job_ids)
         if not snapshot["scheduler_ok"]:
             raise ValueError("live run membership is unavailable")
         refusals = self._control_refusals(request, meta.slots.bindings.job_ids, snapshot)
         if refusals:
             raise ValueError("job control refused: " + json.dumps(refusals))
+        self._control_resources(meta.slots.bindings, snapshot)
 
     def inspect(self, request):
         nb = Notebook(request.notebook).read()
