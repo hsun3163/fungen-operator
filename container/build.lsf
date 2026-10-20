@@ -1,0 +1,40 @@
+#!/bin/bash
+#BSUB -J fungen-container-build
+#BSUB -P acc_LOAD
+#BSUB -q premium
+#BSUB -n 8
+#BSUB -R "rusage[mem=4000] span[hosts=1]"
+#BSUB -W 02:00
+set -euo pipefail
+project=${LS_SUBCWD:?submit from repository root}
+images=${FUNGEN_BUILD_DIR:?set FUNGEN_BUILD_DIR to persistent image build directory}
+rootfs=$images/fungen-rootfs
+context=$images/fungen-context
+stage=${FUNGEN_BUILD_STAGE:-install}
+case $stage in install|pack|convert) ;; *) echo 'Stage must be install, pack, or convert'; exit 2;; esac
+if [[ $stage != convert ]]; then
+    mkdir -p "$rootfs/opt/fungen-operator"
+    cp -R "$context/." "$rootfs/opt/fungen-operator/"
+    chmod -R a+rX "$rootfs/opt"
+    chmod 755 "$rootfs/workspace"
+fi
+if [[ $stage == install ]]; then
+    cp /etc/resolv.conf "$rootfs/etc/resolv.conf"
+    unshare --user --map-root-user --mount --fork bash -c '
+    set -euo pipefail
+    mount --rbind /dev "$1/dev"
+    mount --rbind /proc "$1/proc"
+    chroot "$1" /bin/bash /opt/fungen-operator/container/install.sh
+' bash "$rootfs"
+fi
+# Runtime supplies its own resolver. Keep the builder's host resolver external.
+if [[ $stage != convert ]]; then
+    : > "$rootfs/etc/resolv.conf"
+    python "$project/container/build.py" archive "$rootfs" "$images/fungen-operator.tar"
+fi
+cd "$images"
+# Singularity 3.11 gates definition-file %test behind fakeroot even when the
+# payload already exists. Direct Docker archive conversion is its rootless path;
+# the archive carries the Dockerfile's entrypoint, command and environment.
+singularity build --force "$images/fungen-operator-ollama0.18.2-codex0.155.1.sif" \
+    docker-archive://fungen-operator.tar
