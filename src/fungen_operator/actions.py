@@ -15,6 +15,8 @@ from typing import Annotated, Literal
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, AfterValidator, field_validator
 
+from .live_control import ControlRun, render_control
+
 VERSION = "1"
 
 
@@ -63,7 +65,10 @@ class RunSlots(Model):
     controller_cores: Annotated[int, Field(ge=1, le=72)] = 1
     workflow_cores: Annotated[int, Field(ge=1, le=512)] = 72
     memory_gb: Annotated[int, Field(ge=32, le=1000)] = 40
-    jobs: Annotated[int, Field(ge=1, le=1000)] = 100
+    jobs: Annotated[int, Field(ge=1, le=10000)] = 2000
+    sos_j: Annotated[int, Field(ge=1, le=10000)] | None = None
+    sos_max_running_jobs: Annotated[int, Field(ge=1, le=10000)] | None = None
+    sos_queue: Literal["premium", "express"] | None = None
     latency_wait: Annotated[int, Field(ge=1, le=3600)] = 120
     # Execution policy only; scientific inputs and targets remain in the recipe.
     rerun_triggers: Annotated[
@@ -93,10 +98,11 @@ class InspectRun(Model):
     notebook: PathSlot
     paths: list[PathSlot] = Field(default_factory=list)
     max_bytes: Annotated[int, Field(ge=1, le=100000)] = 10000
+    dead_child_grace_minutes: Annotated[int, Field(ge=0, le=10080)] = 10
 
 
 MODELS = {"prepare_config": PrepareConfig, "check_readiness": CheckReadiness,
-          "initiate_run": InitiateRun}
+          "initiate_run": InitiateRun, "control_run": ControlRun}
 
 
 def digest(value) -> str:
@@ -266,6 +272,8 @@ def render(action: str, slots: dict) -> str:
         raise ValueError("unknown action or slot envelope")
     args = MODELS[action].model_validate(slots["arguments"])
     b = slots["bindings"]
+    if action == "control_run":
+        return render_control(slots)
     if action == "prepare_config":
         if set(b) != {"config_text"}:
             raise ValueError("invalid config bindings")
@@ -288,6 +296,15 @@ def render(action: str, slots: dict) -> str:
     tail = " --dry-run" if action == "check_readiness" else ""
     execution_options = ("  --rerun-triggers " + " ".join(args.rerun_triggers) + " \\\n"
                          if args.rerun_triggers is not None else "")
+    # Keep omitted options absent so every retained cell keeps its exact source.
+    sos_settings = {name: getattr(args, name) for name in
+                    ("sos_j", "sos_max_running_jobs", "sos_queue")
+                    if getattr(args, name) is not None}
+    if sos_settings:
+        sos_settings["sos_config"] = b["log_stem"] + ".sos.yml"
+        execution_options += ("  --config " + " ".join(
+            q(f"fungen_{name}={value}") for name, value in sos_settings.items()
+        ) + " \\\n")
     return f'''%%bash
 set -eo pipefail
 mkdir -p {q(args.log_dir)} {q(args.workdir)}

@@ -39,7 +39,8 @@ def main():
         return
     deployment = Deployment.model_validate_json(Path(args.deployment).read_text())
     # These commands must themselves be launched through host approval on Minerva.
-    executor = Executor(deployment, host_approved=args.command in {"execute", "replay", "inspect"})
+    executor = Executor(deployment, host_approved=args.command in {"execute", "replay", "inspect"},
+                        host_inspection=args.command == "serve")
     harness = Harness(deployment, executor, str(Path(args.deployment).resolve()))
     if args.command == "serve":
         from .server import serve_stdio

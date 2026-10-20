@@ -85,7 +85,7 @@ def test_valid_renderer_uses_native_cell(setup):
     source = render("initiate_run", slots)
     assert "bsub <<'LSF'\n#BSUB -J fungen\n#BSUB -P acc_LOAD\n#BSUB -q premium\n#BSUB -W 144:00" in source
     assert '#BSUB -R "span[hosts=1] rusage[mem=40GB]"' in source
-    assert "--cores 72 --jobs 100" in source and "--latency-wait 120" in source
+    assert "--cores 72 --jobs 2000" in source and "--latency-wait 120" in source
     assert source.endswith("  all\nLSF\n")
     assert "--force" not in source and "--dry-run" not in source
     assert render("initiate_run", copy.deepcopy(slots)) == source
@@ -323,6 +323,7 @@ def test_stdio_tools_and_scientific_approval(setup, tmp_path, mode):
         command=sys.executable,
         args=["-m", "fungen_operator", "serve", "--deployment", str(deployment_path)],
         cwd=str(Path(__file__).resolve().parents[1]),
+        env={"PYTHONPATH": str(Path(__file__).resolve().parents[1] / "src")},
     )
     answers = iter([False, True])
     asked = []
@@ -339,7 +340,7 @@ def test_stdio_tools_and_scientific_approval(setup, tmp_path, mode):
                           elicitation_callback=simulated_human) as client:
             listed = await client.list_tools()
             assert {t.name for t in listed.tools} == {
-                "prepare_config", "check_readiness", "initiate_run", "inspect_run"}
+                "prepare_config", "check_readiness", "initiate_run", "inspect_run", "control_run"}
             request = {"request": {**args, "parameters": {"pca.n_pcs": 1}}}
             declined = await client.call_tool("prepare_config", request)
             assert not declined.is_error, declined
@@ -399,7 +400,8 @@ def test_rerun_triggers_require_matching_readiness_and_preserve_legacy_fingerpri
     harness, executor, kwargs = unit_harness(setup)
     args = InitiateRun(**kwargs)
     legacy = args.model_dump()
-    legacy.pop("rerun_triggers")
+    for option in ("rerun_triggers", "sos_j", "sos_max_running_jobs", "sos_queue"):
+        legacy.pop(option, None)
     for key in ("job_name", "walltime_minutes", "phase", "log_dir", "depends_on", "defer_readiness"):
         legacy.pop(key, None)
     assert harness._run_fingerprint(args, {}, "config") == digest(

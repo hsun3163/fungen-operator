@@ -16,13 +16,18 @@ from .actions import Deployment, MODELS, inside, render
 
 
 class Executor:
-    def __init__(self, deployment: Deployment, host_approved=False):
+    def __init__(self, deployment: Deployment, host_approved=False, host_inspection=False):
         self.deployment = deployment
         self.host_approved = host_approved
+        self.host_inspection = host_inspection
 
     @property
     def can_schedule(self):
         return self.deployment.backend == "fixture" or self.host_approved
+
+    @property
+    def can_inspect(self):
+        return self.can_schedule or self.host_inspection
 
     def environment(self):
         env = dict(os.environ)
@@ -53,8 +58,13 @@ class Executor:
         if cell.source != render(meta.action, meta.slots):
             raise ValueError("executor refused a cell that does not re-render")
         args = MODELS[meta.action].model_validate(meta.slots.arguments)
-        self.deployment.validate_arguments(args)
-        if meta.action != "prepare_config":
+        if meta.action == "control_run":
+            from .harness import Harness
+            from .notebook import Notebook
+            Harness(self.deployment, self).validate_control_cell(Notebook(args.notebook).read(), cell)
+        else:
+            self.deployment.validate_arguments(args)
+        if meta.action not in {"prepare_config", "control_run"}:
             b = meta.slots.bindings
             for key in ("snakefile", "profile_path", "conda_sh", "conda_env"):
                 if b[key] != getattr(self.deployment, key):
@@ -80,6 +90,11 @@ class Executor:
                   "notebook_interpreter": sys.executable, "notebook_python": sys.version.split()[0]}
         if meta.action == "prepare_config":
             return result
+        if meta.action == "control_run":
+            from .live_control import command
+            return {**result, "status": "failed" if error else "controlled",
+                    "command": command(args, meta.slots.bindings.job_ids),
+                    "job_ids": list(meta.slots.bindings.job_ids), "receipt": text}
         receipt = re.search(r"Job <(\d+)> is submitted", text)
         if not receipt:
             # Nonzero bsub without a receipt can still be ambiguous. Never retry blindly.

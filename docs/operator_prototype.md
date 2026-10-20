@@ -16,7 +16,7 @@ parameter validation, implementation identity, and pure cell rendering. `noteboo
 atomic notebook writes, recipe ordering, supersession, and exact re-render checks.
 `execution.py` executes the exact saved cell through nbclient and collects native scheduler
 receipts/logs. `harness.py` connects these pieces and enforces approval/readiness gates.
-`server.py` exposes the four MCP tools; the CLI uses the same harness. `fixture.py` and `demo.py`
+`server.py` exposes the action tools; the CLI uses the same harness. `fixture.py` and `demo.py`
 are explicitly synthetic test infrastructure, not alternate production workflows.
 
 There is no workflow controller or database replacing Snakemake/LSF. Notebook metadata is the
@@ -30,7 +30,8 @@ retained action record; the adjacent empty `.lock` file coordinates writers. The
 | `prepare_config` | Notebook/config/work paths and a mapping of canonical parameter paths to typed values; returns materialization or a pending host command. |
 | `check_readiness` | Run paths, targets, scheduler/resource slots, and `before_run` or `conclusion`; returns `ready`, `nothing_to_do`, `failed`, `unknown`, or a pending host command. |
 | `initiate_run` | The same run slots; returns the retained submission receipt. The same action handles initial submission and normal resume. |
-| `inspect_run` | Notebook and optional paths; returns history, scheduler observations, logs, and bounded file prefixes. It does not write the notebook. |
+| `inspect_run` | Notebook, optional paths and `dead_child_grace_minutes` (default 10); returns history, scheduler observations, logs, and submitted/running SoS tasks whose children are terminal or missing in LSF. Read-only. |
+| `control_run` | `kill` or `switch_queue`, explicit job IDs or `dead_child_wrappers` / pending-queue-age selector; returns membership refusals, an exact-command approval exchange, then a visible executed cell and native receipt. |
 
 MCP arguments are nested under `request`. `python -m fungen_operator schemas` exports the input
 schemas (also retained in `schemas/action_arguments.json`); MCP `tools/list` supplies the actual tool envelopes. No tool takes source code,
@@ -43,11 +44,32 @@ Targets are separate rule/file strings, never option-like tokens or shell text; 
 above the workspace is rejected. Absolute file targets must belong to the working directory.
 
 The initial enums are queues `premium`/`express`, project `acc_LOAD`, and the deployment's
-canonical runtime/profile. Bounds are controller cores 1–72, workflow cores 1–512, jobs 1–1000,
+canonical runtime/profile. Bounds are controller cores 1–72, workflow cores 1–512, jobs 1–10000,
 memory 32–1000 GB, latency 1–3600 seconds, and walltime 1–8640 minutes. Express is capped at
 720 minutes. These are prototype admission limits, not a claim about current scheduler capacity.
 Defaults follow the retained practice: premium, 40 GB, one controller core, 72 workflow cores,
-100 jobs, 60-minute readiness and 8640-minute production. Runtime is rendered as explicit HH:MM.
+2000 jobs, 60-minute readiness and 8640-minute production. Runtime is rendered as explicit HH:MM.
+
+Optional execution settings `sos_j` and `sos_max_running_jobs` accept integers 1–10000;
+`sos_queue` accepts `premium` or `express`. They travel in the literal Snakemake command and
+a per-cell host YAML inside the run's log directory. The canonical workflow copies its host
+configuration and applies the overrides there. Omitted settings keep existing cell text and
+fingerprints unchanged. J limits each SoS engine, including pending children; it is not a
+run-wide scheduler ceiling. These settings apply to newly started engines.
+
+`inspect_run` reads per-unit exported SoS task directories and submission headers without
+executing SoS or changing task records. It joins child job files, controller submission logs,
+and a batched `bjobs` query, consulting `bhist` for missing child IDs. Terminal or absent children
+become dead only after the submission grace window; scheduler errors remain unknown. Reports
+include task/child/wrapper IDs, rule/unit, LSF state/reason and the first decisive scheduler error.
+
+`control_run` checks live membership against controller receipts, exact wrapper submissions and
+run task directories. Selectors resolve before approval; approval shows the literal command and
+frozen IDs. A mixed selection containing an outside job is refused as a whole. Membership is
+rechecked after approval and at host execution. Decline, cancel and unsupported elicitation
+clients keep every job unchanged. The nbclient path executes the saved `bkill` or `bswitch`
+cell and retains its native receipt. `verify` re-renders control cells; replay skips them.
+Resume after a kill uses `initiate_run` and its existing matching readiness gate.
 
 Configuration field types/structure come from the selected canonical default configuration.
 Any represented parameter can be changed; the prototype does not freeze scientific knobs.
@@ -204,5 +226,5 @@ Cell indices below are zero-based, matching the source notebook arrays inspected
   catalog candidates rather than adding arbitrary flags to normal submission.
 
 Native unlock has historical recovery evidence, but the three-action lifecycle does not need
-it. Unlock, cancellation, dependency slots, per-rule command-line resource overrides, and a
+it. Unlock, dependency slots, per-rule command-line resource overrides, and a
 complete parameter catalog remain explicit later additions.

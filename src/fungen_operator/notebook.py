@@ -39,6 +39,9 @@ def verify(nb):
 
 def recipe_key(meta):
     action = meta["action"]
+    if action == "control_run":
+        from .live_control import approval_fingerprint
+        return action + ":" + approval_fingerprint(meta["slots"]["arguments"], meta["slots"]["bindings"])
     if action == "check_readiness":
         return action + ":" + meta["slots"]["arguments"]["phase"]
     return action
@@ -110,7 +113,7 @@ class Notebook:
             "tags": ["fungen-action"], "fungen": meta}, id=cell_id)
         nb.cells.append(cell)
         intro = [c for c in nb.cells if c.cell_type != "code" and not c.metadata.get("fungen_history_heading")]
-        current = sorted(active(nb), key=lambda c: ORDER[recipe_key(c.metadata.fungen)])
+        current = sorted(active(nb), key=lambda c: ORDER.get(recipe_key(c.metadata.fungen), 2.5))
         history = sorted([c for c in nb.cells if c.cell_type == "code" and c not in current],
                          key=lambda c: c.metadata.fungen.sequence)
         heading = nbformat.v4.new_markdown_cell("## Superseded attempts\n\nRetained history; excluded from replay.",

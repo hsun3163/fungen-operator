@@ -13,6 +13,7 @@ from pydantic import BaseModel, ConfigDict
 
 from .actions import PrepareConfig, CheckReadiness, InitiateRun, InspectRun, digest
 from .harness import Harness
+from .live_control import ControlRun
 from .notebook import now
 
 
@@ -65,6 +66,23 @@ def create_server(harness: Harness):
                           "proposal_fingerprint": proposal["fingerprint"],
                           "configfile": request.configfile}, indent=2), Confirmation)
 
+    def control_proposal(request: ControlRun):
+        try:
+            return harness.propose_control(request)
+        except ValueError as exc:
+            raise ToolError(str(exc)) from exc
+
+    def control_confirmation(
+        proposal: Annotated[dict[str, Any], Resolve(control_proposal)],
+    ):
+        if proposal["status"] != "approval_required":
+            return Confirmation(approve=True)
+        import shlex
+        return Elicit("Approve this exact run job control command and IDs:\n"
+                      + shlex.join(proposal["command"]) + "\n"
+                      + json.dumps({"job_ids": proposal["job_ids"],
+                                    "proposal_fingerprint": proposal["fingerprint"]}), Confirmation)
+
     async def invoke(function, *args):
         try:
             return await asyncio.to_thread(function, *args)
@@ -96,6 +114,23 @@ def create_server(harness: Harness):
     async def initiate_run(request: InitiateRun) -> dict[str, Any]:
         """Submit or normally resume the same graph through the fixed LSF/Snakemake cell."""
         return await invoke(harness.run, "initiate_run", request)
+
+    @server.tool()
+    async def control_run(
+        request: ControlRun,
+        proposal: Annotated[dict[str, Any], Resolve(control_proposal)],
+        confirmation_result: Annotated[ElicitationResult[Confirmation], Resolve(control_confirmation)],
+    ) -> dict[str, Any]:
+        """Approve kill or switch_queue for a frozen, live-checked set of this run's jobs."""
+        # Resolve caches this proposal only within this call, including the
+        # confirmation dependency; concurrent selectors retain their own IDs.
+        if proposal["status"] != "approval_required":
+            return proposal
+        if confirmation_result.action != "accept" or not confirmation_result.data.approve:
+            return {"status": "approval_declined", "job_ids": proposal["job_ids"], "materialized": False}
+        proof = {"fingerprint": proposal["fingerprint"], "channel": "mcp_human_elicitation",
+                 "time": now(), "backend": harness.deployment.backend}
+        return await invoke(harness.control_run, proposal, proof)
 
     @server.tool(annotations={"readOnlyHint": True, "destructiveHint": False})
     async def inspect_run(request: InspectRun) -> dict[str, Any]:

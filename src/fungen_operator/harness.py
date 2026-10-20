@@ -13,6 +13,7 @@ import yaml
 from .actions import Deployment, PrepareConfig, RunSlots, MODELS, digest, inside, validate_value
 from .execution import Executor
 from .notebook import Notebook, active, now, recipe_key, verify
+from .live_control import ControlRun, command, approval_fingerprint
 
 
 class Harness:
@@ -116,8 +117,9 @@ class Harness:
     def _run_fingerprint(self, args, identity, config_text):
         values = args.model_dump()
         # Keep pre-option recipes/fingerprints stable when the option is absent.
-        if values.get("rerun_triggers") is None:
-            values.pop("rerun_triggers", None)
+        for option in ("rerun_triggers", "sos_j", "sos_max_running_jobs", "sos_queue"):
+            if values.get(option) is None:
+                values.pop(option, None)
         for key in ("job_name", "walltime_minutes", "phase", "log_dir"):
             values.pop(key, None)
         return digest({"arguments": values, "identity": identity, "config": config_text})
@@ -187,6 +189,9 @@ class Harness:
                 raise ValueError("only an unexecuted active cell can be executed here")
             meta = cell.metadata.fungen
             args = MODELS[meta.action].model_validate(meta.slots.arguments)
+            if meta.action == "control_run":
+                self.validate_control_cell(nb, cell)
+                return self._execute(book, nb, cell)
             _, _, current = self._context(args)
             self._idle(nb)
             identity = self.deployment.identity()
@@ -211,6 +216,7 @@ class Harness:
         self._idle(nb)
         remaining = nb.metadata.fungen.get("replay_remaining")
         recipe = copy.deepcopy([c for c in active(nb) if c.id in remaining] if remaining else active(nb))
+        recipe = [c for c in recipe if c.metadata.fungen.action != "control_run"]
         results = []
         for index, old in enumerate(recipe):
             meta = old.metadata.fungen
@@ -260,8 +266,107 @@ class Harness:
         verify(Notebook(notebook).read())
         return results
 
+    def _control_notebook(self, notebook):
+        if not inside(notebook, self.deployment.run_root):
+            raise ValueError("notebook must belong to run_root")
+        if hasattr(self.deployment, "validate_write_path"):
+            self.deployment.validate_write_path(notebook)
+        return Notebook(notebook)
+
+    def _job_snapshot(self, nb, grace_minutes=10, job_ids=None):
+        from .run_jobs import inspect_jobs
+        if not getattr(self.executor, "can_inspect", self.executor.can_schedule):
+            return {"count": 0, "dead_children": [], "jobs": {}, "scheduler_ok": False,
+                    "observations": ["host_approval_required"]}
+        return inspect_jobs(self.deployment, nb, grace_minutes=grace_minutes, requested_ids=job_ids)
+
+    def propose_control(self, request: ControlRun):
+        book = self._control_notebook(request.notebook)
+        nb = book.read()
+        snapshot = self._job_snapshot(nb, request.dead_child_grace_minutes, request.job_ids)
+        if not snapshot["scheduler_ok"]:
+            return {"status": "refused", "reason": "live run membership is unavailable",
+                    "observations": snapshot.get("observations", [])}
+        if request.job_ids is not None:
+            ids = request.job_ids
+        elif request.selector.kind == "dead_child_wrappers":
+            ids = sorted({child["wrapper_job_id"] for child in snapshot["dead_children"]
+                          if child.get("wrapper_job_id")}, key=int)
+        else:
+            ids = sorted([job_id for job_id, job in snapshot["jobs"].items()
+                          if job.get("membership") and job.get("status", job.get("state")) == "PEND"
+                          and job.get("queue") == request.selector.queue
+                          and job.get("pending_minutes", -1) > request.selector.min_pending_minutes], key=int)
+        refusals = self._control_refusals(request, ids, snapshot)
+        if refusals:
+            return {"status": "refused", "refusals": refusals, "job_ids": ids}
+        if not ids:
+            return {"status": "nothing_to_do", "job_ids": []}
+        bindings = {"job_ids": ids}
+        proposal = {"status": "approval_required", "arguments": request.model_dump(),
+                    "bindings": bindings, "command": command(request, ids),
+                    "job_ids": ids, "notebook_hash": digest(nb) if book.path.exists() else None}
+        proposal["fingerprint"] = approval_fingerprint(proposal["arguments"], bindings)
+        return proposal
+
+    @staticmethod
+    def _control_refusals(request, ids, snapshot):
+        refusals = []
+        for job_id in ids:
+            job = snapshot["jobs"].get(job_id, {})
+            reason = None
+            if not job.get("membership"):
+                reason = job.get("membership_reason", "job is outside this run's receipts, wrappers and task directories")
+            elif job.get("status", job.get("state")) not in {"PEND", "RUN", "PSUSP", "USUSP", "SSUSP", "WAIT"}:
+                reason = "job has no live controllable LSF state"
+            if reason:
+                refusals.append({"job_id": job_id, "reason": reason})
+        return refusals
+
+    def control_run(self, proposal, approval=None):
+        if proposal.get("status") != "approval_required":
+            return proposal
+        if not approval or approval.get("fingerprint") != proposal["fingerprint"]:
+            raise ValueError("job control approval required")
+        request = ControlRun.model_validate(proposal["arguments"])
+        bindings = proposal["bindings"]
+        if approval_fingerprint(request.model_dump(), bindings) != proposal["fingerprint"]:
+            raise ValueError("stale job control approval")
+        book = self._control_notebook(request.notebook)
+        with book.locked():
+            nb = book.read()
+            if (digest(nb) if book.path.exists() else None) != proposal["notebook_hash"]:
+                raise ValueError("notebook changed while awaiting approval; request approval again")
+            # Recheck the frozen list; a selector is never expanded after approval.
+            snapshot = self._job_snapshot(nb, request.dead_child_grace_minutes, bindings["job_ids"])
+            if not snapshot["scheduler_ok"]:
+                return {"status": "refused", "reason": "live run membership is unavailable"}
+            refusals = self._control_refusals(request, bindings["job_ids"], snapshot)
+            if refusals:
+                return {"status": "refused", "refusals": refusals}
+            cell = book.append(nb, "control_run", {"arguments": request.model_dump(), "bindings": bindings},
+                               self.deployment.identity(), uuid.uuid4().hex, approval=approval)
+            return self._execute(book, nb, cell)
+
+    def validate_control_cell(self, nb, cell):
+        meta = cell.metadata.fungen
+        request = ControlRun.model_validate(meta.slots.arguments)
+        self._control_notebook(request.notebook)
+        if (meta.get("approval") or {}).get("fingerprint") != approval_fingerprint(
+                request.model_dump(), meta.slots.bindings):
+            raise ValueError("job control approval required for this exact command and IDs")
+        snapshot = self._job_snapshot(nb, request.dead_child_grace_minutes, meta.slots.bindings.job_ids)
+        if not snapshot["scheduler_ok"]:
+            raise ValueError("live run membership is unavailable")
+        refusals = self._control_refusals(request, meta.slots.bindings.job_ids, snapshot)
+        if refusals:
+            raise ValueError("job control refused: " + json.dumps(refusals))
+
     def inspect(self, request):
         nb = Notebook(request.notebook).read()
+        snapshot = (self._job_snapshot(nb, request.dead_child_grace_minutes)
+                    if self.deployment.backend == "lsf" else
+                    {"count": 0, "dead_children": [], "jobs": {}, "scheduler_ok": True})
         cells = []
         for c in nb.cells:
             if c.cell_type != "code":
@@ -272,7 +377,8 @@ class Harness:
                      "result": meta.get("result", {})}
             job = entry["result"].get("job_id")
             if job:
-                entry["scheduler"] = self.executor.scheduler(job)
+                entry["scheduler"] = (snapshot["jobs"].get(str(job), {"status": "UNKNOWN"})
+                                      if self.deployment.backend == "lsf" else self.executor.scheduler(job))
                 entry["logs"] = self.executor.logs(meta.slots.bindings.log_stem, job)
             cells.append(entry)
         observations = {}
@@ -284,4 +390,7 @@ class Harness:
                 with p.open("rb") as stream:
                     record["prefix"] = stream.read(request.max_bytes).decode("utf-8", errors="replace")
             observations[name] = record
-        return {"cells": cells, "paths": observations, "active_cells_valid": True}
+        return {"cells": cells, "paths": observations, "active_cells_valid": True,
+                "dead_children": snapshot["dead_children"], "dead_child_count": snapshot["count"],
+                "scheduler_ok": snapshot["scheduler_ok"],
+                "scheduler_observations": snapshot.get("observations", [])}

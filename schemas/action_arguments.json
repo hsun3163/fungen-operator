@@ -124,11 +124,55 @@
         "type": "integer"
       },
       "jobs": {
-        "default": 100,
-        "maximum": 1000,
+        "default": 2000,
+        "maximum": 10000,
         "minimum": 1,
         "title": "Jobs",
         "type": "integer"
+      },
+      "sos_j": {
+        "anyOf": [
+          {
+            "maximum": 10000,
+            "minimum": 1,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Sos J"
+      },
+      "sos_max_running_jobs": {
+        "anyOf": [
+          {
+            "maximum": 10000,
+            "minimum": 1,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Sos Max Running Jobs"
+      },
+      "sos_queue": {
+        "anyOf": [
+          {
+            "enum": [
+              "premium",
+              "express"
+            ],
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Sos Queue"
       },
       "latency_wait": {
         "default": 120,
@@ -136,6 +180,30 @@
         "minimum": 1,
         "title": "Latency Wait",
         "type": "integer"
+      },
+      "rerun_triggers": {
+        "anyOf": [
+          {
+            "items": {
+              "enum": [
+                "mtime",
+                "params",
+                "input",
+                "software-env",
+                "code"
+              ],
+              "type": "string"
+            },
+            "maxItems": 5,
+            "minItems": 1,
+            "type": "array"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Rerun Triggers"
       },
       "walltime_minutes": {
         "default": 60,
@@ -252,11 +320,55 @@
         "type": "integer"
       },
       "jobs": {
-        "default": 100,
-        "maximum": 1000,
+        "default": 2000,
+        "maximum": 10000,
         "minimum": 1,
         "title": "Jobs",
         "type": "integer"
+      },
+      "sos_j": {
+        "anyOf": [
+          {
+            "maximum": 10000,
+            "minimum": 1,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Sos J"
+      },
+      "sos_max_running_jobs": {
+        "anyOf": [
+          {
+            "maximum": 10000,
+            "minimum": 1,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Sos Max Running Jobs"
+      },
+      "sos_queue": {
+        "anyOf": [
+          {
+            "enum": [
+              "premium",
+              "express"
+            ],
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Sos Queue"
       },
       "latency_wait": {
         "default": 120,
@@ -264,6 +376,30 @@
         "minimum": 1,
         "title": "Latency Wait",
         "type": "integer"
+      },
+      "rerun_triggers": {
+        "anyOf": [
+          {
+            "items": {
+              "enum": [
+                "mtime",
+                "params",
+                "input",
+                "software-env",
+                "code"
+              ],
+              "type": "string"
+            },
+            "maxItems": 5,
+            "minItems": 1,
+            "type": "array"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Rerun Triggers"
       },
       "walltime_minutes": {
         "default": 8640,
@@ -281,6 +417,132 @@
       "targets"
     ],
     "title": "InitiateRun",
+    "type": "object"
+  },
+  "control_run": {
+    "$defs": {
+      "Selector": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "enum": [
+              "dead_child_wrappers",
+              "pending"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "queue": {
+            "anyOf": [
+              {
+                "enum": [
+                  "premium",
+                  "express"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Queue"
+          },
+          "min_pending_minutes": {
+            "anyOf": [
+              {
+                "maximum": 525600,
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Min Pending Minutes"
+          }
+        },
+        "required": [
+          "kind"
+        ],
+        "title": "Selector",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "notebook": {
+        "pattern": "^/[A-Za-z0-9_./:+-]+$",
+        "title": "Notebook",
+        "type": "string"
+      },
+      "operation": {
+        "enum": [
+          "kill",
+          "switch_queue"
+        ],
+        "title": "Operation",
+        "type": "string"
+      },
+      "job_ids": {
+        "anyOf": [
+          {
+            "items": {
+              "pattern": "^[1-9][0-9]{0,15}$",
+              "type": "string"
+            },
+            "maxItems": 20000,
+            "minItems": 1,
+            "type": "array"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Job Ids"
+      },
+      "selector": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/Selector"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
+      "queue": {
+        "anyOf": [
+          {
+            "enum": [
+              "premium",
+              "express"
+            ],
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Queue"
+      },
+      "dead_child_grace_minutes": {
+        "default": 10,
+        "maximum": 10080,
+        "minimum": 0,
+        "title": "Dead Child Grace Minutes",
+        "type": "integer"
+      }
+    },
+    "required": [
+      "notebook",
+      "operation"
+    ],
+    "title": "ControlRun",
     "type": "object"
   },
   "inspect_run": {
@@ -304,6 +566,13 @@
         "maximum": 100000,
         "minimum": 1,
         "title": "Max Bytes",
+        "type": "integer"
+      },
+      "dead_child_grace_minutes": {
+        "default": 10,
+        "maximum": 10080,
+        "minimum": 0,
+        "title": "Dead Child Grace Minutes",
         "type": "integer"
       }
     },
