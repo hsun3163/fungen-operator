@@ -13,6 +13,7 @@ def test_identity_skips_data_stats_and_preserves_source_hashes(tmp_path, monkeyp
     data.write_text("opaque fixture data\n")
     script = root / "worker.py"
     script.write_text("print('fixture source')\n")
+    deployment.canonical_source_paths = [str(script)]
     original = Path.is_file
 
     def source_only_stat(path):

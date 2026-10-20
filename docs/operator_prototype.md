@@ -21,7 +21,7 @@ parameter validation, implementation identity, and pure cell rendering. `noteboo
 atomic notebook writes, recipe ordering, supersession, and exact re-render checks.
 `execution.py` executes the exact saved cell through nbclient and collects native scheduler
 receipts/logs. `harness.py` connects these pieces and enforces approval/readiness gates.
-`server.py` exposes the four MCP tools; the CLI uses the same harness. `fixture.py` and `demo.py`
+`server.py` exposes the action tools; the CLI uses the same harness. `fixture.py` and `demo.py`
 are explicitly synthetic test infrastructure, not alternate production workflows.
 
 There is no workflow controller or database replacing Snakemake/LSF. Notebook metadata is the
@@ -35,7 +35,8 @@ retained action record; the adjacent empty `.lock` file coordinates writers. The
 | `prepare_config` | Notebook/config/work paths and a mapping of canonical parameter paths to typed values; returns materialization or a pending host command. |
 | `check_readiness` | Run paths, targets, scheduler/resource slots, and `before_run` or `conclusion`; returns `ready`, `nothing_to_do`, `failed`, `unknown`, or a pending host command. |
 | `initiate_run` | The same run slots; returns the retained submission receipt. The same action handles initial submission and normal resume. |
-| `inspect_run` | Notebook and optional paths; returns history, scheduler observations, logs, and bounded file prefixes. It does not write the notebook. |
+| `inspect_run` | Notebook, optional paths and `dead_child_grace_minutes` (default 10); returns history, scheduler observations, logs, and submitted/running SoS tasks whose children are terminal or missing in LSF. Read-only. |
+| `control_run` | `kill`, `switch_queue`, `modify` or `sweep`; explicit job IDs or dead-wrapper / pending-queue-age / step-and-memory selector; returns membership refusals, an exact-command approval exchange, then a visible executed cell and native receipt. |
 
 MCP arguments are nested under `request`. `python -m fungen_operator schemas` exports the input
 schemas (also retained in `schemas/action_arguments.json`); MCP `tools/list` supplies the actual tool envelopes. No tool takes source code,
@@ -48,13 +49,61 @@ Targets are separate rule/file strings, never option-like tokens or shell text; 
 above the workspace is rejected. Absolute file targets must belong to the working directory.
 
 The initial enums are queues `premium`/`express`, project `acc_LOAD`, and the deployment's
-canonical runtime/profile. Bounds are controller cores 1–72, workflow cores 1–512, jobs 1–1000,
+canonical runtime/profile. Bounds are controller cores 1–72, workflow cores 1–512, jobs 1–10000,
 memory 32–1000 GB, latency 1–3600 seconds, and walltime 1–8640 minutes. Express is capped at
 720 minutes. These are prototype admission limits, not a claim about current scheduler capacity.
 Defaults follow the retained practice: premium, 40 GB, one controller core, 72 workflow cores,
-100 jobs, 60-minute readiness and 8640-minute production. Runtime is rendered as explicit HH:MM.
+2000 jobs, 60-minute readiness and 8640-minute production. Runtime is rendered as explicit HH:MM.
+
+Optional execution settings `sos_j` and `sos_max_running_jobs` accept integers 1–10000;
+`sos_queue` accepts `premium` or `express`. They travel in the literal Snakemake command and
+a per-cell host YAML inside the run's log directory. The canonical workflow copies its host
+configuration and applies the overrides there. Omitted settings keep existing cell text and
+fingerprints unchanged. J limits each SoS engine, including pending children; it is not a
+run-wide scheduler ceiling. Explicit J takes precedence over the host limit; a host-only
+override leaves J unset. These settings apply to newly started engines.
+
+`inspect_run` reads per-unit exported SoS task directories and submission headers without
+executing SoS or changing task records. It joins child job files, controller submission logs,
+and a batched `bjobs` query, consulting `bhist` for missing child IDs. Terminal or absent children
+become dead only after the submission grace window; scheduler errors remain unknown. Reports
+include task/child/wrapper IDs, rule/unit, LSF state/reason and the first decisive scheduler error.
+
+`control_run` checks live membership against controller receipts, exact wrapper submissions and
+run task directories. Selectors resolve before approval; approval shows the literal command and
+frozen IDs. A mixed selection containing an outside job is refused as a whole. Membership is
+rechecked after approval and at host execution. Decline, cancel and unsupported elicitation
+clients keep every job unchanged. The nbclient path executes the saved `bkill` or `bswitch`
+cell and retains its native receipt. `verify` re-renders control cells; replay skips them.
+Resume after a kill uses `initiate_run` and its existing matching readiness gate.
+
+`modify` accepts optional reservation and hard-limit memory (1–1000 GB), walltime
+(1–8640 minutes), cores (1–512), and queue. At least one field is required. Reservation
+changes preserve the native combined resource expression and replace only its single
+`rusage.mem` value. Different expressions produce separate literal commands. The expressions
+are frozen for approval and checked again before execution. The `step` selector combines
+an exact rule or task-kind identifier with its current reservation in GB.
+
+`sweep` accepts typed memory remaps by step and current reservation, an optional hard limit,
+queue moves with a 1–20000-job cap per pass, and an interval of 0–86400 seconds (default 300).
+One approval covers the rule set, cap, interval, and literal submission cell. That cell writes
+its hash-bound plan under the run logs and submits one 4 GB / one-core premium job. Interval
+0 uses one synchronous pass. The worker applies `bmod` only to live pending members, writes
+one JSON count line per pass, and stops when the workflow has no pending or running jobs.
+Sweep receipts are run members for kill; sweep jobs do not keep upkeep alive. Scheduler
+uncertainty stops mutation. Periodic passes record per-job failures and continue observing
+the remaining work. Replay skips every control cell.
+
+The worker uses the installed `jq --stream` to read receipt fields without loading notebook
+outputs into Python. Its cache refreshes when the notebook changes, so later controller
+receipts enter the same membership checks. The operator Python and jq paths are fixed in
+the approved run-local plan and visible cell.
 
 Configuration field types/structure come from the selected canonical default configuration.
+Deployments may register `mapping_parameters` with a member schema for maps such as
+`eqtl` or `SUMSTATS`. Study names may then vary; fields, types and shell-syntax checks
+remain enforced, and edits retain the existing scientific approval gate. The registered
+mapping schemas are retained in implementation identity.
 Any represented parameter can be changed; the prototype does not freeze scientific knobs.
 `parameter_defaults` registers source-exposed optional fields absent from that configuration.
 Unregistered fields produce an actionable error. The developer maintains this metadata; it is
@@ -75,12 +124,12 @@ The automated example's client response is explicitly simulated and labelled as 
 
 ## Install and connect
 
-Use a dedicated environment; the canonical workflow environment is not changed:
+Use a dedicated environment on persistent project storage; temporary directories can be cleaned while an MCP connection still references them. The canonical workflow environment is not changed:
 
 ```bash
-python -m venv /tmp/fungen-prototype-venv
-/tmp/fungen-prototype-venv/bin/python -m pip install -e '.[test]'
-/tmp/fungen-prototype-venv/bin/python -m fungen_operator schemas
+python -m venv /sc/arion/projects/load/users/sunh14/fungen-operator/.venv
+/sc/arion/projects/load/users/sunh14/fungen-operator/.venv/bin/python -m pip install -e '.[test]'
+/sc/arion/projects/load/users/sunh14/fungen-operator/.venv/bin/python -m fungen_operator schemas
 ```
 
 Connect a local stdio MCP server using the environment's absolute Python path, arguments
@@ -97,7 +146,7 @@ this capability and exits with an actionable error instead of waiting indefinite
 The MCP client launches and manages this process; its command is:
 
 ```bash
-/tmp/fungen-prototype-venv/bin/python -m fungen_operator serve --deployment /absolute/path/deployment.json
+/sc/arion/projects/load/users/sunh14/fungen-operator/.venv/bin/python -m fungen_operator serve --deployment /absolute/path/deployment.json
 ```
 
 The SDK version range is MCP 2.2–2.x; the server uses resolver-based elicitation to support
@@ -123,6 +172,25 @@ invoke it inside the Minerva sandbox or give a persistent general interpreter/sc
 This explicit host step keeps execution approval in the existing platform rather than
 pretending an MCP subprocess can request Codex sandbox escalation on its own.
 
+## Start an operator conversation
+
+Use the normal Codex configuration with the connected FunGen MCP server. Start an OSS operator with the native approval option:
+
+```bash
+codex exec --oss --approve-for-me \
+  --cd /sc/arion/projects/load/users/sunh14/fungen-operator \
+  --add-dir /sc/arion/projects/load/users/sunh14/xqtl \
+  'Use skills/fungen-operator/SKILL.md to complete this goal: <analysis request>'
+```
+
+The startup header must show workspace write access and approval requests enabled. An empty temporary `CODEX_HOME` otherwise loses the MCP connection and can start with read-only access and approvals disabled. Use the existing user configuration. The per-command host approval requirement remains in force.
+
+For an existing scribe backend, resolve its native `scribes endpoint ID` first, then select the returned host and model through `OLLAMA_HOST`, `CODEX_OSS_BASE_URL` (host plus `/v1`), and `CODEX_OLLAMA_MODEL`. This chooses the model backend for the operator conversation and does not change the GPU service. Use only the backend assigned by the user; an available scribe may be reserved for another task. When the user assigns the main librarian GPU, use its native default endpoint and hold the existing librarian lock for the operator conversation.
+
+For a local model with an entry in the maintained Ollama catalog, pass `-c 'model_catalog_json="/hpc/users/sunh14/.codex/ollama-models.json"'` so the client uses the configured local tool protocol. Verify a harmless approved host command before accepting an analysis request; MCP discovery alone does not verify the client execution path.
+
+Before accepting a production request, the client must connect to the MCP server and discover its four tools. An MCP import/startup error is an interface failure: stop that attempt, repair the installation or connection, and retry the same user goal. Avoid treating a partial import or a live model connection as proof of a working operator interface.
+
 ## Recipe, history, and completion
 
 The active order is configuration → readiness → submission → conclusion readiness. A replacement
@@ -140,6 +208,10 @@ stops when an asynchronous controller still needs observation, retaining the une
 as active cells. Calling replay again after termination continues that suffix. It never blindly executes every
 code cell as Jupyter Run All would. Inspect the pending controller and continue with the next
 action or resume replay after it terminates. Concurrent or unknown controller state blocks execution.
+When `bjobs` explicitly reports a purged receipt as not found, the executor checks
+`bacct -l` for the same numeric job ID. A matching native `DONE` or `EXIT` header
+reconciles terminal state with `source="bacct"`. Missing, failed, or nonterminal
+accounting remains unknown; scheduler connection errors retain the existing block.
 
 Each action records its template/version, slots, source identity, full config content where
 applicable, configuration fingerprint, targets, runtime/profile, outputs, and receipt. Identity
@@ -222,5 +294,57 @@ Cell indices below are zero-based, matching the source notebook arrays inspected
   catalog candidates rather than adding arbitrary flags to normal submission.
 
 Native unlock has historical recovery evidence, but the three-action lifecycle does not need
-it. Unlock, cancellation, dependency slots, per-rule command-line resource overrides, and a
+it. Unlock, dependency slots, per-rule command-line resource overrides, and a
 complete parameter catalog remain explicit later additions.
+
+## Native repository run areas
+
+A deployment may register `native_run_paths` (absolute generated files or directories)
+inside its repository, separately from `canonical_source_paths`. The Snakefile,
+canonical default config, profile and Git metadata always remain source paths.
+Registered run areas must be disjoint from source paths after resolving symlinks.
+Source identity directly enumerates `canonical_source_paths`, plus the Snakefile,
+default config, profile files and pipeline notebook symlinks. It hashes all declared
+files in bounded chunks. Git queries receive only literal source file paths and
+never enumerate untracked directories. Register each additional implementation
+directory in the deployment; generated result trees remain outside this catalog.
+All other repository locations retain their existing protection. The repository
+root may be used as `workdir` with this registration; that exception grants no
+file write access. Operator runtime files remain in the disjoint `run_root`.
+Native run artifacts and notebook locks are excluded from source identity, while
+source changes retain the existing identity and readiness checks.
+
+The CLI can stage the same typed actions as MCP without a transport client:
+
+```bash
+python -m fungen_operator action --deployment DEPLOYMENT.json --action prepare_config --request REQUEST.json
+```
+
+Use `check_readiness` and `initiate_run` with their respective request schemas for
+subsequent actions. Returned host commands follow the existing approval path.
+`initiate_run.depends_on` accepts up to 32 numeric LSF job IDs and renders native
+`#BSUB -w "done(ID)"` dependencies. This scheduler-only gate may be added after a
+successful readiness check for the same graph; it introduces no waiter process.
+When inputs are being produced by prerequisite jobs, `defer_readiness: true`
+requires a nonempty `depends_on` list. The submitted controller then runs the same
+canonical Snakemake command with `--dry-run` before its production invocation.
+`set -e` prevents production when that dry-run fails. The notebook records this
+readiness policy and retains earlier readiness attempts as superseded history.
+The ordinary submission path continues to require matching successful readiness.
+Scientific differences fail closed through this CLI; MCP retains human elicitation.
+Configuration preparation binds `cwd` only when the canonical config exposes it.
+
+Configuration preparation and approved host materialization permit a resource edit
+while an existing controller is RUN or PEND. The full saved proposal is compared
+with the last materialized configuration, including superseded history. Every
+changed leaf must be exactly `sos_tasks.<component>.{mem,walltime,queue}` or
+`jobs.<component>.{mem_mb,runtime,queue}`; typed leaf overrides retain independent
+schema/catalog and scientific approval checks. Parent overrides, mixed changes,
+external configuration drift and source identity changes retain their gates.
+The accepted notebook, configuration path and working directory remain bound.
+Readiness, submission, replay, unknown scheduler states and unresolved receipts
+retain the normal idle guard. Existing processes and tasks retain materialized
+resources; new processes read the updated YAML. Changes represented as rule
+parameters can trigger native re-execution at the next controller restart.
+
+Deployment JSON files may live beside their workflows. Pass their paths with `--deployment` to `serve`, `action`, `execute`, `replay` or `inspect`; `verify NOTEBOOK --deployment FILE` also checks the notebook against that deployment.

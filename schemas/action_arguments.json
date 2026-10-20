@@ -124,11 +124,55 @@
         "type": "integer"
       },
       "jobs": {
-        "default": 100,
-        "maximum": 1000,
+        "default": 2000,
+        "maximum": 10000,
         "minimum": 1,
         "title": "Jobs",
         "type": "integer"
+      },
+      "sos_j": {
+        "anyOf": [
+          {
+            "maximum": 10000,
+            "minimum": 1,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Sos J"
+      },
+      "sos_max_running_jobs": {
+        "anyOf": [
+          {
+            "maximum": 10000,
+            "minimum": 1,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Sos Max Running Jobs"
+      },
+      "sos_queue": {
+        "anyOf": [
+          {
+            "enum": [
+              "premium",
+              "express"
+            ],
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Sos Queue"
       },
       "latency_wait": {
         "default": 120,
@@ -136,6 +180,30 @@
         "minimum": 1,
         "title": "Latency Wait",
         "type": "integer"
+      },
+      "rerun_triggers": {
+        "anyOf": [
+          {
+            "items": {
+              "enum": [
+                "mtime",
+                "params",
+                "input",
+                "software-env",
+                "code"
+              ],
+              "type": "string"
+            },
+            "maxItems": 5,
+            "minItems": 1,
+            "type": "array"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Rerun Triggers"
       },
       "walltime_minutes": {
         "default": 60,
@@ -252,11 +320,55 @@
         "type": "integer"
       },
       "jobs": {
-        "default": 100,
-        "maximum": 1000,
+        "default": 2000,
+        "maximum": 10000,
         "minimum": 1,
         "title": "Jobs",
         "type": "integer"
+      },
+      "sos_j": {
+        "anyOf": [
+          {
+            "maximum": 10000,
+            "minimum": 1,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Sos J"
+      },
+      "sos_max_running_jobs": {
+        "anyOf": [
+          {
+            "maximum": 10000,
+            "minimum": 1,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Sos Max Running Jobs"
+      },
+      "sos_queue": {
+        "anyOf": [
+          {
+            "enum": [
+              "premium",
+              "express"
+            ],
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Sos Queue"
       },
       "latency_wait": {
         "default": 120,
@@ -265,12 +377,50 @@
         "title": "Latency Wait",
         "type": "integer"
       },
+      "rerun_triggers": {
+        "anyOf": [
+          {
+            "items": {
+              "enum": [
+                "mtime",
+                "params",
+                "input",
+                "software-env",
+                "code"
+              ],
+              "type": "string"
+            },
+            "maxItems": 5,
+            "minItems": 1,
+            "type": "array"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Rerun Triggers"
+      },
       "walltime_minutes": {
         "default": 8640,
         "maximum": 8640,
         "minimum": 1,
         "title": "Walltime Minutes",
         "type": "integer"
+      },
+      "depends_on": {
+        "items": {
+          "pattern": "^[1-9][0-9]{0,19}$",
+          "type": "string"
+        },
+        "maxItems": 32,
+        "title": "Depends On",
+        "type": "array"
+      },
+      "defer_readiness": {
+        "default": false,
+        "title": "Defer Readiness",
+        "type": "boolean"
       }
     },
     "required": [
@@ -281,6 +431,339 @@
       "targets"
     ],
     "title": "InitiateRun",
+    "type": "object"
+  },
+  "control_run": {
+    "$defs": {
+      "MemoryRemap": {
+        "additionalProperties": false,
+        "properties": {
+          "step": {
+            "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,63}$",
+            "title": "Step",
+            "type": "string"
+          },
+          "from_gb": {
+            "maximum": 1000,
+            "minimum": 1,
+            "title": "From Gb",
+            "type": "integer"
+          },
+          "to_gb": {
+            "maximum": 1000,
+            "minimum": 1,
+            "title": "To Gb",
+            "type": "integer"
+          },
+          "hard_limit_gb": {
+            "anyOf": [
+              {
+                "maximum": 1000,
+                "minimum": 1,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Hard Limit Gb"
+          }
+        },
+        "required": [
+          "step",
+          "from_gb",
+          "to_gb"
+        ],
+        "title": "MemoryRemap",
+        "type": "object"
+      },
+      "QueueMove": {
+        "additionalProperties": false,
+        "properties": {
+          "from_queue": {
+            "enum": [
+              "premium",
+              "express"
+            ],
+            "title": "From Queue",
+            "type": "string"
+          },
+          "to_queue": {
+            "enum": [
+              "premium",
+              "express"
+            ],
+            "title": "To Queue",
+            "type": "string"
+          },
+          "limit": {
+            "maximum": 20000,
+            "minimum": 1,
+            "title": "Limit",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "from_queue",
+          "to_queue",
+          "limit"
+        ],
+        "title": "QueueMove",
+        "type": "object"
+      },
+      "Selector": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "enum": [
+              "dead_child_wrappers",
+              "pending",
+              "step"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "queue": {
+            "anyOf": [
+              {
+                "enum": [
+                  "premium",
+                  "express"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Queue"
+          },
+          "min_pending_minutes": {
+            "anyOf": [
+              {
+                "maximum": 525600,
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Min Pending Minutes"
+          },
+          "step": {
+            "anyOf": [
+              {
+                "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.:-]{0,127}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Step"
+          },
+          "memory_reservation_gb": {
+            "anyOf": [
+              {
+                "maximum": 1000,
+                "minimum": 1,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Memory Reservation Gb"
+          }
+        },
+        "required": [
+          "kind"
+        ],
+        "title": "Selector",
+        "type": "object"
+      },
+      "SweepSpec": {
+        "additionalProperties": false,
+        "properties": {
+          "memory_remaps": {
+            "items": {
+              "$ref": "#/$defs/MemoryRemap"
+            },
+            "maxItems": 1000,
+            "title": "Memory Remaps",
+            "type": "array"
+          },
+          "queue_move": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/QueueMove"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "interval_seconds": {
+            "default": 300,
+            "maximum": 86400,
+            "minimum": 0,
+            "title": "Interval Seconds",
+            "type": "integer"
+          }
+        },
+        "title": "SweepSpec",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "notebook": {
+        "pattern": "^/[A-Za-z0-9_./:+-]+$",
+        "title": "Notebook",
+        "type": "string"
+      },
+      "operation": {
+        "enum": [
+          "kill",
+          "switch_queue",
+          "modify",
+          "sweep"
+        ],
+        "title": "Operation",
+        "type": "string"
+      },
+      "job_ids": {
+        "anyOf": [
+          {
+            "items": {
+              "pattern": "^[1-9][0-9]{0,15}$",
+              "type": "string"
+            },
+            "maxItems": 20000,
+            "minItems": 1,
+            "type": "array"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Job Ids"
+      },
+      "selector": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/Selector"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
+      "queue": {
+        "anyOf": [
+          {
+            "enum": [
+              "premium",
+              "express"
+            ],
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Queue"
+      },
+      "memory_reservation_gb": {
+        "anyOf": [
+          {
+            "maximum": 1000,
+            "minimum": 1,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Memory Reservation Gb"
+      },
+      "memory_limit_gb": {
+        "anyOf": [
+          {
+            "maximum": 1000,
+            "minimum": 1,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Memory Limit Gb"
+      },
+      "walltime_minutes": {
+        "anyOf": [
+          {
+            "maximum": 8640,
+            "minimum": 1,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Walltime Minutes"
+      },
+      "cores": {
+        "anyOf": [
+          {
+            "maximum": 512,
+            "minimum": 1,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Cores"
+      },
+      "sweep": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/SweepSpec"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
+      "dead_child_grace_minutes": {
+        "default": 10,
+        "maximum": 10080,
+        "minimum": 0,
+        "title": "Dead Child Grace Minutes",
+        "type": "integer"
+      }
+    },
+    "required": [
+      "notebook",
+      "operation"
+    ],
+    "title": "ControlRun",
     "type": "object"
   },
   "inspect_run": {
@@ -304,6 +787,13 @@
         "maximum": 100000,
         "minimum": 1,
         "title": "Max Bytes",
+        "type": "integer"
+      },
+      "dead_child_grace_minutes": {
+        "default": 10,
+        "maximum": 10080,
+        "minimum": 0,
+        "title": "Dead Child Grace Minutes",
         "type": "integer"
       }
     },

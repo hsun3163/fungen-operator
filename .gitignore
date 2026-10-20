@@ -9,3 +9,4 @@ build/
 dist/
 /runs/
 output/sketch_to_plink1/
+/.venv/

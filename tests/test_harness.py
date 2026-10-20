@@ -39,7 +39,7 @@ class LocalExecution:
         self.cells = []
         self.done = False
 
-    def execute(self, cell):
+    def execute(self, cell, folder):
         self.cells.append(cell.source)
         meta = cell.metadata.fungen
         if meta.action == "prepare_config":
@@ -86,10 +86,23 @@ def test_valid_renderer_uses_native_cell(setup):
     source = render("initiate_run", slots)
     assert "bsub <<'LSF'\n#BSUB -J fungen\n#BSUB -P acc_LOAD\n#BSUB -q premium\n#BSUB -W 144:00" in source
     assert '#BSUB -R "span[hosts=1] rusage[mem=40GB]"' in source
-    assert "--cores 72 --jobs 100" in source and "--latency-wait 120" in source
+    assert "--cores 72 --jobs 2000" in source and "--latency-wait 120" in source
     assert source.endswith("  all\nLSF\n")
     assert "--force" not in source and "--dry-run" not in source
     assert render("initiate_run", copy.deepcopy(slots)) == source
+
+
+def test_native_job_dependency_keeps_readiness_gate(setup):
+    harness, execution, kwargs = unit_harness(setup)
+    args = InitiateRun(**kwargs, depends_on=["123", "456"])
+    with pytest.raises(ValueError, match="successful matching"):
+        harness.run("initiate_run", args)
+    harness.run("check_readiness", CheckReadiness(**kwargs))
+    assert harness.run("initiate_run", args)["status"] == "submitted"
+    assert '#BSUB -w "done(123) && done(456)"' in execution.cells[-1]
+    for bad in [["1); exit"], ["0"], ["-1"], [123], ["1\n#BSUB -q express"]]:
+        with pytest.raises(ValidationError):
+            InitiateRun(**kwargs, depends_on=bad)
 
 
 @pytest.mark.parametrize("field,value", [("targets", ["--forceall"]), ("targets", ["x --forceall"]),
@@ -225,8 +238,8 @@ def test_replay_continues_after_asynchronous_submission(setup):
     harness.run("initiate_run", InitiateRun(**kwargs))
     harness.run("check_readiness", CheckReadiness(**kwargs, phase="conclusion"))
     original_execute = executor.execute
-    def delayed(cell):
-        result = original_execute(cell)
+    def delayed(cell, folder):
+        result = original_execute(cell, folder)
         if cell.metadata.fungen.action == "initiate_run":
             result["scheduler"] = {"status": "RUN"}
         return result
@@ -427,6 +440,7 @@ def test_stdio_tools_and_scientific_approval(setup, tmp_path, mode):
         command=sys.executable,
         args=["-m", "fungen_operator", "serve", "--deployment", str(deployment_path)],
         cwd=str(Path(__file__).resolve().parents[1]),
+        env={"PYTHONPATH": str(Path(__file__).resolve().parents[1] / "src")},
     )
     answers = iter([False, True])
     asked = []
@@ -443,7 +457,7 @@ def test_stdio_tools_and_scientific_approval(setup, tmp_path, mode):
                           elicitation_callback=simulated_human) as client:
             listed = await client.list_tools()
             assert {t.name for t in listed.tools} == {
-                "prepare_config", "check_readiness", "initiate_run", "inspect_run"}
+                "prepare_config", "check_readiness", "initiate_run", "inspect_run", "control_run"}
             request = {"request": {**args, "parameters": {"pca.n_pcs": 1}}}
             declined = await client.call_tool("prepare_config", request)
             assert not declined.is_error, declined
@@ -465,3 +479,58 @@ def test_stdio_tools_and_scientific_approval(setup, tmp_path, mode):
     assert active(nb)[0].metadata.fungen.approval.channel == "mcp_human_elicitation"
     assert not Path(args["configfile"]).exists()
     assert not Path(deployment.conda_env, "scheduler.json").exists()
+
+
+@pytest.mark.parametrize("action,model", [("check_readiness", CheckReadiness),
+                                         ("initiate_run", InitiateRun)])
+def test_rerun_triggers_render_only_when_selected(setup, action, model):
+    deployment, args = setup
+    values = model(**run_args(deployment, args))
+    bindings = {"snakefile": deployment.snakefile, "profile_path": deployment.profile_path,
+                "conda_sh": deployment.conda_sh, "conda_env": deployment.conda_env,
+                "log_stem": str(Path(deployment.run_root, "logs/attempt"))}
+    arguments = values.model_dump()
+    legacy = {k: v for k, v in arguments.items() if k != "rerun_triggers"}
+    original = render(action, {"arguments": legacy, "bindings": bindings})
+    assert render(action, {"arguments": arguments, "bindings": bindings}) == original
+    assert "--rerun-triggers" not in original
+    arguments["rerun_triggers"] = ["mtime", "input", "code", "software-env"]
+    selected = render(action, {"arguments": arguments, "bindings": bindings})
+    option = "  --rerun-triggers mtime input code software-env " + "\\\n"
+    assert selected == original.replace("  --printshellcmds", option + "  --printshellcmds")
+    arguments["rerun_triggers"] = ["mtime", "params", "input", "software-env", "code"]
+    assert "--rerun-triggers mtime params input software-env code" in render(
+        action, {"arguments": arguments, "bindings": bindings})
+
+
+@pytest.mark.parametrize("value", [[], ["mtime", "mtime"], ["--forceall"],
+    ["mtime; id"], ["input\n--forceall"], "mtime input", [True], {"mtime": True},
+    ["mtime", "params", "input", "software-env", "code", "mtime"]])
+@pytest.mark.parametrize("model", [CheckReadiness, InitiateRun])
+def test_invalid_rerun_triggers_rejected(setup, value, model):
+    deployment, args = setup
+    with pytest.raises(ValidationError):
+        model(**run_args(deployment, args), rerun_triggers=value)
+
+
+def test_rerun_triggers_require_matching_readiness_and_preserve_legacy_fingerprint(setup):
+    harness, executor, kwargs = unit_harness(setup)
+    args = InitiateRun(**kwargs)
+    legacy = args.model_dump()
+    for option in ("rerun_triggers", "sos_j", "sos_max_running_jobs", "sos_queue"):
+        legacy.pop(option, None)
+    for key in ("job_name", "walltime_minutes", "phase", "log_dir", "depends_on", "defer_readiness"):
+        legacy.pop(key, None)
+    assert harness._run_fingerprint(args, {}, "config") == digest(
+        {"arguments": legacy, "identity": {}, "config": "config"})
+    harness.run("check_readiness", CheckReadiness(**kwargs))
+    selected = {**kwargs, "rerun_triggers": ["mtime", "input", "code", "software-env"]}
+    with pytest.raises(ValueError, match="matching"):
+        harness.run("initiate_run", InitiateRun(**selected))
+    harness.run("check_readiness", CheckReadiness(**selected))
+    for different in (kwargs, {**selected, "rerun_triggers": ["mtime", "params"]}):
+        with pytest.raises(ValueError, match="matching"):
+            harness.run("initiate_run", InitiateRun(**different))
+    result = harness.run("initiate_run", InitiateRun(**selected))
+    assert result["status"] == "submitted"
+    verify(Notebook(kwargs["notebook"]).read())
