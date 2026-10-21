@@ -7,7 +7,7 @@ operator wheel bundle and its skill. Models and credentials stay on the host.
 The current build targets Linux x86-64 with Apptainer/Singularity. The local
 backend needs an NVIDIA GPU; the OpenAI backend runs host Codex without one.
 
-With a locally built `fungen.sif`, the quick start is two shell commands:
+With a locally built `fungen.sif`, the local backend quick start is two shell commands:
 
 ```bash
 apptainer run fungen.sif
@@ -58,7 +58,8 @@ Unchanged files are kept, and changed binaries are replaced atomically so a
 running host client retains its existing executable mapping.
 The PATH line is appended only after an explicit `yes`.
 
-For the OpenAI backend, setup prints `codex login --device-auth` for headless
+For the OpenAI backend, use `fungen codex` after sign-in; skip `fungen serve`.
+Setup prints `codex login --device-auth` for headless
 sign-in. You may instead set `OPENAI_API_KEY` in your shell. The launcher passes
 the key through the environment; it never writes it to a configuration, image
 or working folder. Ordinary host `codex` also sees the installed skill.
@@ -104,7 +105,7 @@ chain, and hand-off. Each step checks its predecessors and retains a native log.
 Setup registers the **Fungen Operator** Jupyter kernel using the installed host
 Python, so these cells import the operator even when Jupyter itself uses another environment.
 Resume with `--step workflow|software|reference|scheduler|fixture|test|handoff`.
-Mamba is the required route, using hash-pinned Miniforge 26.7.2-0 and the bundled version-pinned environment with its 790-package hash lock;
+Mamba is the required route, using hash-pinned Miniforge 26.7.2-0 and the bundled version-pinned environment with its 790-package hash lock.
 The runtime dependency susieR is pinned to 0.16.6 for pecotmr 0.9.3.
 Software has a 35 GB budget and a user-selected folder. Pixi is offered through
 StatFunGen pixi-setup. On Minerva its full setup fails in `safe_expose_remove`
