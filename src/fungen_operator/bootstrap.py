@@ -630,6 +630,10 @@ def check(config,online=True):
 
 def main(argv=None):
     argv=list(sys.argv[1:] if argv is None else argv)
+    if BUNDLE.is_dir() and argv[:1] in (['codex'],['xqtl']):
+        install=Path(read_config().get('install',str(Path.home()/'.fungen')))
+        print('fungen: Codex and workflows run on the host. Exit the image and run: '+shlex.join([str(install/'bin/fungen'),argv[0]]),file=sys.stderr)
+        return 1
     if argv[:1]==['xqtl']:
         from .onboarding import main as onboard
         try:
@@ -652,13 +656,13 @@ def main(argv=None):
         p.add_argument('--port',type=int,default=11434)
         p.add_argument('--context',type=int,choices=[32768,262144],default=32768)
         p.add_argument('--state',default=str(Path.home()/'.fungen/server.json'))
-    p=sub.add_parser('codex',help='Wait for the server, then run host Codex')
+    p=sub.add_parser('codex',help='Host only: wait for the server, then run Codex')
     p.add_argument('--deployment')
     p.add_argument('--wait',type=int,default=1800)
     p.add_argument('args',nargs=argparse.REMAINDER)
     p=sub.add_parser('check',help='Report each installation check and its exact fix')
     p.add_argument('--offline',action='store_true')
-    p=sub.add_parser('xqtl',help='Guided, notebook-recorded xQTL setup and synthetic test')
+    p=sub.add_parser('xqtl',help='Host only: guided xQTL setup and synthetic test')
     p.add_argument('args',nargs=argparse.REMAINDER)
     args=parser.parse_args(argv or ['--help'])
     try:

@@ -250,3 +250,12 @@ def test_complete_read_only_reuse_never_repairs_download_state(monkeypatch):
     monkeypatch.setattr(b,'gpu_memory',lambda:[])
     monkeypatch.setattr(b,'repair_pull_progress',Mock(side_effect=AssertionError('read-only state mutation')))
     with pytest.raises(ValueError,match='GPU unavailable'):b.inside_serve(SimpleNamespace())
+
+
+@pytest.mark.parametrize('command',['codex','xqtl'])
+def test_image_cannot_run_host_agent_or_workflow(tmp_path,monkeypatch,capsys,command):
+    monkeypatch.setattr(b,'BUNDLE',tmp_path)
+    monkeypatch.setattr(b,'read_config',lambda:{'install':str(tmp_path/'host install')})
+    monkeypatch.setattr(b,'codex',Mock(side_effect=AssertionError('agent started in image')))
+    assert b.main([command])==1
+    assert 'run on the host' in capsys.readouterr().err
