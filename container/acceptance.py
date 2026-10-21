@@ -128,10 +128,10 @@ def operator_smoke(root,scenario,home,work,env,software,operator_python=None):
     action('prepare_config',slots)
     runslots=dict(slots,log_dir=str(runroot/'logs'),targets=['all'],job_name='fungen_smoke',workflow_cores=1,walltime_minutes=30)
     action('check_readiness',runslots)
-    prompt=('Acceptance only. Make exactly one connected MCP call to mcp__fungen__initiate_run with these arguments: '+json.dumps({'request':runslots})+'. '
+    prompt=('Acceptance only. Make exactly one call to the available operator tool named initiate_run, using its provided function definition, with these arguments: '+json.dumps({'request':runslots})+'. '
             'Matching readiness and the default configuration already exist. The host approver will execute the returned host_command. '
             'Do not submit or inspect scheduler jobs with shell commands. Return only the MCP result as JSON. '
-            'If the named connected MCP tool is unavailable, stop and say MCP_UNAVAILABLE without searching the filesystem.')
+            'MCP resource listings do not list callable tools. If the callable tool definition is unavailable, stop and say MCP_UNAVAILABLE without searching the filesystem.')
     launcher=([operator_python,'-m','fungen_operator.bootstrap'] if operator_python else [home/'.fungen/bin/fungen'])
     drive(launcher+['codex','--deployment',deployment,'--','-c',
            'mcp_servers.fungen.tools.initiate_run.approval_mode="approve"',

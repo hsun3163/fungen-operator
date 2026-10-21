@@ -41,7 +41,9 @@ home quotas. A new download requires a writable folder and model size plus 10%
 plus 2 GB free space; check the site's quota too. Ollama resumes partial blobs.
 If an interruption leaves an empty or truncated Ollama progress record, setup
 archives that record under the model folder's `.fungen-download-recovery` and
-retains the partial blob. Ollama resumes the remaining chunks and verifies their hash.
+rebuilds its native partition descriptor with zero completed bytes for that
+chunk. Valid progress and partial blob bytes stay intact; Ollama resumes the
+remaining chunks and verifies their hash.
 A complete existing model folder may be read-only. Advanced 256k context creates
 a local Modelfile variant in a writable overlay, reusing the base blobs. Ollama
 refreshes blob timestamps during variant creation, so this advanced option needs
@@ -52,6 +54,8 @@ copies the bundled client when needed. It installs the Codex skill without
 replacing the user's Codex configuration. Backend settings live in
 `~/.config/fungen/config.toml`; local Codex sessions use the install folder's
 separate Codex home. Setup upgrades to the image's operator bundle on re-run.
+Unchanged files are kept, and changed binaries are replaced atomically so a
+running host client retains its existing executable mapping.
 The PATH line is appended only after an explicit `yes`.
 
 For the OpenAI backend, setup prints `codex login --device-auth` for headless
@@ -70,6 +74,9 @@ fungen check                  # checks and exact fixes
 fungen codex --deployment deployment.json
 fungen codex -- exec --skip-git-repo-check 'Your task'
 ```
+
+With `--deployment`, the operator connection must be ready before Codex begins
+the task. A connection startup failure stops the session with its error.
 
 The server script is `~/.fungen/serve.lsf.sh`, `serve.slurm.sh` or `serve.local.sh`.
 It requests the tag's GPU count, uses `apptainer run --nv IMAGE serve`, selects a

@@ -203,16 +203,47 @@ def test_host_kernel_uses_installed_python_and_is_idempotent(tmp_path,monkeypatc
 def test_interrupted_pull_repairs_only_invalid_part_records(tmp_path):
     blobs=tmp_path/'blobs';blobs.mkdir();digest='sha256-'+'a'*64
     model=blobs/(digest+'-partial');model.write_bytes(b'partial model bytes')
+    with model.open('r+b') as stream:stream.truncate(1600000000)
     empty=blobs/(digest+'-partial-7');empty.write_bytes(b'')
     truncated=blobs/(digest+'-partial-8');truncated.write_text('{"Completed":')
-    valid=blobs/(digest+'-partial-9');valid.write_text('{"N":9,"Offset":10,"Size":20,"Completed":5}')
+    valid=blobs/(digest+'-partial-9');valid.write_text('{"N":9,"Offset":900000000,"Size":100000000,"Completed":5}')
     unrelated=blobs/'another-file';unrelated.write_bytes(b'')
     repaired=b.repair_pull_progress(tmp_path)
-    assert sorted(p.read_bytes() for p in repaired)==[b'',b'{"Completed":']
-    assert model.read_bytes()==b'partial model bytes'
+    assert len(repaired)==15
+    assert sorted(p.read_bytes() for p in (tmp_path/'.fungen-download-recovery').iterdir())==[b'',b'{"Completed":']
+    with model.open('rb') as stream:assert stream.read(19)==b'partial model bytes'
     assert json.loads(valid.read_text())['Completed']==5 and unrelated.exists()
-    assert not empty.exists() and not truncated.exists()
+    records=[json.loads((blobs/(digest+'-partial-'+str(i))).read_text()) for i in range(16)]
+    assert [r['N'] for r in records]==list(range(16))
+    assert sum(r['Size'] for r in records)==model.stat().st_size
+    assert json.loads(empty.read_text())=={'N':7,'Offset':700000000,'Size':100000000,'Completed':0}
     assert b.repair_pull_progress(tmp_path)==[]
+
+
+def test_missing_pull_records_preserve_valid_completed_chunks(tmp_path):
+    blobs=tmp_path/'blobs';blobs.mkdir();model=blobs/('sha256-'+'b'*64+'-partial')
+    with model.open('wb') as stream:stream.truncate(300000000)
+    for i in (0,2):
+        model.with_name(model.name+'-'+str(i)).write_text(json.dumps({'N':i,'Offset':i*100000000,'Size':100000000,'Completed':100000000}))
+    repaired=b.repair_pull_progress(tmp_path)
+    assert len(repaired)==1 and repaired[0].name.endswith('-1')
+    assert json.loads(repaired[0].read_text())['Completed']==0
+    assert json.loads(model.with_name(model.name+'-2').read_text())['Completed']==100000000
+
+
+def test_atomic_install_keeps_live_mappings_and_identical_files(tmp_path):
+    import mmap
+    source=tmp_path/'source';target=tmp_path/'codex'
+    old=b'O'*4096;new=b'N'*4096
+    source.write_bytes(new);source.chmod(0o755);target.write_bytes(old)
+    with target.open('rb') as stream,mmap.mmap(stream.fileno(),0,access=mmap.ACCESS_READ) as mapped:
+        b.atomic_copy(source,target)
+        assert mapped[:]==old
+        assert target.read_bytes()==new
+    stamp=target.stat()
+    b.atomic_copy(source,target)
+    assert target.stat().st_ino==stamp.st_ino and target.stat().st_mtime_ns==stamp.st_mtime_ns
+    assert target.stat().st_mode&0o777==0o755
 
 
 def test_complete_read_only_reuse_never_repairs_download_state(monkeypatch):

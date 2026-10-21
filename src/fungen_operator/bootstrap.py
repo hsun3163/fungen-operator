@@ -193,6 +193,21 @@ def install_kernel(install):
     return path
 
 
+def atomic_copy(source,target):
+    """Preserve live executable mappings and leave identical files untouched."""
+    source,target=Path(source),Path(target)
+    if target.is_file() and source.stat().st_size==target.stat().st_size:
+        with source.open('rb') as a,target.open('rb') as b:
+            if hashlib.file_digest(a,'sha256').digest()==hashlib.file_digest(b,'sha256').digest():return str(target)
+    with tempfile.NamedTemporaryFile(dir=target.parent,delete=False) as stream:temporary=Path(stream.name)
+    try:
+        shutil.copy2(source,temporary)
+        os.replace(temporary,target)
+    finally:
+        if temporary.exists():temporary.unlink()
+    return str(target)
+
+
 def install_host(install):
     install.mkdir(parents=True, exist_ok=True)
     if not BUNDLE.is_dir():
@@ -208,12 +223,12 @@ def install_host(install):
     changed = not stamp.exists() or stamp.read_text() != version
     if changed:
         for name in ('python', 'wheels', 'skills'):
-            shutil.copytree(BUNDLE/name, install/name, dirs_exist_ok=True)
-        if (BUNDLE/'docs').is_dir(): shutil.copytree(BUNDLE/'docs',install/'docs',dirs_exist_ok=True)
-        if (BUNDLE/'README.md').exists(): shutil.copy2(BUNDLE/'README.md',install/'README.md')
-    if (BUNDLE/'source.json').exists(): shutil.copy2(BUNDLE/'source.json',install/'source.json')
+            shutil.copytree(BUNDLE/name, install/name, dirs_exist_ok=True,copy_function=atomic_copy)
+        if (BUNDLE/'docs').is_dir(): shutil.copytree(BUNDLE/'docs',install/'docs',dirs_exist_ok=True,copy_function=atomic_copy)
+        if (BUNDLE/'README.md').exists(): atomic_copy(BUNDLE/'README.md',install/'README.md')
+    if (BUNDLE/'source.json').exists(): atomic_copy(BUNDLE/'source.json',install/'source.json')
     (install/'bin').mkdir(exist_ok=True)
-    shutil.copy2(BUNDLE/'bin/uv', install/'bin/uv')
+    atomic_copy(BUNDLE/'bin/uv', install/'bin/uv')
     python = install/'python/bin/python3'
     venv = install/'venv'
     if not (venv/'bin/python').exists():
@@ -224,11 +239,12 @@ def install_host(install):
         stamp.write_text(version)
     install_kernel(install)
     codex = host_codex()
+    if not codex and recent_codex(install/'bin/codex'):codex=str(install/'bin/codex')
     if codex:
         print(f'Keeping host Codex: {codex}')
     else:
         for name in ('codex', 'bwrap'):
-            shutil.copy2(BUNDLE/'bin'/name, install/'bin'/name)
+            atomic_copy(BUNDLE/'bin'/name, install/'bin'/name)
         codex = str(install/'bin/codex')
         print('Installed bundled Codex 0.155.1 on the host.')
     for name in ('fungen', 'fungen-operator'):
@@ -423,18 +439,35 @@ def inside_serve(args):
 
 
 def repair_pull_progress(folder):
-    """Preserve malformed Ollama part records left by an interrupted write."""
+    """Restore Ollama 0.40.6's complete, numbered partition protocol.
+
+    server/download.go: total/16, clamped to 100--1000 decimal MB. A missing
+    record cannot simply be removed: Prepare sums the records and cleanup
+    requires every index. Unknown completion resets only that chunk to zero.
+    """
     folder=Path(folder);recovered=[]
-    for path in sorted((folder/'blobs').glob('sha256-*-partial-*')):
-        if not re.fullmatch(r'sha256-[0-9a-f]{64}-partial-\d+',path.name) or not path.is_file():continue
-        try:
-            json.loads(path.read_text())
-        except (ValueError,UnicodeError):
-            archive=folder/'.fungen-download-recovery';archive.mkdir(exist_ok=True)
-            target=archive/(path.name+'.'+str(time.time_ns()))
-            path.rename(target);recovered.append(target)
+    for blob in sorted((folder/'blobs').glob('sha256-*-partial')):
+        if not re.fullmatch(r'sha256-[0-9a-f]{64}-partial',blob.name) or not blob.is_file():continue
+        total=blob.stat().st_size
+        if total<=0:continue
+        chunk=min(1000000000,max(100000000,total//16))
+        for n,offset in enumerate(range(0,total,chunk)):
+            path=blob.with_name(blob.name+'-'+str(n));size=min(chunk,total-offset)
+            try:
+                doc=json.loads(path.read_text())
+                valid=(isinstance(doc,dict) and doc.get('N')==n and doc.get('Offset')==offset
+                       and doc.get('Size')==size and type(doc.get('Completed')) is int and 0<=doc['Completed']<=size)
+            except (FileNotFoundError,ValueError,UnicodeError):valid=False
+            if valid:continue
+            if path.exists():
+                archive=folder/'.fungen-download-recovery';archive.mkdir(exist_ok=True)
+                path.rename(archive/(path.name+'.'+str(time.time_ns())))
+            with tempfile.NamedTemporaryFile('w',dir=path.parent,delete=False) as stream:
+                json.dump({'N':n,'Offset':offset,'Size':size,'Completed':0},stream);stream.write('\n')
+                stream.flush();os.fsync(stream.fileno())
+            os.replace(stream.name,path);recovered.append(path)
     if recovered:
-        print(f'Archived {len(recovered)} incomplete Ollama progress records under {folder / ".fungen-download-recovery"}; partial model bytes are retained.',flush=True)
+        print(f'Rebuilt {len(recovered)} incomplete Ollama progress records; damaged originals are archived under {folder / ".fungen-download-recovery"}. Partial model bytes and valid progress are retained.',flush=True)
     return recovered
 
 
