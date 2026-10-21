@@ -91,6 +91,8 @@ fungen xqtl --root /scratch/user/xqtl-setup
 It writes `setup.ipynb` with one confirmed cell per step: pinned upstream workflow,
 software, references, scheduler profile, a new synthetic fixture, the native test
 chain, and hand-off. Each step checks its predecessors and retains a native log.
+Setup registers the **Fungen Operator** Jupyter kernel using the installed host
+Python, so these cells import the operator even when Jupyter itself uses another environment.
 Resume with `--step workflow|software|reference|scheduler|fixture|test|handoff`.
 Mamba is the required route, using hash-pinned Miniforge 26.7.2-0 and the bundled version-pinned environment;
 software has a 35 GB budget and a user-selected folder. Pixi is offered through

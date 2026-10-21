@@ -252,12 +252,20 @@ def check_step(root,step,c):
 
 def notebook(root):
     root=Path(root);path=root/'setup.ipynb'
-    if path.exists():return path
+    kernel={'name':'fungen-operator','display_name':'Fungen Operator','language':'python'}
+    if path.exists():
+        nb=nbformat.read(path,as_version=4)
+        recorded=[c.metadata['fungen_setup']['step'] for c in nb.cells if c.metadata.get('fungen_setup',{}).get('step')]
+        if recorded!=list(STEPS):raise ValueError('Existing setup.ipynb is not this guided sequence; choose another --root.')
+        if nb.metadata.get('kernelspec',{}).get('name')=='python3':
+            nb.metadata['kernelspec']=kernel
+            nbformat.write(nb,path)
+        return path
     cells=[nbformat.v4.new_markdown_cell('# Set up xQTL through fine-mapping\nEach step asks first, checks its predecessors, and stops on failure. Run in order. Scheduler operations require the host approval path.\nThe scientific fixture and recovery criterion are frozen in fixture.json before fitting.')]
     for step in STEPS:
         cells.append(nbformat.v4.new_markdown_cell('**'+step+'** — '+DESCRIPTIONS[step]))
         cells.append(nbformat.v4.new_code_cell('from fungen_operator.onboarding import perform\nperform('+repr(str(root))+', '+repr(step)+')',metadata={'fungen_setup':{'step':step,'version':1}}))
-    nb=nbformat.v4.new_notebook(cells=cells,metadata={'kernelspec':{'name':'python3','display_name':'Python 3','language':'python'}})
+    nb=nbformat.v4.new_notebook(cells=cells,metadata={'kernelspec':kernel})
     nbformat.write(nb,path);return path
 
 

@@ -16,6 +16,23 @@ def test_notebook_retains_every_confirmed_step(tmp_path):
     assert o.notebook(tmp_path)==p and p.stat().st_mtime_ns==stamp
 
 
+def test_old_generated_notebook_keeps_cells_when_kernel_is_upgraded(tmp_path):
+    path=o.notebook(tmp_path);nb=nbformat.read(path,as_version=4)
+    nb.metadata.kernelspec={'name':'python3','display_name':'Python 3','language':'python'}
+    nb.cells[2].outputs=[nbformat.v4.new_output('stream',name='stdout',text='retained evidence')]
+    nbformat.write(nb,path)
+    o.notebook(tmp_path);upgraded=nbformat.read(path,as_version=4)
+    assert upgraded.metadata.kernelspec.name=='fungen-operator'
+    assert upgraded.cells==nb.cells
+
+
+def test_existing_unrelated_notebook_is_preserved(tmp_path):
+    path=tmp_path/'setup.ipynb';nbformat.write(nbformat.v4.new_notebook(),path)
+    original=path.read_bytes()
+    with pytest.raises(ValueError,match='another --root'):o.notebook(tmp_path)
+    assert path.read_bytes()==original
+
+
 def test_refusing_a_step_prevents_execution(tmp_path,monkeypatch):
     (tmp_path/'setup.json').write_text('{}')
     monkeypatch.setattr(o,'ask',lambda *a:'no')

@@ -51,7 +51,10 @@ def drive(command,answers,transcript,env,cwd,timeout=3600,expected_codes=(0,)):
 def clean_env(home):
     home=Path(home);home.mkdir(parents=True,exist_ok=True)
     env=dict(os.environ,HOME=str(home),XDG_CONFIG_HOME=str(home/'.config'),CODEX_HOME=str(home/'.codex'),
-             PYTHONDONTWRITEBYTECODE='1',UV_CACHE_DIR=str(home/'.cache/uv'))
+             PYTHONDONTWRITEBYTECODE='1',UV_CACHE_DIR=str(home/'.cache/uv'),
+             XDG_DATA_HOME=str(home/'.local/share'),XDG_CACHE_HOME=str(home/'.cache'),
+             JUPYTER_DATA_DIR=str(home/'.local/share/jupyter'),JUPYTER_CONFIG_DIR=str(home/'.jupyter'),
+             JUPYTER_RUNTIME_DIR=str(home/'.local/share/jupyter/runtime'))
     for key in ('OPENAI_API_KEY','OPENAI_ORG_ID','OPENAI_PROJECT_ID','PYTHONPATH','R_LIBS','R_LIBS_USER','FUNGEN_HOST_CODEX'):
         env.pop(key,None)
     # Keep native scheduler/runtime clients; remove host Codex and Python envs.
@@ -172,7 +175,7 @@ def operator_smoke(root,scenario,home,work,env,software,operator_python=None):
 
 def main():
     p=argparse.ArgumentParser(description=__doc__)
-    p.add_argument('scenario',choices=['pixi','staged','xs','h100-xs','advanced','edges','onboarding','operator'])
+    p.add_argument('scenario',choices=['pixi','staged','xs','h100-xs','advanced','edges','onboarding','operator','kernel'])
     p.add_argument('--root',type=Path,required=True)
     p.add_argument('--image',type=Path)
     p.add_argument('--staged',type=Path)
@@ -181,6 +184,8 @@ def main():
     p.add_argument('--busy-port',action='store_true')
     p.add_argument('--h100',action='store_true',help='Constrain this Minerva acceptance allocation to H100 GPUs')
     p.add_argument('--operator-python',type=Path,help='Use a development operator interpreter for onboarding diagnostics')
+    p.add_argument('--operator-scenario',choices=['staged','xs','h100-xs'],default='xs')
+    p.add_argument('--onboarding-home',type=Path,help='Use the main stranger installation for the native onboarding replay')
     a=p.parse_args();root=a.root.resolve();root.mkdir(parents=True,exist_ok=True)
     report=root/'scenarios.json'
     results=json.loads(report.read_text()) if report.exists() else {}
@@ -259,11 +264,20 @@ def main():
             (root/'offline.log').write_text(r.stdout+r.stderr)
             assert r.returncode and 'download on a login node' in r.stdout
         elif a.scenario=='operator':
-            home=root/'xs/home';work=root/'xs/work';env=clean_env(home)
+            home=root/a.operator_scenario/'home';work=root/a.operator_scenario/'work';env=clean_env(home)
             env['PATH']=str(home/'.fungen/bin')+':'+env['PATH']
-            operator_smoke(root,'xs',home,work,env,a.software,a.operator_python)
+            operator_smoke(root,a.operator_scenario,home,work,env,a.software,a.operator_python)
+        elif a.scenario=='kernel':
+            home=a.onboarding_home or root/'staged/home';work=home.parent/'work';env=clean_env(home)
+            python=home/'.fungen/venv/bin/python'
+            code=('import nbformat\nfrom nbclient import NotebookClient\n'
+                  'source='+repr('import sys\nfrom fungen_operator.onboarding import perform\nassert sys.executable == '+repr(str(python))+'\nprint("FUNGEN_KERNEL_READY")')+'\n'
+                  'nb=nbformat.v4.new_notebook(cells=[nbformat.v4.new_code_cell(source)])\n'
+                  'NotebookClient(nb,kernel_name="fungen-operator",timeout=60).execute()\n'
+                  'assert "FUNGEN_KERNEL_READY" in nb.cells[0].outputs[0].text\nprint("FUNGEN_KERNEL_READY")\n')
+            drive([python,'-c',code],[],root/'kernel.pty.log',env,work,180)
         elif a.scenario=='onboarding':
-            home=root/'staged/home';work=root/'staged/work';env=clean_env(home)
+            home=a.onboarding_home or root/'staged/home';work=home.parent/'work';work.mkdir(parents=True,exist_ok=True);env=clean_env(home)
             env['PATH']=str(home/'.fungen/bin')+':'+env['PATH']
             prefix=([a.operator_python,'-m','fungen_operator.bootstrap','xqtl'] if a.operator_python else [home/'.fungen/bin/fungen','xqtl'])
             command=prefix+['--root',root/'xqtl','--manager','mamba','--software',a.software,

@@ -186,3 +186,15 @@ def test_codex_explicit_root_override_precedes_exec(tmp_path,monkeypatch):
             SimpleNamespace(args=['-c',override,'exec','hello'],wait=0,deployment=None))
     command=captured[0][1]
     assert command.index(override)<command.index('exec')<command.index('--oss')
+
+
+def test_host_kernel_uses_installed_python_and_is_idempotent(tmp_path,monkeypatch):
+    monkeypatch.setenv('JUPYTER_DATA_DIR',str(tmp_path/'jupyter'))
+    install=tmp_path/'custom install'
+    path=b.install_kernel(install)
+    data=json.loads(path.read_text())
+    assert data['argv']==[str(install/'venv/bin/python'),'-m','ipykernel_launcher','-f','{connection_file}']
+    assert data['env']['PYTHONPATH']==''
+    stamp=path.stat().st_mtime_ns
+    b.install_kernel(install)
+    assert path.stat().st_mtime_ns==stamp

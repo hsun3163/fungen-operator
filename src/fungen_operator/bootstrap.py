@@ -181,6 +181,18 @@ def host_codex():
     return None
 
 
+def install_kernel(install):
+    """Make setup notebook cells use the operator's installed host Python."""
+    data=Path(os.environ.get('JUPYTER_DATA_DIR',str(Path(os.environ.get('XDG_DATA_HOME',str(Path.home()/'.local/share')))/'jupyter')))
+    path=data/'kernels/fungen-operator/kernel.json'
+    content=json.dumps({'argv':[str(install/'venv/bin/python'),'-m','ipykernel_launcher','-f','{connection_file}'],
+                        'display_name':'Fungen Operator','language':'python',
+                        'env':{'PYTHONPATH':'','PYTHONDONTWRITEBYTECODE':'1'}},indent=2)+'\n'
+    path.parent.mkdir(parents=True,exist_ok=True)
+    if not path.exists() or path.read_text()!=content:path.write_text(content)
+    return path
+
+
 def install_host(install):
     install.mkdir(parents=True, exist_ok=True)
     if not BUNDLE.is_dir():
@@ -210,6 +222,7 @@ def install_host(install):
         run([install/'bin/uv', 'pip', 'install', '--python', venv/'bin/python', '--no-index',
              '--find-links', install/'wheels', '--reinstall-package', 'fungen-operator', 'fungen-operator'])
         stamp.write_text(version)
+    install_kernel(install)
     codex = host_codex()
     if codex:
         print(f'Keeping host Codex: {codex}')
