@@ -1,155 +1,137 @@
-# fungen-operator
+# Fungen Operator
 
-**Fungen Operator is an experimental reliability layer for coding agents operating established functional-genomics workflows.**
+Install a workflow operator on your host and serve Laguna from one Apptainer
+image. Host Codex uses the operator's notebook actions and your scheduler. The
+image contains Ollama **0.40.6**, Codex **0.155.1**, uv **0.13.4**, an offline
+operator wheel bundle and its skill. Models and credentials stay on the host.
+The current build targets Linux x86-64 with Apptainer/Singularity. The local
+backend needs an NVIDIA GPU; the OpenAI backend runs host Codex without one.
 
-It is not a new workflow engine and not an autonomous scientist. The project already has scientific mini-protocol infrastructure in maintained Snakemake `.smk` files. The operator's job is to select and compose those existing mini-protocols into the requested analysis, run them through the native execution path, recover from operational failures, and reach the authorized endpoint without silently changing the science or building a parallel orchestration layer.
+With a locally built `fungen.sif`, the quick start is two shell commands:
 
-> **Maximum initiative inside the delegated scientific and operational contract; minimum invention outside it.**
-
-That is the guiding principle for the replacement.
-
-The broader working philosophy behind this project is in [MANIFESTO.md](MANIFESTO.md): agents try to make everything certain, and uncertainty stays only where it belongs.
-
-## Current status
-
-As of 2026-09-25, this repository includes a **thin executable lab-tech prototype** alongside its development evidence.
-
-**2026-09-23 MWE update:** the fixed-bin PLINK1 genotype fixture, 12 covariates and 40 phenotypes are generated and verified. See the [progress report](docs/mwe_progress_20260923.md) for results, source, reproducibility commands and the closed reconstruction pilot.
-
-The [prototype](docs/operator_prototype.md) exposes configuration, readiness, and submission through typed MCP tools and fixed notebook cells. It includes scientific approval, retained superseded history, replay, and a synthetic lifecycle. [Live LSF readiness and gated submission](docs/readiness_reconciliation_20260924.md) are verified. The [500-sample MWS-01 reference and OSS repeat](benchmark/README.md) passed the phenotype-partitioning endpoint and independent grader. The OSS trajectory review records a login-host validation exception; broader scientific endpoints and the full action catalog remain separate work. The repository also contains:
-
-- 19 imported skill entrypoints with domain procedures, helpers, templates, and site/runtime knowledge;
-- historical attempts and retired approaches under `archive/`;
-- an attributed incident/evidence packet;
-- multiple analyses of recurring agent failures and user corrections;
-- a detailed replacement-development brief;
-- the new canonical operating model and research/evaluation basis.
-
-The current skill collection contains overlapping and sometimes conflicting procedures. Do not interpret the whole `skills/` directory as one combined instruction set.
-
-## Start here
-
-For the executable harness, start with the [prototype architecture and setup](docs/operator_prototype.md),
-the [operator skill](skills/fungen-operator/SKILL.md), and the [executed synthetic notebook](examples/operator_lifecycle.ipynb).
-The [action-surface design](docs/operator_action_surface_20260923.md) supplies the fixed-cell model;
-the prototype implements its configuration/readiness/submission subset, with harmonization upstream.
-
-1. **[Operating model](docs/operator_model.md)** — the canonical current conceptual model: what the operator is, its positive action contract, ownership boundaries, state model, and parsimony principle.
-2. **[Operator action surface](docs/operator_action_surface_20260923.md)** — the concrete proposal that all state-changing behavior occurs through fixed operator-notebook cell templates with bounded slots.
-3. **[Benchmark](docs/benchmark.md)** — the canonical evaluation contract, explicitly aligned to Anthropic's task/trial/grader/outcome framework and peer-reviewed agent benchmarks (τ-bench, ToolSandbox, WorkArena++, AgentBoard, MAST, ScienceAgentBench).
-4. **[Skill baseline and migration map](skills/README.md)** — what capabilities exist in the current collection and how they should be treated during consolidation.
-5. **[Development brief](docs/fungen_operator_development_brief.md)** — detailed requirements, migration questions, case derivation, and implementation sequence.
-6. **[Research basis](docs/research_basis.md)** — how the project's observed problems map to published work on compositional workflows, stateful tool use, rule-constrained agents, trajectory evaluation, scientific agents, and agent complexity.
-
-Only then descend into the evidence corpus when a design decision needs traceability.
-
-The workflow contract for the current implementation is the local `../xqtl/xqtl-protocol` checkout; see the [source boundary](docs/operator_model.md#authoritative-workflow-source). Existing individual-derived MWEs under `../xqtl/` are excluded from the new benchmark; see the [fixture boundary](docs/benchmark.md#legacy-mwe-exclusion).
-
-The active [MWS-01 development reference](benchmark/README.md) uses a verified **500-sample synthetic MWE**, with matched genotype, phenotype, and covariate inputs.
-
-## Operating model in one page
-
-The operator has six legitimate moves:
-
-```text
-select -> compose -> execute -> recover -> verify -> report/stop
+```bash
+apptainer run fungen.sif
+~/.fungen/bin/fungen serve && ~/.fungen/bin/fungen codex
 ```
 
-The scientific task and established project own the method and workflow semantics. The operator owns the reasoning needed to carry out that authorized operation.
+Use `singularity` in place of `apptainer` on Minerva. Local builds and acceptance
+are recorded in [container/VALIDATION.md](container/VALIDATION.md). Registry
+publication is a separate step.
 
-The canonical implementation is immutable to the operator. The operator may instantiate it through already-exposed interfaces and parameters. Read-only observation may remain flexible, but every state-changing action must be materialized as a retained notebook cell selected from a fixed template catalog; the agent fills bounded slots rather than authoring a free-form execution path.
-
-The model is **composition, not reconstruction**. Maintained Snakemake `.smk` files are the existing mini-protocol interface; notebooks and R/Python scripts remain implementation details invoked by those mini-protocols rather than pieces for the operator to rewire. The operator uses the existing composition mechanisms. A missing capability or canonical defect is handed to the developer role rather than bridged by an operator-created wrapper, controller, validator, environment, helper, or alternate execution path.
-
-Execution state is layered:
+Setup asks, in order:
 
 ```text
-source -> configuration -> materialized task/command -> scheduler state -> scientific product
+Install folder [~/.fungen]:
+Scheduler (lsf/slurm/local) [detected scheduler]:
+Model backend (local/openai) [local]:
+Models (download):
+  laguna-xs-2.1:q4_K_M: 20 GB
+  laguna-xs-2.1:q8_0: 36 GB
+  laguna-s-2.1:q4_K_M: 96 GB
+  laguna-s-2.1:q8_0: 128 GB
+Model tag [largest choice fitting visible GPU memory; XS Q4 when unknown]:
+Download model? (yes/no) [no]:
+Model folder to download into or reuse [scratch/project on clusters; ~/.fungen/models locally]:
+Context (32768; advanced 262144 needs extra GPU memory) [32768]:
+Add the install bin folder to your shell PATH? (yes/no) [no]:
 ```
 
-A change to one layer does not automatically change later layers. This is central to recovery.
+The model questions apply to the local backend. On clusters setup warns about
+home quotas. A new download requires a writable folder and model size plus 10%
+plus 2 GB free space; check the site's quota too. Ollama resumes partial blobs.
+A complete existing model folder may be read-only. Advanced 256k context creates
+a local Modelfile variant in a writable overlay, reusing the base blobs. Ollama
+refreshes blob timestamps during variant creation, so this advanced option needs
+a writable base model store; use the default 32768 context for read-only reuse.
 
-Completion is defined by the requested scientific endpoint and actual terminal products or explicitly valid no-result states—not merely by submission, a controller exit, a marker file, or an empty queue.
+Setup installs under the chosen folder, keeps host Codex 0.155.1 or newer, and
+copies the bundled client when needed. It installs the Codex skill without
+replacing the user's Codex configuration. Backend settings live in
+`~/.config/fungen/config.toml`; local Codex sessions use the install folder's
+separate Codex home. Setup upgrades to the image's operator bundle on re-run.
+The PATH line is appended only after an explicit `yes`.
 
-## Why this exists
+For the OpenAI backend, setup prints `codex login --device-auth` for headless
+sign-in. You may instead set `OPENAI_API_KEY` in your shell. The launcher passes
+the key through the environment; it never writes it to a configuration, image
+or working folder. Ordinary host `codex` also sees the installed skill.
+See [Codex authentication](https://developers.openai.com/codex/auth/) and
+[configuration](https://developers.openai.com/codex/config-reference/).
 
-The historical record repeatedly shows a characteristic failure pattern: an agent asked to operate an existing workflow starts solving a different problem.
+Daily commands:
 
-Examples include:
-
-- building alternative wrappers/controllers instead of using the shared workflow;
-- adding assurance machinery that becomes another operational dependency;
-- rebuilding a supplied runtime;
-- changing scientific semantics to resolve an execution mismatch;
-- stopping at an intermediate checkpoint instead of the requested endpoint;
-- expanding the scope of the task;
-- fixing source while leaving already-materialized execution state stale;
-- applying a sensible resource convention at the wrong level;
-- spending attention on redundant inspection rather than the requested decision;
-- damaging consequential configuration while editing the operational record.
-
-The repository's design question is therefore not simply how to make an agent "more autonomous" or "more constrained." The target is **persistence within delegated authority**.
-
-## Repository map
-
-```text
-README.md                         this entry point
-docs/
-  operator_model.md              canonical conceptual model
-  operator_action_surface_20260923.md
-                                 fixed notebook action-surface design
-  benchmark.md                   canonical benchmark specification
-  research_basis.md              external research/evaluation grounding
-  fungen_operator_development_brief.md
-                                 detailed replacement engineering brief
-  historical_evidence_extraction_20260920.md
-                                 primary retained TASK/EVENT/FEEDBACK evidence
-  failure_mode_insights_20260920.md
-                                 interpretation of historical failure patterns
-  session_insights_analysis_20260922.md
-                                 separate session-insights run and corrections
-  insights_review_20260922.md     additional insights-derived development review
-  source-manifest.tsv             provenance for imported files
-skills/
-  README.md                       capability and migration map
-  */SKILL.md                      imported operating/domain skill baseline
-archive/                          prior approaches, reviews, and retired policy
+```bash
+fungen serve                  # submit/start the GPU model server
+fungen codex                  # wait for the recorded endpoint; start host Codex
+fungen check                  # checks and exact fixes
+fungen codex --deployment deployment.json
+fungen codex -- exec --skip-git-repo-check 'Your task'
 ```
 
-Nothing in the renovation requires deleting the historical material. The goal is to keep evidence rich while making the runtime/product concept small.
+The server script is `~/.fungen/serve.lsf.sh`, `serve.slurm.sh` or `serve.local.sh`.
+It requests the tag's GPU count, uses `apptainer run --nv IMAGE serve`, selects a
+free port, tests inference, and records the node and port. Without a GPU the local
+server stops with the exact `--nv`/GPU-job fix. Choose OpenAI on a machine without
+a GPU. Workflows and their scheduler clients run on the host.
 
-## Evidence discipline
+A scripted setup accepts the same answers as flags or `FUNGEN_*` variables:
 
-The documents play different roles:
+```bash
+apptainer run fungen.sif setup --non-interactive --backend local --scheduler lsf \
+  --model laguna-xs-2.1:q4_K_M --models-dir /scratch/user/models --download yes \
+  --install "$HOME/.fungen" --add-path no
+```
 
-- **historical evidence** records attributed incidents and uncertainty;
-- **failure analyses** infer recurring patterns and competing mechanisms;
-- **development documents** convert those observations into candidate requirements;
-- **current skills** are capability/policy sources, not proof that their rules were active during historical incidents;
-- **published research** supplies vocabulary and evaluation precedent, not product requirements by itself.
+Ask Codex to “set up the xQTL protocol through fine-mapping”, or run:
 
-A later rule does not prove what caused an earlier incident. Automated session labels are useful for finding cases, not for estimating failure rates without checking the underlying evidence.
+```bash
+fungen xqtl --root /scratch/user/xqtl-setup
+```
 
-## Development direction
+It writes `setup.ipynb` with one confirmed cell per step: pinned upstream workflow,
+software, references, scheduler profile, a new synthetic fixture, the native test
+chain, and hand-off. Each step checks its predecessors and retains a native log.
+Resume with `--step workflow|software|reference|scheduler|fixture|test|handoff`.
+Mamba is the required route, using hash-pinned Miniforge 26.7.2-0 and the bundled version-pinned environment;
+software has a 35 GB budget and a user-selected folder. Pixi is offered through
+StatFunGen pixi-setup. On Minerva its full setup fails in `safe_expose_remove`
+because the upstream jq expression `.[].exposed.[].exposed_name` is invalid. The
+exact native failure is retained in the validation record. It does not silently fall back to another package manager.
 
-The replacement should converge toward:
+The workflow pin is `f66555213b5deeb68d347690493b694de923ef4d`. A retained interface
+patch connects its current QtlDataset workers and per-gene SoS interface to its
+Snakemake fine-mapping rule, uses normal SoS signatures, and maps PCA sample IDs
+from the PLINK FAM order. Statistical calculations remain upstream. Cluster profiles
+use 2000 jobs. The prepared-input RNA chain needs no genome, dbSNP or external LD
+download; the notebook names the optional Ensembl 103 FASTA (about 840 MB) and GTF
+(about 47 MB). This test generates fresh PLINK and normalized phenotype inputs.
 
-- one recognizable, skill-first Fungen Operator entry point;
-- one concise shared operating contract;
-- a finite catalog of fixed state-changing notebook-cell templates derived first from successful MESA/CARDIA operation;
-- direct use of the existing `.smk` mini-protocol infrastructure for both fixed and composed analyses;
-- composition by selecting and connecting maintained mini-protocols through their existing inputs/outputs and configuration conventions, not by building a new composition framework;
-- task/domain references or capabilities loaded only when relevant;
-- preservation of useful scientific helpers and conventions;
-- explicit ownership of runtime and scheduler facts;
-- controlled-data-safe synthetic acceptance cases plus bounded native integration tests;
-- repeated evaluation of endpoint completion **and** contract adherence;
-- staged retirement of overlapping legacy discovery routes only after capability coverage is accounted for.
+The frozen seed is 20261020: 500 artificial participants, four regions on two
+chromosomes, 512 variants and six contexts with four planted and four null traits
+each. Genotype QC, native PCA, phenotype/covariate preparation, hidden factors,
+TensorQTL and five-fold SuSiE/TWAS run through the upstream DAG. Every planted
+causal pair must have nominal P < 5E-8 with its expected counted-allele direction
+and causal membership in a 95% SuSiE credible set; at most one null trait may cross
+that threshold. Acceptance checks native products and the generated truth.
+The final deployment starts the user's own harmonized-data analysis after their
+input paths and scientific choices are reviewed.
 
-Start skill-first. Add a plugin, custom agent, or heavier harness only if a concrete capability gap demonstrates that the skill layer is insufficient.
+Troubleshooting mirrors `fungen check`:
 
-## Provenance
+| Failed check | Exact action |
+|---|---|
+| Install writable | Rerun setup with `--install WRITABLE_FOLDER`. |
+| Install on PATH | Add `export PATH="$HOME/.fungen/bin:$PATH"` or confirm the setup PATH prompt. |
+| Operator importable / skill visible | Rerun `apptainer run fungen.sif`. |
+| Codex recent enough | Rerun setup to install the bundled client. |
+| Internet reachable | Download on a login node or another machine; rerun with `--download no --models-dir FOLDER`. |
+| Model present | Rerun with `--download yes` to resume. |
+| Model folder writable | Select a writable download folder, or reuse a complete read-only store. |
+| Model space and quota | Free storage, check your site quota, or choose scratch/project storage. |
+| Server reachable / port | Run `fungen serve`; inspect its native job log. The server records the selected free port. |
+| GPU / driver | Use a GPU queue and `--nv`; update the host driver if the log reports CUDA incompatibility. |
+| OpenAI signed in | Run `codex login --device-auth` or export `OPENAI_API_KEY` in the shell. |
 
-This repository incorporates the original `hsun3163/runner-skills` history and a refreshed local skill snapshot. The [source manifest](docs/source-manifest.tsv) records imported source locations and hashes. Imported snapshots are historical provenance; subsequent edited files require their own revision identity.
-
-Analysis datasets and the external workflow implementations themselves are not bundled here.
+Developer material: [build recipe](container/README.md), [image specification](docs/operator_container_spec.md),
+[operator architecture](docs/operator_prototype.md), [operating model](docs/operator_model.md),
+[benchmark](benchmark/README.md), [manifesto](MANIFESTO.md).

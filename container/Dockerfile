@@ -1,6 +1,6 @@
-FROM ollama/ollama:0.18.2
+FROM ollama/ollama:0.40.6
 LABEL org.opencontainers.image.title="Fungen Operator" \
-      org.opencontainers.image.description="Ollama 0.18.2, Fungen Operator, Codex 0.155.1; external model storage"
+      org.opencontainers.image.description="Ollama 0.40.6, Fungen Operator, Codex 0.155.1; external model storage"
 # An allowlisted context, made by build.py, prevents private workspace material
 # from entering even the build context. The same install path serves both builds.
 COPY . /opt/fungen-operator/
@@ -11,4 +11,4 @@ ENV PATH="/opt/python/bin:/opt/agent/bin:/usr/local/sbin:/usr/local/bin:/usr/sbi
     OLLAMA_FLASH_ATTENTION="1" OLLAMA_KV_CACHE_TYPE="q8_0"
 WORKDIR /workspace
 ENTRYPOINT ["/opt/python/bin/python3", "/opt/fungen-operator/container/fungen.py"]
-CMD ["setup", "--stay"]
+CMD ["setup"]

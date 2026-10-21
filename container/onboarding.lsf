@@ -1,0 +1,20 @@
+#!/bin/bash
+#BSUB -J fungen-xqtl-software
+#BSUB -P acc_LOAD
+#BSUB -q premium
+#BSUB -n 8
+#BSUB -M 64000
+#BSUB -R "rusage[mem=8000] span[hosts=1]"
+#BSUB -W 04:00
+set -euo pipefail
+export CONDA_PKGS_DIRS="${FUNGEN_TRIAL_ROOT:?}/package-cache"
+export MAMBA_NO_BANNER=1
+export MAMBA_DOWNLOAD_THREADS=2 MAMBA_EXTRACT_THREADS=2
+unset PYTHONPATH R_LIBS R_LIBS_USER PIXI_HOME
+mamba=${FUNGEN_MAMBA:-$FUNGEN_TRIAL_ROOT/mamba/bin/mamba}
+if [[ ! -x $mamba ]]; then
+    "$LS_SUBCWD/.venv/bin/python" -c 'from fungen_operator.onboarding import acquire_mamba; import os; acquire_mamba(os.environ["FUNGEN_TRIAL_ROOT"])'
+fi
+operation=create
+if [[ -f "$FUNGEN_TRIAL_ROOT/software/conda-meta/history" ]]; then operation=update; fi
+"$mamba" env "$operation" -y -p "$FUNGEN_TRIAL_ROOT/software" -f "$LS_SUBCWD/src/fungen_operator/resources/xqtl-mamba.yaml"

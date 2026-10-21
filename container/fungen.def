@@ -12,7 +12,7 @@ From: fungen-operator.tar
 
 %runscript
     if [ "$#" -eq 0 ]; then
-        exec /opt/python/bin/python3 /opt/fungen-operator/container/fungen.py setup --stay
+        exec /opt/python/bin/python3 /opt/fungen-operator/container/fungen.py setup
     fi
     exec /opt/python/bin/python3 /opt/fungen-operator/container/fungen.py "$@"
 

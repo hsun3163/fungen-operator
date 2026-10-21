@@ -1,0 +1,475 @@
+--- a/code/snakemake/Snakefile
++++ b/code/snakemake/Snakefile
+@@ -232,7 +232,7 @@
+     job_size = rule_cfg.get("job_size", defaults.get("job_size", 1))
+     rule_force = rule_cfg.get("force")
+     stage_force = _FORCE if rule_force is None else bool(rule_force)
+-    stage = "force" if stage_force else "build"
++    stage = "force" if stage_force else "default"
+     local_rules = set(SOS_CFG.get("local_rules", ["sample_match", "merge_pca_covariate"]))
+     is_local = rule_name in local_rules or str(queue).lower() in {"", "local", "none", "false"}
+     return queue, max_jobs, job_size, stage, is_local
+@@ -542,7 +542,7 @@
+ 
+ rule phenotype_calling:
+     input:
+-        [get_molecular_phenotype_bed_by_theme(theme) for theme in THEMES],
++        [get_phenotype_bed_by_theme(theme) for theme in THEMES],
+ 
+ rule genotype_preprocessing:
+     input:
+--- a/code/snakemake/rules/02_genotype_preprocessing.smk
++++ b/code/snakemake/rules/02_genotype_preprocessing.smk
+@@ -29,6 +29,7 @@
+     output:
+         vcf_qc = "{cwd}/data_preprocessing/genotype/{prefix}.vcf.gz",
+     params:
++        sos_sched = sos_sched("vcf_qc"),
+         sos_bin       = SOS_BIN,
+         notebooks_dir = NOTEBOOKS,
+         modular_script_dir = MODULAR_SCRIPT_DIR,
+@@ -52,7 +53,7 @@
+             --reference-genome {params.fasta} \
+             --gt-only-vcf-qc {params.gt_only_vcf_qc} \
+             --modular-script-dir {params.modular_script_dir} \
+-            --numThreads {threads} {params.dry_run}
++            --numThreads {threads} {params.dry_run} {params.sos_sched}
+         """
+ 
+ # ------------------------------------
+@@ -84,6 +85,7 @@
+         ),
+         plink_list = "{cwd}/data_preprocessing/genotype/vcf_to_plink_files.list",
+     params:
++        sos_sched = sos_sched("vcf_to_plink"),
+         sos_bin       = SOS_BIN,
+         notebooks_dir = NOTEBOOKS,
+         modular_script_dir = MODULAR_SCRIPT_DIR,
+@@ -100,11 +102,12 @@
+         mkdir -p {params.outdir}
+         printf '%s\n' {input.vcf_qc} > {params.vcf_list}
+         {params.sos_bin} run {params.notebooks_dir}/genotype_formatting.ipynb vcf_to_plink \
++            --name "" \
+             --cwd {params.outdir} \
+             --genoFile {params.vcf_list} \
+              \
+             --modular-script-dir {params.modular_script_dir} \
+-            --numThreads {threads} {params.dry_run}
++            --numThreads {threads} {params.dry_run} {params.sos_sched}
+         printf '%s\n' {output.bed} > {output.plink_list}
+         """
+ 
+@@ -135,6 +138,7 @@
+         bim = "{cwd}/data_preprocessing/genotype/" + CONVERTED_PLINK_BASENAME + ".bim",
+         fam = "{cwd}/data_preprocessing/genotype/" + CONVERTED_PLINK_BASENAME + ".fam",
+     params:
++        sos_sched = sos_sched("merge_plink"),
+         sos_bin       = SOS_BIN,
+         notebooks_dir = NOTEBOOKS,
+         modular_script_dir = MODULAR_SCRIPT_DIR,
+@@ -163,7 +167,7 @@
+                 --mem {params.merge_mem} \
+                  \
+                 --modular-script-dir {params.modular_script_dir} \
+-                --numThreads {threads} {params.dry_run}
++                --numThreads {threads} {params.dry_run} {params.sos_sched}
+         fi
+         """
+ 
+@@ -179,6 +183,7 @@
+         bim = "{cwd}/data_preprocessing/genotype/" + PLINK_QC_BASENAME + ".bim",
+         fam = "{cwd}/data_preprocessing/genotype/" + PLINK_QC_BASENAME + ".fam",
+     params:
++        sos_sched = sos_sched("plink_qc"),
+         sos_bin       = SOS_BIN,
+         notebooks_dir = NOTEBOOKS,
+         modular_script_dir = MODULAR_SCRIPT_DIR,
+@@ -197,6 +202,7 @@
+     shell:
+         """
+         {params.sos_bin} run {params.notebooks_dir}/GWAS_QC.ipynb qc_no_prune \
++            --name "" \
+             --cwd {params.outdir} \
+             --genoFile {input.bed} \
+             --mac-filter {params.mac_filter} \
+@@ -206,7 +212,7 @@
+             --hwe-filter {params.hwe_filter} \
+              \
+             --modular-script-dir {params.modular_script_dir} \
+-            --numThreads {threads} {params.dry_run}
++            --numThreads {threads} {params.dry_run} {params.sos_sched}
+         """
+ 
+ # ------------------------------------
+@@ -219,6 +225,7 @@
+     output:
+         chrom_list = "{cwd}/data_preprocessing/genotype/" + PLINK_QC_BASENAME + ".genotype_by_chrom_files.txt",
+     params:
++        sos_sched = sos_sched("genotype_by_chrom"),
+         sos_bin       = SOS_BIN,
+         notebooks_dir = NOTEBOOKS,
+         modular_script_dir = MODULAR_SCRIPT_DIR,
+@@ -236,10 +243,11 @@
+     shell:
+         """
+         {params.sos_bin} run {params.notebooks_dir}/genotype_formatting.ipynb genotype_by_chrom \
++            --name "" \
+             --cwd {params.outdir} \
+             --genoFile {input.bed} \
+             --chrom {params.chroms} \
+              \
+             --modular-script-dir {params.modular_script_dir} \
+-            --numThreads {threads} {params.dry_run}
+-        """
++            --numThreads {threads} {params.dry_run} {params.sos_sched}
++        """
+--- a/code/snakemake/rules/03_sample_qc_pca.smk
++++ b/code/snakemake/rules/03_sample_qc_pca.smk
+@@ -43,6 +43,7 @@
+         ln -sfn {input.phenotype_bed} "$local_pheno"
+         local_genofam="$(printf '%s\n' '{input.bed}' | sed 's/\\.bed$/.fam/')"
+         {params.sos_bin} run {params.notebooks_dir}/GWAS_QC.ipynb genotype_phenotype_sample_overlap \
++            --name "" \
+             --cwd {params.outdir} \
+             --genoFile "$local_genofam" \
+             --phenoFile "$local_pheno" \
+@@ -159,6 +160,7 @@
+     shell:
+         """
+         {params.sos_bin} run {params.notebooks_dir}/GWAS_QC.ipynb qc \
++            --name "" \
+             --cwd {params.outdir} \
+             --genoFile {input.unrelated_bed} \
+             --mac-filter {params.mac_filter} \
+@@ -213,6 +215,7 @@
+         fi
+ 
+         {params.sos_bin} run {params.notebooks_dir}/GWAS_QC.ipynb qc_no_prune \
++            --name "" \
+             --cwd {params.outdir} \
+             --genoFile {input.related_bed} \
+             --keep-variants {input.pruned_in} \
+@@ -260,6 +263,7 @@
+         """
+         mkdir -p {params.outdir}
+         {params.sos_bin} run {params.notebooks_dir}/PCA.ipynb flashpca \
++            --name "" \
+             --cwd {params.outdir} \
+             --genoFile {input.pruned_bed} \
+             --k {params.n_pcs} \
+@@ -302,6 +306,7 @@
+         fi
+ 
+         {params.sos_bin} run {params.notebooks_dir}/PCA.ipynb project_samples \
++            --name "" \
+             --cwd {params.outdir} \
+             --genoFile {input.related_qc_bed} \
+             --pca-model {input.pca_rds} \
+--- a/code/snakemake/rules/04_phenotype_covariate_prep.smk
++++ b/code/snakemake/rules/04_phenotype_covariate_prep.smk
+@@ -65,6 +65,7 @@
+         chrom_list   = "{cwd}/data_preprocessing/{theme}/phenotype_data/{pheno_base}.phenotype_by_chrom_files.txt",
+         region_list  = "{cwd}/data_preprocessing/{theme}/phenotype_data/{pheno_base}.phenotype_by_chrom_files.region_list.txt",
+     params:
++        sos_sched = sos_sched("phenotype_by_chrom"),
+         sos_bin       = SOS_BIN,
+         notebooks_dir = NOTEBOOKS,
+         modular_script_dir = MODULAR_SCRIPT_DIR,
+@@ -85,7 +86,7 @@
+             --name {params.output_name} \
+             --chrom {params.chroms} \
+             --modular-script-dir {params.modular_script_dir} \
+-            --numThreads {threads} {params.dry_run}
++            --numThreads {threads} {params.dry_run} {params.sos_sched}
+         """
+ 
+ # ------------------------------------
+--- a/code/snakemake/rules/05_association_testing.smk
++++ b/code/snakemake/rules/05_association_testing.smk
+@@ -63,6 +63,7 @@
+ 	            geno_bed="$(awk 'NR==2 {{print $2}}' {params.normalized_geno_manifest})"
+ 	            XQTL_PATCH_TENSORQTL_SORT=1 PYTHONPATH="{params.compat_python}${{PYTHONPATH:+:$PYTHONPATH}}" \
+ 	            {params.sos_bin} run {params.tensorqtl_notebook} cis {params.dry_run} \
++            --name "" \
+ 	                --cwd {params.outdir} \
+ 	                --genotype-file "$geno_bed" \
+ 	                --phenotype-file {input.phenotype_bed} \
+@@ -78,6 +79,7 @@
+ 	        else
+ 	            XQTL_PATCH_TENSORQTL_SORT=1 PYTHONPATH="{params.compat_python}${{PYTHONPATH:+:$PYTHONPATH}}" \
+ 	            {params.sos_bin} run {params.tensorqtl_notebook} cis {params.dry_run} \
++            --name "" \
+ 	                --cwd {params.outdir} \
+ 	                --genotype-file {params.normalized_geno_manifest} \
+ 	                --phenotype-file {params.normalized_pheno_manifest} \
+--- a/code/snakemake/rules/06_univariate_finemapping.smk
++++ b/code/snakemake/rules/06_univariate_finemapping.smk
+@@ -11,140 +11,95 @@
+ # ------------------------------------
+ # Step 6.1 — Univariate SuSiE fine-mapping + TWAS weights
+ # ------------------------------------
++rule univariate_qtl_manifest:
++    input:
++        phenotype = lambda wc: get_phenotype_bed(wc),
++        covariates = lambda wc: get_hidden_factors(wc),
++    output:
++        manifest = "{cwd}/finemapping/{theme}/susie_twas/phenotype_manifest.tsv",
++        regions = "{cwd}/finemapping/{theme}/susie_twas/region_ids.txt",
++        samples = "{cwd}/finemapping/{theme}/susie_twas/sample_ids.txt",
++    params:
++        worker = MODULAR_SCRIPT_DIR + "/data_preprocessing/phenotype/phenotype_formatting.R",
++        chroms = " ".join(CHROMS),
++    threads: 1
++    resources:
++        mem_mb = config["resources"]["default"]["mem_mb"],
++        runtime = config["resources"]["default"]["runtime"],
++    shell:
++        """
++        Rscript {params.worker:q} --step qtl_dataset_manifest \
++          --phenoFile {input.phenotype:q} --covariate-file {input.covariates:q} \
++          --context {wildcards.theme:q} --chromosomes {params.chroms} \
++          --phenotype-id-column ID --output {output.manifest:q} \
++          --output-region-ids {output.regions:q} --output-sample-ids {output.samples:q}
++        """
++
++rule univariate_qtl_dataset:
++    input:
++        genotype = lambda wc: get_plink_qc_bed(),
++        manifest = "{cwd}/finemapping/{theme}/susie_twas/phenotype_manifest.tsv",
++        samples = "{cwd}/finemapping/{theme}/susie_twas/sample_ids.txt",
++    output:
++        dataset = "{cwd}/finemapping/{theme}/susie_twas/qtl_dataset/{theme}.qtl_dataset.rds",
++    params:
++        worker = MODULAR_SCRIPT_DIR + "/pecotmr_integration/qtl_dataset_construct.R",
++    threads: 1
++    resources:
++        mem_mb = config["resources"]["finemapping"]["mem_mb"],
++        runtime = config["resources"]["finemapping"]["runtime"],
++    shell:
++        """
++        Rscript {params.worker:q} --study {wildcards.theme:q} \
++          --genotype-prefix $(printf '%s' {input.genotype:q} | sed 's/\\.bed$//') \
++          --phenotype-manifest {input.manifest:q} --transpose-covariates \
++          --keep-samples {input.samples:q} --output {output.dataset:q}
++        """
++
+ rule susie_twas:
+-    """Run univariate SuSiE fine-mapping and compute TWAS weights for all loci."""
+     input:
+-        geno_list      = lambda wc: get_genotype_chrom_list(),
+-        pheno_region_list = lambda wc: get_phenotype_region_list(wc.theme),
+-        hidden_factors = lambda wc: get_hidden_factors(wc),
++        genotype = lambda wc: get_plink_qc_bed(),
++        manifest = "{cwd}/finemapping/{theme}/susie_twas/phenotype_manifest.tsv",
++        covariates = lambda wc: get_hidden_factors(wc),
++        dataset = "{cwd}/finemapping/{theme}/susie_twas/qtl_dataset/{theme}.qtl_dataset.rds",
++        regions = "{cwd}/finemapping/{theme}/susie_twas/region_ids.txt",
+     output:
+         done = "{cwd}/finemapping/{theme}/susie_twas/.done_susie_twas",
+     params:
+-        sos_bin       = SOS_BIN,
+-        sos_sched     = sos_sched("susie_twas"),
+-        outer_lsf     = str(sos_uses_lsf("susie_twas")).lower(),
+-        outer_queue   = sos_queue("susie_twas"),
+-        outer_walltime = lsf_walltime(config["resources"]["finemapping"]["runtime"], sos_queue("susie_twas")),
+-        outer_mem_gb  = lsf_mem_gb(config["resources"]["finemapping"]["mem_mb"]),
+-        outer_job_name = lambda wc: f"xqtl_susie_{wc.theme}",
+-        runtime_home  = RUNTIME_HOME,
+-        runtime_root  = RUNTIME_ROOT,
+-        activate_pixi = str(ACTIVATE_PIXI),
+-        run_workdir   = RUN_WORKDIR,
+-        notebooks_dir = NOTEBOOKS,
+-        modular_script_dir = MODULAR_SCRIPT_DIR,
+-        outdir        = "{cwd}/finemapping/{theme}/susie_twas",
+-        cis_window    = config["association"]["cis_window"],
+-        init_L        = config["finemapping"]["L"],
+-        L             = config["finemapping"]["max_L"],
+-        pip_cutoff    = config["finemapping"]["pip_cutoff"],
+-        min_twas_maf  = config["finemapping"]["maf"],
+-        dry_run       = DRY_RUN_SOS,
++        sos_sched = sos_sched("susie_twas"),
++        sos_bin = SOS_BIN,
++        notebook = NOTEBOOKS + "/mnm_regression.ipynb",
++        scripts = MODULAR_SCRIPT_DIR,
++        outdir = "{cwd}/finemapping/{theme}/susie_twas",
++        window = config["association"]["cis_window"],
++        seed = config.get("seed", 20261020),
+     threads: 1
+     resources:
+-        mem_mb   = config["resources"]["finemapping"]["mem_mb"],
+-        runtime  = config["resources"]["finemapping"]["runtime"],
++        mem_mb = config["resources"]["finemapping"]["mem_mb"],
++        runtime = config["resources"]["finemapping"]["runtime"],
+     shell:
+         """
+-        mkdir -p {params.outdir}
+-        if [ "{params.outer_lsf}" = "true" ]; then
+-            outer_script="{params.outdir}/susie_twas.outer_lsf.sh"
+-            outer_stdout="{params.outdir}/susie_twas.outer_lsf.%J.out"
+-            outer_stderr="{params.outdir}/susie_twas.outer_lsf.%J.err"
+-            cat > "$outer_script" <<'OUTER_LSF'
+-#!/bin/bash
+-set -euo pipefail
+-if command -v module >/dev/null 2>&1; then
+-    module purge || true
+-    module load singularity/3.11.0 || true
+-elif command -v ml >/dev/null 2>&1; then
+-    ml singularity/3.11.0 || true
+-fi
+-export SINGULARITY_BIND="/sc:/sc"
+-export XQTL_LOCAL_RUNTIME_HOME="{params.runtime_home}"
+-export XQTL_LOCAL_RUNTIME_ROOT="{params.runtime_root}"
+-source "{params.activate_pixi}"
+-cd "{params.run_workdir}"
+-{params.sos_bin} run {params.notebooks_dir}/mnm_regression.ipynb susie_twas \
+-    --cwd {params.outdir} \
+-    --name {wildcards.theme} \
+-    --genoFile {input.geno_list} \
+-    --phenoFile {input.pheno_region_list} \
+-    --covFile {input.hidden_factors} \
+-    --cis-window {params.cis_window} \
+-    --init-L {params.init_L} \
+-    --L {params.L} \
+-    --pip-cutoff {params.pip_cutoff} \
+-    --min_twas_maf {params.min_twas_maf} \
+-    --modular-script-dir {params.modular_script_dir} \
+-    --numThreads {threads} {params.dry_run} {params.sos_sched}
+-OUTER_LSF
+-            chmod +x "$outer_script"
+-            bsub -K \
+-                -q "{params.outer_queue}" \
+-                -P acc_load \
+-                -W "{params.outer_walltime}" \
+-                -J "{params.outer_job_name}" \
+-                -oo "$outer_stdout" \
+-                -eo "$outer_stderr" \
+-                -n {threads} \
+-                -R "span[hosts=1] rusage[mem={params.outer_mem_gb}GB]" \
+-                < "$outer_script"
+-        else
+-            {params.sos_bin} run {params.notebooks_dir}/mnm_regression.ipynb susie_twas \
+-                --cwd {params.outdir} \
+-                --name {wildcards.theme} \
+-                --genoFile {input.geno_list} \
+-                --phenoFile {input.pheno_region_list} \
+-                --covFile {input.hidden_factors} \
+-                --cis-window {params.cis_window} \
+-                --init-L {params.init_L} \
+-                --L {params.L} \
+-	                --pip-cutoff {params.pip_cutoff} \
+-	                --min_twas_maf {params.min_twas_maf} \
+-	                --modular-script-dir {params.modular_script_dir} \
+-	                --numThreads {threads} {params.dry_run} {params.sos_sched}
+-        fi
+-	        python3 - "{params.outdir}" "{input.pheno_region_list}" <<'PY'
+-import os
++        mapfile -t genes < {input.regions:q}
++        test "${{#genes[@]}}" -gt 0
++        {params.sos_bin:q} run {params.notebook:q} susie_twas \
++          --cwd {params.outdir:q} --name {wildcards.theme:q} \
++          --genoFile {input.genotype:q} --phenoFile {input.manifest:q} --covFile {input.covariates:q} \
++          --region-name "${{genes[@]}}" --cis-window {params.window} \
++          --seed {params.seed} --cv-folds 5 --cv-threads 1 \
++          --modular-script-dir {params.scripts:q} --numThreads {threads} {params.sos_sched}
++        python - {params.outdir:q} {input.regions:q} {wildcards.theme:q} <<'PY'
++from pathlib import Path
+ import sys
++root, ids, theme = Path(sys.argv[1]), Path(sys.argv[2]), sys.argv[3]
++for gene in ids.read_text().splitlines():
++    for folder, suffix in [('fine_mapping', 'univariate_bvsr.rds'), ('twas_weights', 'univariate_twas_weights.rds')]:
++        product = root / folder / f'{{theme}}.{{gene}}.{{suffix}}'
++        if not product.is_file() or product.stat().st_size == 0:
++            raise SystemExit(f'Missing native product: {{product}}')
++PY
++        touch {output.done:q}
++        """
+ 
+-outdir, region_list = sys.argv[1], sys.argv[2]
+-expected = 0
+-with open(region_list) as handle:
+-    for line in handle:
+-        if line.strip() and not line.startswith("#"):
+-            expected += 1
+-
+-if expected == 0:
+-    print("ERROR: susie_twas phenotype region list has no analyzable rows", file=sys.stderr)
+-    sys.exit(1)
+-
+-fine_dir = os.path.join(outdir, "fine_mapping")
+-twas_dir = os.path.join(outdir, "twas_weights")
+-fine_count = sum(
+-    1 for root, _, files in os.walk(fine_dir)
+-    for name in files if name.endswith(".univariate_bvsr.rds")
+-)
+-twas_count = sum(
+-    1 for root, _, files in os.walk(twas_dir)
+-    for name in files if name.endswith(".univariate_twas_weights.rds")
+-)
+-
+-if fine_count < expected or twas_count < expected:
+-    print(
+-        "ERROR: susie_twas incomplete outputs: expected %d fine-mapping RDS and %d TWAS-weight RDS, found %d and %d"
+-        % (expected, expected, fine_count, twas_count),
+-        file=sys.stderr,
+-    )
+-    sys.exit(1)
+-PY
+-	        susie_guard_status=$?
+-	        if [ "$susie_guard_status" -ne 0 ]; then
+-	            exit "$susie_guard_status"
+-	        fi
+-	        touch {output.done}
+-	        """
+ 
+ # ------------------------------------
+ # Step 6.2 — Fine-mapping credible set plots
+--- a/code/script/data_preprocessing/genotype/PCA.R
++++ b/code/script/data_preprocessing/genotype/PCA.R
+@@ -112,6 +112,7 @@
+     if (!"FID" %in% colnames(pheno)) pheno$FID <- pheno$IID
+   }
+ 
++  if (all(pheno$FID == pheno$IID)) pheno$FID <- "0"
+   pheno$ID <- paste(pheno$FID, pheno$IID, sep = ":")
+   if (length(unique(pheno$ID)) != length(pheno$ID)) {
+     stop("There are duplicated names in IID column of phenoFile")
+@@ -119,6 +119,17 @@
+   pheno
+ }
+ 
++projection_with_ids <- function(projection, bed_file) {
++  # flashpcaR's PLINK reader preserves FAM order but supplies no sample names.
++  ids <- read_pheno_metadata(sub("\\.bed$", ".fam", bed_file))$ID
++  if (nrow(projection) != length(ids)) stop("PCA/FAM sample count mismatch")
++  pca <- as.data.frame(projection, check.names = FALSE)
++  rownames(pca) <- ids
++  pca <- tibble::rownames_to_column(pca, "ID")
++  colnames(pca) <- c("ID", paste0("PC", seq_len(ncol(pca) - 1L)))
++  pca
++}
++
+ read_bim_reference <- function(geno_file) {
+   bim_file <- sub("\\.bed$", ".bim", resolve_bed_file(geno_file))
+   if (!file.exists(bim_file)) stop("Missing BIM file: ", bim_file)
+@@ -298,9 +309,7 @@
+     rownames(result$loadings) <- bim_reference$snp_ids
+   }
+ 
+-  pca <- as.data.frame(result$projection, check.names = FALSE)
+-  pca <- tibble::rownames_to_column(pca, "ID")
+-  colnames(pca) <- c("ID", paste0("PC", seq_len(ncol(pca) - 1L)))
++  pca <- projection_with_ids(result$projection, bed_file)
+ 
+   pheno <- read_pheno_metadata(pheno_file)
+   pheno <- filter_pheno_by_pops(pheno, opt$`pop-col`, opt$`label-col`, pops)
+@@ -382,9 +391,7 @@
+                        orig_sd = f$scale[overlapped_variants],
+                        ref_allele = bim_reference$ref_alleles)
+ 
+-  pca <- as.data.frame(projected$projection, check.names = FALSE)
+-  pca <- tibble::rownames_to_column(pca, "ID")
+-  colnames(pca) <- c("ID", paste0("PC", seq_len(ncol(pca) - 1L)))
++  pca <- projection_with_ids(projected$projection, bed_file)
+ 
+   pheno <- read_pheno_metadata(pheno_file)
+ 

@@ -1,0 +1,29 @@
+name: fungen-xqtl
+channels:
+  - dnachun
+  - conda-forge
+  - bioconda
+dependencies:
+  - python=3.11.13
+  - r-base=4.5.1
+  - r-pecotmr=0.9.3
+  - r-flashpcar=2.1
+  - r-optparse=1.7.5
+  - r-argparser=0.7.2
+  - r-gridextra=2.3
+  - r-tidyverse=2.0.0
+  - r-igraph=2.3.3
+  - r-plinkqc=1.1.0
+  - r-rmtstat=0.3.1
+  - bioconductor-pcatools=2.22.4
+  - plink=1.90b7.7
+  - plink2=2.0.0_a.7.1
+  - bcftools=1.23
+  - htslib=1.23
+  - tensorqtl=1.0.10
+  - snakemake-minimal=7.32.4
+  - pulp=2.7.0
+  - sos=0.25.1
+  - sos-notebook=0.24.4
+  - sos-pbs=0.20.8
+  - pip=26.2.2

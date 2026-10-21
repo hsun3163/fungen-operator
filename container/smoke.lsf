@@ -1,20 +1,9 @@
 #!/bin/bash
 #BSUB -J fungen-container-smoke
 #BSUB -P acc_LOAD
-#BSUB -q gpuexpress
-#BSUB -n 2
-#BSUB -R "rusage[mem=32000] span[hosts=1]"
-#BSUB -M 64000
-#BSUB -gpu "num=2:gmem=70G:mode=exclusive_process"
-#BSUB -W 02:00
+#BSUB -q premium
+#BSUB -n 4
+#BSUB -R "rusage[mem=4000] span[hosts=1]"
+#BSUB -W 04:00
 set -euo pipefail
-image=${FUNGEN_IMAGE:?set FUNGEN_IMAGE}
-models=${FUNGEN_STAGED_MODELS:?set FUNGEN_STAGED_MODELS to an existing read-only Ollama store}
-audit=${FUNGEN_AUDIT_DIR:?set FUNGEN_AUDIT_DIR}
-project=${LS_SUBCWD:?submit from repository root}
-mkdir -p "$audit/home"
-singularity exec --cleanenv --nv --home "$audit/home:/home/fungen" \
-    --bind "$models:/models:ro,$audit:/audit,$project/container/smoke.sh:/opt/fungen-operator/container/smoke.sh:ro" \
-    --env XDG_CONFIG_HOME=/home/fungen/.config,FUNGEN_SKIP_SUITE="${FUNGEN_SKIP_SUITE:-0}" \
-    --env CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:?LSF must assign GPU visibility}" \
-    "$image" bash /opt/fungen-operator/container/smoke.sh
+exec bash "${LS_SUBCWD:?}/container/smoke.sh"
