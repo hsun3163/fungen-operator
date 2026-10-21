@@ -67,6 +67,7 @@ def test_codex_host_config_untouched(tmp_path,monkeypatch):
     assert env['CODEX_OSS_BASE_URL']=='http://gpu:11435/v1'
     assert env['CODEX_HOME']==str(tmp_path/'codex')
     assert 'mcp_servers.fungen.command='+json.dumps(str(tmp_path/'bin/fungen-operator')) in cmd
+    assert 'mcp_servers.fungen.required=true' in cmd
     assert not (tmp_path/'config.toml').exists()
 
 

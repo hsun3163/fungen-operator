@@ -574,7 +574,8 @@ def codex(config,args):
     overrides += ['-c','developer_instructions='+json.dumps('Read '+str(Path(config['install'])/'skills/fungen-operator/SKILL.md')+' before workflow operation. Ask before each setup notebook step. Operator and scheduler run on the host.')]
     if args.deployment:
         overrides += ['-c','mcp_servers.fungen.command='+json.dumps(str(Path(config['install'])/'bin/fungen-operator')),
-                      '-c','mcp_servers.fungen.args='+json.dumps(['serve','--deployment',str(Path(args.deployment).resolve())])]
+                      '-c','mcp_servers.fungen.args='+json.dumps(['serve','--deployment',str(Path(args.deployment).resolve())]),
+                      '-c','mcp_servers.fungen.required=true','-c','mcp_servers.fungen.startup_timeout_sec=60']
     # Root configuration overrides must precede exec in the pinned client.
     command=[config['codex']]+overrides+root_overrides+subcommand+provider+extra
     os.execvpe(command[0],command,env)
