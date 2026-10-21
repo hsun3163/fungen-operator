@@ -39,6 +39,9 @@ Add the install bin folder to your shell PATH? (yes/no) [no]:
 The model questions apply to the local backend. On clusters setup warns about
 home quotas. A new download requires a writable folder and model size plus 10%
 plus 2 GB free space; check the site's quota too. Ollama resumes partial blobs.
+If an interruption leaves an empty or truncated Ollama progress record, setup
+archives that record under the model folder's `.fungen-download-recovery` and
+retains the partial blob. Ollama resumes the remaining chunks and verifies their hash.
 A complete existing model folder may be read-only. Advanced 256k context creates
 a local Modelfile variant in a writable overlay, reusing the base blobs. Ollama
 refreshes blob timestamps during variant creation, so this advanced option needs

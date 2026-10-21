@@ -198,3 +198,24 @@ def test_host_kernel_uses_installed_python_and_is_idempotent(tmp_path,monkeypatc
     stamp=path.stat().st_mtime_ns
     b.install_kernel(install)
     assert path.stat().st_mtime_ns==stamp
+
+
+def test_interrupted_pull_repairs_only_invalid_part_records(tmp_path):
+    blobs=tmp_path/'blobs';blobs.mkdir();digest='sha256-'+'a'*64
+    model=blobs/(digest+'-partial');model.write_bytes(b'partial model bytes')
+    empty=blobs/(digest+'-partial-7');empty.write_bytes(b'')
+    truncated=blobs/(digest+'-partial-8');truncated.write_text('{"Completed":')
+    valid=blobs/(digest+'-partial-9');valid.write_text('{"N":9,"Offset":10,"Size":20,"Completed":5}')
+    unrelated=blobs/'another-file';unrelated.write_bytes(b'')
+    repaired=b.repair_pull_progress(tmp_path)
+    assert sorted(p.read_bytes() for p in repaired)==[b'',b'{"Completed":']
+    assert model.read_bytes()==b'partial model bytes'
+    assert json.loads(valid.read_text())['Completed']==5 and unrelated.exists()
+    assert not empty.exists() and not truncated.exists()
+    assert b.repair_pull_progress(tmp_path)==[]
+
+
+def test_complete_read_only_reuse_never_repairs_download_state(monkeypatch):
+    monkeypatch.setattr(b,'gpu_memory',lambda:[])
+    monkeypatch.setattr(b,'repair_pull_progress',Mock(side_effect=AssertionError('read-only state mutation')))
+    with pytest.raises(ValueError,match='GPU unavailable'):b.inside_serve(SimpleNamespace())

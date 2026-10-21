@@ -422,7 +422,24 @@ def inside_serve(args):
             process.wait(timeout=30)
 
 
+def repair_pull_progress(folder):
+    """Preserve malformed Ollama part records left by an interrupted write."""
+    folder=Path(folder);recovered=[]
+    for path in sorted((folder/'blobs').glob('sha256-*-partial-*')):
+        if not re.fullmatch(r'sha256-[0-9a-f]{64}-partial-\d+',path.name) or not path.is_file():continue
+        try:
+            json.loads(path.read_text())
+        except (ValueError,UnicodeError):
+            archive=folder/'.fungen-download-recovery';archive.mkdir(exist_ok=True)
+            target=archive/(path.name+'.'+str(time.time_ns()))
+            path.rename(target);recovered.append(target)
+    if recovered:
+        print(f'Archived {len(recovered)} incomplete Ollama progress records under {folder / ".fungen-download-recovery"}; partial model bytes are retained.',flush=True)
+    return recovered
+
+
 def inside_download(args):
+    if not args.skip_pull:repair_pull_progress(args.models_dir)
     port = available_port(11434)
     env = dict(os.environ,OLLAMA_HOST=f'127.0.0.1:{port}',OLLAMA_MODELS=args.models_dir,OLLAMA_NO_CLOUD='1')
     process = subprocess.Popen(['ollama','serve'],env=env,stdout=sys.stderr,stderr=sys.stderr)
