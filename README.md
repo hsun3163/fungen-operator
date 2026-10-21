@@ -104,8 +104,9 @@ chain, and hand-off. Each step checks its predecessors and retains a native log.
 Setup registers the **Fungen Operator** Jupyter kernel using the installed host
 Python, so these cells import the operator even when Jupyter itself uses another environment.
 Resume with `--step workflow|software|reference|scheduler|fixture|test|handoff`.
-Mamba is the required route, using hash-pinned Miniforge 26.7.2-0 and the bundled version-pinned environment;
-software has a 35 GB budget and a user-selected folder. Pixi is offered through
+Mamba is the required route, using hash-pinned Miniforge 26.7.2-0 and the bundled version-pinned environment with its 790-package hash lock;
+The runtime dependency susieR is pinned to 0.16.6 for pecotmr 0.9.3.
+Software has a 35 GB budget and a user-selected folder. Pixi is offered through
 StatFunGen pixi-setup. On Minerva its full setup fails in `safe_expose_remove`
 because the upstream jq expression `.[].exposed.[].exposed_name` is invalid. The
 exact native failure is retained in the validation record. It does not silently fall back to another package manager.

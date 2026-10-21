@@ -163,11 +163,12 @@ def perform(root,step):
                         c['mamba']=acquire_mamba(Path(c['software']).parent)
                         (root/'setup.json').write_text(json.dumps(c,indent=2)+'\n')
                     spec=RESOURCES/'xqtl-mamba.yaml'
+                    lock=RESOURCES/'xqtl-linux-64.lock'
                     stamp=root/'software-spec.sha256'
-                    identity=hashlib.sha256(spec.read_bytes()).hexdigest()
+                    identity=hashlib.sha256(spec.read_bytes()+b'\0'+lock.read_bytes()).hexdigest()
                     if not stamp.exists() or stamp.read_text()!=identity:
-                        operation='update' if (Path(c['software'])/'conda-meta/history').exists() else 'create'
-                        command([c['mamba'],'env',operation,'-y','-p',c['software'],'-f',spec],env=dict(os.environ,CONDA_PKGS_DIRS=str(Path(c['software']).parent/'package-cache'),MAMBA_DOWNLOAD_THREADS='2',MAMBA_EXTRACT_THREADS='2'))
+                        operation='install' if (Path(c['software'])/'conda-meta/history').exists() else 'create'
+                        command([c['mamba'],operation,'-y','-p',c['software'],'--file',lock],env=dict(os.environ,CONDA_PKGS_DIRS=str(Path(c['software']).parent/'package-cache'),MAMBA_DOWNLOAD_THREADS='2',MAMBA_EXTRACT_THREADS='2'))
                         stamp.write_text(identity)
                     command([c['mamba'],'list','-p',c['software'],'--explicit'])
                 else:

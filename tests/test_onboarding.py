@@ -76,3 +76,29 @@ def test_miniforge_hash_is_checked_before_execution(tmp_path,monkeypatch):
     monkeypatch.setattr(o,'run',lambda *a,**k:pytest.fail('unverified installer executed'))
     with pytest.raises(ValueError,match='hash differs'):
         o.acquire_mamba(tmp_path)
+
+
+def test_software_install_uses_frozen_lock_and_detects_lock_changes(tmp_path,monkeypatch):
+    resources=tmp_path/'resources';resources.mkdir()
+    (resources/'xqtl-mamba.yaml').write_text('dependencies: [r-susier=0.16.6]')
+    lock=resources/'xqtl-linux-64.lock';lock.write_text('@EXPLICIT\nhttps://example.org/pinned.conda#hash\n')
+    prefix=tmp_path/'software'
+    (tmp_path/'setup.json').write_text(json.dumps({'manager':'mamba','mamba':'/managed/mamba','software':str(prefix)}))
+    monkeypatch.setattr(o,'RESOURCES',resources)
+    monkeypatch.setattr(o,'ask',lambda *a:'yes')
+    monkeypatch.setattr(o,'check_step',lambda *a:None)
+    commands=[];monkeypatch.setattr(o,'run',lambda cmd,**kw:commands.append([str(x) for x in cmd]))
+    o.perform(tmp_path,'software')
+    assert commands[0]==['/managed/mamba','create','-y','-p',str(prefix),'--file',str(lock)]
+    commands.clear();o.perform(tmp_path,'software')
+    assert all('create' not in x and 'install' not in x for x in commands)
+    (prefix/'conda-meta').mkdir(parents=True);(prefix/'conda-meta/history').touch()
+    lock.write_text(lock.read_text()+'https://example.org/updated.conda#newhash\n')
+    commands.clear();o.perform(tmp_path,'software')
+    assert commands[0][1]=='install' and commands[0][-1]==str(lock)
+
+
+def test_runtime_susier_requirement_is_pinned_in_both_specs():
+    environment=yaml.safe_load((o.RESOURCES/'xqtl-mamba.yaml').read_text())
+    assert 'r-susier=0.16.6' in environment['dependencies']
+    assert '/r-susier-0.16.6-' in (o.RESOURCES/'xqtl-linux-64.lock').read_text()
