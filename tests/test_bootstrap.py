@@ -105,8 +105,9 @@ def test_advanced_context_preserves_source_store(tmp_path,monkeypatch):
     assert c['serve_model']==model+'-256k'
 
 
-def test_xqtl_cli_forwards_options_without_double_dash(monkeypatch):
+def test_xqtl_cli_forwards_options_without_double_dash(monkeypatch,tmp_path):
     from fungen_operator import onboarding
+    monkeypatch.setattr(b,"BUNDLE",tmp_path/"absent-image-bundle")
     seen=[];monkeypatch.setattr(onboarding,'main',lambda args:seen.append(args))
     b.main(['xqtl','--root','/scratch/test'])
     assert seen==[['--root','/scratch/test']]
