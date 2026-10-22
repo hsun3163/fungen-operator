@@ -18,6 +18,8 @@ Use `singularity` in place of `apptainer` on Minerva. Local builds and acceptanc
 are recorded in [container/VALIDATION.md](container/VALIDATION.md). Registry
 publication is a separate step.
 
+Try the distribution on Minerva with the [try-out notebook](examples/try_fungen_operator.ipynb).
+
 Setup asks, in order:
 
 ```text
