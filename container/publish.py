@@ -26,6 +26,12 @@ FIX = ("Owner action: export GHCR_TOKEN from a classic PAT with write:packages a
        "Alternatively, the owner can complete `gh auth refresh -h github.com "
        "-s write:packages,read:packages` in their own browser, then rerun. "
        "This script never starts device sign-in.")
+if os.environ.get("GITHUB_ACTIONS") == "true":
+    FIX = ("Owner action: open the GHCR package Settings > Manage Actions access, "
+           "add " + os.environ.get("GITHUB_REPOSITORY", "the workflow repository") +
+           " with Write permission, retain workflow permissions packages: write, "
+           "then rerun this workflow. Keep the package private. "
+           "GITHUB_TOKEN requires access to this existing package; no personal-token secret is required.")
 ACCEPT = "application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json"
 
 
