@@ -105,15 +105,25 @@ def test_local_override_catalog_requires_positive_endpoint_evidence(tmp_path,mon
     assert not (tmp_path/'served').exists()
 
 
-def test_local_base_model_requires_loaded_context_when_parameter_absent(tmp_path,monkeypatch):
+@pytest.mark.parametrize('parameters',[None,''])
+def test_local_base_model_requires_loaded_context_when_parameter_absent(tmp_path,monkeypatch,parameters):
     catalog=tmp_path/'models.json';catalog.write_bytes((Path(b.__file__).with_name('resources')/'codex-models.json').read_bytes())
     selected='laguna-xs-2.1:q4_K_M'
     def api(url,path='/api/tags',data=None,**kwargs):
         if path in ('/api/tags','/api/ps'):return {'models':[{'name':selected,'context_length':32768}]}
-        return {'details':{'quantization_level':'Q4_K_M'},'parameters':'',
-                'model_info':{'general.architecture':'laguna','laguna.context_length':262144}}
+        show={'details':{'quantization_level':'Q4_K_M'},
+              'model_info':{'general.architecture':'laguna','laguna.context_length':262144}}
+        if parameters is not None:show['parameters']=parameters
+        return show
     monkeypatch.setattr(b,'api',api)
     c={'model':selected,'context':32768}
+    def unloaded(url,path='/api/tags',data=None,**kwargs):
+        return {'models':[]} if path=='/api/ps' else api(url,path,data,**kwargs)
+    monkeypatch.setattr(b,'api',unloaded)
+    with pytest.raises(RuntimeError,match='Cannot verify local model override choices'):
+        b.served_catalog(c,'http://fixture',catalog)
+    assert not (tmp_path/'served').exists()
+    monkeypatch.setattr(b,'api',api)
     path=b.served_catalog(c,'http://fixture',catalog);stamp=path.stat().st_mtime_ns
     assert b.served_catalog(c,'http://fixture',catalog)==path and path.stat().st_mtime_ns==stamp
     visible=[m for m in json.loads(path.read_text())['models'] if m['visibility']=='list']

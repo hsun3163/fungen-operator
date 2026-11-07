@@ -775,7 +775,7 @@ def served_catalog(config, endpoint, catalog):
             tagged=re.search(r':(q4_K_M|q8_0)(?:-|$)',name)
             if tagged and tagged.group(1).upper()!=quant:
                 raise ValueError('tag and payload quantization differ for '+name)
-            params=dict(re.findall(r'^\s*(\w+)\s+(\S+)\s*$',show['parameters'],re.M))
+            params=dict(re.findall(r'^\s*(\w+)\s+(\S+)\s*$',show.get('parameters',''),re.M))
             model_info=show['model_info'];arch=model_info['general.architecture']
             capacity=int(model_info[arch+'.context_length'])
             # A base tag need not have a num_ctx parameter. Its loaded instance

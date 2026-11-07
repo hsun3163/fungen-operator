@@ -160,3 +160,9 @@ three sample-ID conventions and three count-mismatch guards. Focused cause
 regressions passed **31 tests** in job **281126926 DONE**. Final native job IDs,
 logs, package/patch hashes and frozen grading rows are indexed in
 `temp_reference/codex_workflow_20261106/report.md`.
+
+## Round 4 release acceptance — 2026-11-07
+
+Initial committed build `cf8088d4998a483709734c7073e60b77b86ab66b`: base job **281316840**, install/archive/convert job **281316875**, SIF SHA-256 `da128c2fb471ee9a346c5e312232d5c414fcaefd6e04accea3dc2c7b879512a1`, size **3,633,688,576 bytes**. The in-image `/opt/fungen/source.json` matches the pushed source commit.
+
+Initial XS acceptance driver **281317062 EXIT 1** installed the host bundle, downloaded the fresh official XS Q4 model and started H100 server **281317113**. The server recorded readiness with positive GPU offload, but host Codex launch failed because `/api/show` omitted the optional `parameters` key. The launcher now handles that absence while retaining the requirement for positive loaded or configured context evidence. Regression coverage includes both absent and empty parameters, and rejects both without loaded context. Focused host catalog tests: **25 passed**; the corrected launcher also produced the exact XS entry against the live endpoint. Full host suite and rebuilt-image acceptance are pending.
