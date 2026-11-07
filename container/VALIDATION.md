@@ -1,6 +1,6 @@
-# Container validation — round 2, 2026-10-21
+# Container validation
 
-Status: **required local acceptance PASS**, including the fresh Mamba RNA chain. Pixi has the optional upstream installation failure documented below. SGE support and the BU SCC field feedback fixes are later source additions (2026-11-05 and 2026-11-06 entries below) awaiting an image rebuild. This record replaces the obsolete round-1 Ollama architecture blocker. No registry publication or push is part of this round.
+Status: **round-4 rebuilt-image acceptance PASS**, with **670 host tests passed, 0 failed/skipped**. The current image records source commit `33730da90f31edaa47a1f5c637f2b011080671c0`. Its installer, host Codex connection, selected-model GPU offload and all 12 `fungen check` rows passed. GHCR and Drive publication are pending. The round-2 record below is historical; current release details are in the round-4 section at the end.
 
 ## Pinned payload and build
 
@@ -97,13 +97,13 @@ Source changes with unit tests, included in the pending rebuild:
 8. **Local Codex launch.** On the local backend, interactive `fungen codex` selects the Ollama provider before onboarding: it sets `-c model_provider="ollama"` alongside `--oss`. `fungen codex -- exec` is unchanged.
 9. **Laguna model catalog.** Setup requires the shipped `<install>/codex/models.json` and pinned host client 0.155.1. It includes exact Q4_K_M/Q8_0 descriptors for both families and 32768/262144 contexts. Local launch validates the current endpoint inventory/quantization/context and supplies an immutable served-ID catalog. Model-facing overrides list only verified served IDs at the session context. Full host request comparisons preserve all base/message/tool assertions and explicitly allow only the changed picker list plus validated invocation identities/timestamps. The isolated endpoint covers both families and presets; live inventory/metadata replay in round 6 verifies only `laguna-s-2.1:q8_0-256k-t2` (Q8_0, 262144), without delegated inference. Other live availability and interactive configurations remain unverified.
 
-Current host suite counts and item-level evidence are recorded in `temp_reference/codex_fix_20261106/report.md`; this source awaits a rebuilt-image acceptance run.
+The audit-frozen host suite and item-level evidence are recorded in `temp_reference/codex_fix_20261106/report.md`; the round-4 section below records the post-fix suite and rebuilt-image acceptance.
 
-Suite: **669 passed, 0 failed, 0 skipped**, frozen host suite LSF **281314035** (2026-11-07). The 238-file source snapshot remained unchanged throughout; `temp_reference/codex_fix_20261106/round7-suite.json` records exit 0. Fresh guided xQTL acceptance: driver **281314034**, controller **281314225**, **259/259 DONE**, grader **24/24** nominal/direction and **24/24** credible-set recoveries, **0** null calls. Rebuilt-image installer/serve acceptance remains pending.
+Suite: **669 passed, 0 failed, 0 skipped**, frozen host suite LSF **281314035** (2026-11-07). The 238-file source snapshot remained unchanged throughout; `temp_reference/codex_fix_20261106/round7-suite.json` records exit 0. Fresh guided xQTL acceptance: driver **281314034**, controller **281314225**, **259/259 DONE**, grader **24/24** nominal/direction and **24/24** credible-set recoveries, **0** null calls. Post-fix host rerun: **670 passed, 0 failed, 0 skipped**, LSF **281317242**, 5001.43 seconds. All 240 files remained unchanged across 2,275 freeze checks. Rebuilt-image acceptance **281317523 PASS**; see round 4 below.
 
 **Live SGE validation (previous build).** A BU SCC user ran the previous build on SGE: SGE job submission works, an L40S GPU served the model, and `fungen check` passed 11/11.
 
-**Remaining validation:** re-run acceptance on the rebuilt image.
+**Rebuilt-image validation:** completed in round 4 below.
 
 ## Scope and evidence
 
@@ -165,4 +165,15 @@ logs, package/patch hashes and frozen grading rows are indexed in
 
 Initial committed build `cf8088d4998a483709734c7073e60b77b86ab66b`: base job **281316840**, install/archive/convert job **281316875**, SIF SHA-256 `da128c2fb471ee9a346c5e312232d5c414fcaefd6e04accea3dc2c7b879512a1`, size **3,633,688,576 bytes**. The in-image `/opt/fungen/source.json` matches the pushed source commit.
 
-Initial XS acceptance driver **281317062 EXIT 1** installed the host bundle, downloaded the fresh official XS Q4 model and started H100 server **281317113**. The server recorded readiness with positive GPU offload, but host Codex launch failed because `/api/show` omitted the optional `parameters` key. The launcher now handles that absence while retaining the requirement for positive loaded or configured context evidence. Regression coverage includes both absent and empty parameters, and rejects both without loaded context. Focused host catalog tests: **25 passed**; the corrected launcher also produced the exact XS entry against the live endpoint. Full host suite and rebuilt-image acceptance are pending.
+Initial XS acceptance driver **281317062 EXIT 1** installed the host bundle, downloaded the fresh official XS Q4 model and started H100 server **281317113**. The server recorded readiness with positive GPU offload, but host Codex launch failed because `/api/show` omitted the optional `parameters` key. The launcher now handles that absence while retaining the requirement for positive loaded or configured context evidence. Regression coverage includes both absent and empty parameters, and rejects both without loaded context. Focused host catalog tests: **25 passed**; the corrected launcher also produced the exact XS entry against the live endpoint. The post-fix host suite and rebuilt-image acceptance passed as recorded below.
+
+### Final round-4 image and acceptance
+
+- Pushed image source: `33730da90f31edaa47a1f5c637f2b011080671c0`; rebuild/update/archive/convert job **281317244 DONE**, using the pinned base from **281316840 DONE**. `/opt/fungen/source.json` and the installed host bundle record the pushed source.
+- SIF: [~/sunh14_project/OLLAMA/images/round4/fungen-operator-ollama0.40.6-codex0.155.1.sif](http://127.0.0.1:30548/lab/tree/sunh14_project/OLLAMA/images/round4/fungen-operator-ollama0.40.6-codex0.155.1.sif). Size: **3,633,692,672 bytes**. SHA-256: `2ced4e06a33fdb0d0adf9b059402f2261b7a64594213ca257196552f69b84380`.
+- Required full host rerun: **281317242 DONE**, **670 passed in 5001.43 seconds**, **0 failed/skipped**. The 240-file snapshot remained unchanged throughout 2,275 monitor checks. Focused build-context tests: **11 passed**; publisher protocol/CLI checks: **5 passed**; actionlint passed; focused catalog tests: **25 passed**. Tests and Codex ran on the host.
+- Clean-home production-path acceptance: driver **281317523 DONE**, GPU model service **281317582**, node **lg07c01**. The SIF installed the host bundle, host Codex returned `FUNGEN_AGENT_CONNECTED`, the selected XS Q4 model reported **20,543,805,849 GPU VRAM bytes** at **32768 tokens**, and **12/12 `fungen check` rows passed**, ending `VERIFIED`. The generated production serve script remained unchanged.
+- Retained second attempt: driver **281317447 EXIT 1**, H100 service **281317459**. Host Codex and GPU offload passed, then the strict asset check correctly rejected the legacy `--h100` acceptance option's edits to generated resource/walltime directives. The final required acceptance used the ordinary generated script, preserving the integrity guard. Both failed attempts and the successful attempt remain recorded.
+- All build/test/acceptance batch drivers were awaited in process with `bsub -K`. The final model service remains the verified running endpoint, with the production script's native walltime limit.
+
+Release evidence: [~/sunh14_project/fungen-operator/temp_reference/codex_release_20261107/report.md](http://127.0.0.1:30548/lab/tree/sunh14_project/fungen-operator/temp_reference/codex_release_20261107/report.md). Later validation-only commits change this excluded record; the SIF retains the exact pushed image source commit above.
