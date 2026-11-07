@@ -1,0 +1,126 @@
+name: Publish operator SIF
+run-name: Publish SIF ${{ inputs.tag || github.ref_name }} from ${{ github.sha }}
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'GHCR tag (test tags do not update release aliases)'
+        required: true
+        default: ollama0.40.6-codex0.155.1
+        type: string
+  push:
+    # Register this workflow before merge so branch dispatch can be tested.
+    branches: [ghcr-publish]
+    tags:
+      - 'ollama*-codex*'
+      - 'v*'
+permissions:
+  contents: read
+  packages: write
+concurrency:
+  group: publish-sif-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+jobs:
+  publish:
+    # Branch pushes register the workflow; publishing requires dispatch or a tag.
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    env:
+      RELEASE_TAG: ollama0.40.6-codex0.155.1
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Select and validate tags
+        env:
+          REQUESTED_TAG: ${{ inputs.tag || github.ref_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$REQUESTED_TAG" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]]
+          echo "PUBLISH_TAG=$REQUESTED_TAG" >> "$GITHUB_ENV"
+          echo "BUILD_DIR=$RUNNER_TEMP/fungen-sif" >> "$GITHUB_ENV"
+      - name: Free runner disk before building
+        shell: bash
+        run: |
+          set -euo pipefail
+          df -h /
+          # Disposable GitHub-hosted runner tools unused by this build.
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache
+          docker system prune --all --force
+          df -h /
+          available=$(df --output=avail -B1 / | tail -1)
+          test "$available" -ge 50000000000
+      - name: Install Apptainer
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo add-apt-repository -y ppa:apptainer/ppa
+          sudo apt-get update
+          sudo apt-get install -y apptainer
+          apptainer --version
+      - name: Build the committed recipe
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$BUILD_DIR"
+          python3 container/build.py context "$BUILD_DIR/context"
+          docker build --platform linux/amd64 \
+            --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" \
+            --label "org.opencontainers.image.revision=$GITHUB_SHA" \
+            -f "$BUILD_DIR/context/container/Dockerfile" \
+            -t "fungen-operator:$RELEASE_TAG" "$BUILD_DIR/context"
+          docker save -o "$BUILD_DIR/fungen-operator.tar" "fungen-operator:$RELEASE_TAG"
+          # Save is complete: release Docker layers before SIF conversion.
+          docker image rm "fungen-operator:$RELEASE_TAG"
+          docker builder prune --all --force
+          cd "$BUILD_DIR"
+          # fungen.def owns the environment, runscript and image tests.
+          sudo env APPTAINER_TMPDIR="$BUILD_DIR" \
+            apptainer build --disable-cache fungen.sif "$GITHUB_WORKSPACE/container/fungen.def"
+          sudo chown "$(id -u):$(id -g)" fungen.sif
+          rm fungen-operator.tar
+          sha256sum fungen.sif | tee sif.sha256
+          {
+            echo "### Built operator SIF"
+            echo "Commit: \`$GITHUB_SHA\`"
+            echo "Requested tag: \`$PUBLISH_TAG\`"
+            echo '```'
+            cat sif.sha256
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          df -h /
+      - name: Publish with GITHUB_TOKEN and verify ORAS round trips
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GHCR_USERNAME: ${{ github.actor }}
+          EVENT_NAME: ${{ github.event_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          tags=("$PUBLISH_TAG")
+          if [[ "$EVENT_NAME" == push || "$PUBLISH_TAG" == "$RELEASE_TAG" || "$PUBLISH_TAG" == latest ]]; then
+            tags+=("$RELEASE_TAG" latest)
+          fi
+          repository="${GITHUB_REPOSITORY,,}"
+          python3 container/publish.py "$BUILD_DIR/fungen.sif" "${tags[@]}" \
+            --runtime apptainer --repository "$repository" \
+            --output "$BUILD_DIR/publish.json" 2>&1 | tee "$BUILD_DIR/publish.log"
+          {
+            echo "### Verified GHCR publication"
+            echo '```json'
+            cat "$BUILD_DIR/publish.json"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Retain publication evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ghcr-publication-${{ github.run_id }}
+          path: |
+            ${{ env.BUILD_DIR }}/context/container/source.json
+            ${{ env.BUILD_DIR }}/sif.sha256
+            ${{ env.BUILD_DIR }}/publish.json
+            ${{ env.BUILD_DIR }}/publish.log
+          if-no-files-found: warn
