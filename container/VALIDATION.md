@@ -1,6 +1,6 @@
 # Container validation
 
-Status: **round-4 rebuilt-image acceptance PASS**, with **670 host tests passed, 0 failed/skipped**. The current image records source commit `33730da90f31edaa47a1f5c637f2b011080671c0`. Its installer, host Codex connection, selected-model GPU offload and all 12 `fungen check` rows passed. GHCR and Drive publication are pending. The round-2 record below is historical; current release details are in the round-4 section at the end.
+Status: **round-4 rebuilt-image acceptance PASS**, with **670 host tests passed, 0 failed/skipped**. The current image records source commit `33730da90f31edaa47a1f5c637f2b011080671c0`. Its installer, host Codex connection, selected-model GPU offload and all 12 `fungen check` rows passed. Both private GHCR release tags and the Google Drive replacement have matching-byte verification. The round-2 record below is historical; current release details are in the round-4 section at the end.
 
 ## Pinned payload and build
 
@@ -177,3 +177,11 @@ Initial XS acceptance driver **281317062 EXIT 1** installed the host bundle, dow
 - All build/test/acceptance batch drivers were awaited in process with `bsub -K`. The final model service remains the verified running endpoint, with the production script's native walltime limit.
 
 Release evidence: [~/sunh14_project/fungen-operator/temp_reference/codex_release_20261107/report.md](http://127.0.0.1:30548/lab/tree/sunh14_project/fungen-operator/temp_reference/codex_release_20261107/report.md). Later validation-only commits change this excluded record; the SIF retains the exact pushed image source commit above.
+
+### Round-4 distribution verification
+
+Both `oras://ghcr.io/hsun3163/fungen-operator:ollama0.40.6-codex0.155.1` and `:latest` were published through `container/publish.py`. Authenticated manifest/tag-list checks and cache-disabled native Singularity pulls passed for each tag. Both registry manifest digests are `sha256:e7ca90b67f150e388ec103021eae06a9f7bb1152c2d6b2e5375fbb678ee05747`; each pulled SIF matches SHA-256 `2ced4e06a33fdb0d0adf9b059402f2261b7a64594213ca257196552f69b84380`. The package API confirms **private** visibility after publishing.
+
+The same SIF replaced only `cosi_drive:fungen-operator/fungen-operator-ollama0.40.6-codex0.155.1.sif`. `rclone check` found **1 matching file, 0 differences**. Remote size is **3,633,692,672 bytes**, SHA-256 matches the built image, and MD5 is `015b458d85962128b9e97f1fc70454f5`.
+
+Owner steps: [make the package public in its settings](https://github.com/users/hsun3163/packages/container/fungen-operator/settings) when ready; optionally grant `hsun3163/fungen-operator` **Write** under **Manage Actions access** for future CI publication. Package visibility and repository settings were preserved throughout this release.
