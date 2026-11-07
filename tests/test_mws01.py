@@ -2,6 +2,7 @@
 
 import copy
 import gzip
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -9,13 +10,16 @@ import pytest
 
 from benchmark.mws01 import partition_checks, protected_config
 
-BIN = Path("/sc/arion/work/sunh14/conda/envs/xqtl-r-base-fsusie/bin")
+BGZIP = shutil.which("bgzip")
+TABIX = shutil.which("tabix")
 HEADER = "#chr\tstart\tend\tID\tSYN_1\tSYN_2\n"
 ROWS = ["chr1\t1\t2\tOTHER\t0\t1\n", "chr22\t10\t11\tTRAIT\t1.25\t-2.5\n"]
 
 
 @pytest.fixture
 def products(tmp_path):
+    if not (BGZIP and TABIX):
+        pytest.fail("Required host tools missing: bgzip and/or tabix. Install htslib: conda install -c conda-forge -c bioconda htslib; activate that environment and rerun .venv/bin/python -m pytest -q tests", pytrace=False)
     source = tmp_path / "input.bed.gz"
     with gzip.open(source, "wt") as stream:
         stream.write(HEADER + "".join(ROWS))
@@ -23,9 +27,9 @@ def products(tmp_path):
     output.mkdir()
     bed = output / "phenotypes.chr22.bed.gz"
     with bed.open("wb") as stream:
-        subprocess.run([str(BIN / "bgzip"), "-c"], input=(HEADER + ROWS[1]).encode(),
+        subprocess.run([BGZIP, "-c"], input=(HEADER + ROWS[1]).encode(),
                        stdout=stream, check=True)
-    subprocess.run([str(BIN / "tabix"), "-p", "bed", str(bed)], check=True)
+    subprocess.run([TABIX, "-p", "bed", str(bed)], check=True)
     (output / "phenotypes.phenotype_by_chrom_files.txt").write_text(f"#id\t#dir\n22\t{bed}\n")
     (output / "phenotypes.phenotype_by_chrom_files.region_list.txt").write_text(
         f"#chr\tstart\tend\tID\tpath\nchr22\t10\t11\tTRAIT\t{bed}\n")
@@ -34,7 +38,7 @@ def products(tmp_path):
 
 def test_mws01_grader_accepts_exact_partition(products):
     source, output, _ = products
-    checks, samples, phenotypes = partition_checks(source, output, ["chr22"], BIN / "tabix")
+    checks, samples, phenotypes = partition_checks(source, output, ["chr22"], Path(TABIX))
     assert all(checks.values())
     assert (samples, phenotypes) == (2, 1)
 
@@ -50,13 +54,13 @@ def test_mws01_grader_rejects_incomplete_or_changed_products(products, damage):
         header = HEADER if damage == "value" else HEADER.replace("SYN_1\tSYN_2", "SYN_2\tSYN_1")
         row = ROWS[1].replace("1.25", "9.99") if damage == "value" else ROWS[1]
         with bed.open("wb") as stream:
-            subprocess.run([str(BIN / "bgzip"), "-c"], input=(header + row).encode(), stdout=stream, check=True)
-        subprocess.run([str(BIN / "tabix"), "-f", "-p", "bed", str(bed)], check=True)
+            subprocess.run([BGZIP, "-c"], input=(header + row).encode(), stdout=stream, check=True)
+        subprocess.run([TABIX, "-f", "-p", "bed", str(bed)], check=True)
     else:
         path = output / "phenotypes.phenotype_by_chrom_files.txt"
         text = path.read_text()
         path.write_text(text.replace("22\t", "1\t") if damage == "manifest" else text + f"22\t{bed}\n")
-    checks, _, _ = partition_checks(source, output, ["chr22"], BIN / "tabix")
+    checks, _, _ = partition_checks(source, output, ["chr22"], Path(TABIX))
     assert not all(checks.values())
 
 
@@ -82,3 +86,12 @@ def test_saved_trial_retains_original_sample_contract(tmp_path, monkeypatch):
     assert mws01.inputs(mws01.task(old)).name == "behavioral_fixture"
     assert mws01.task(tmp_path / "new_trial")["declared_outcome"]["samples"] == 500
     assert mws01.inputs(mws01.task()).name == "fixture_500"
+
+
+def test_missing_required_htslib_fails_with_install_command(tmp_path,monkeypatch):
+    import sys
+    module=sys.modules[__name__]
+    monkeypatch.setattr(module,'BGZIP',None)
+    monkeypatch.setattr(module,'TABIX',None)
+    with pytest.raises(pytest.fail.Exception,match='conda install -c conda-forge -c bioconda htslib'):
+        products.__wrapped__(tmp_path)

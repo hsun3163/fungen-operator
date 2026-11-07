@@ -6,8 +6,6 @@
 !src/**
 !skills/
 !skills/**
-!tests/
-!tests/**
 !benchmark/
 !benchmark/mws01.py
 !benchmark/tasks/
@@ -23,3 +21,6 @@ container/*.sif
 container/*.tar
 container/*.log
 container/VALIDATION.md
+
+container/conftest.py
+container/test_*.py

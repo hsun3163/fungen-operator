@@ -103,7 +103,9 @@ class Deployment(Model):
     conda_sh: PathSlot
     conda_env: PathSlot
     run_root: PathSlot
-    backend: Literal["lsf", "fixture"] = "lsf"
+    backend: Literal["lsf", "slurm", "sge", "local", "fixture"] = "lsf"
+    scheduler_account: Annotated[str | None, Field(pattern=r"^[A-Za-z0-9_.-]*$")] = None
+    scheduler_queue: Annotated[str | None, Field(pattern=r"^[A-Za-z0-9_.-]*$")] = None
     action_provider: str | None = None
     provider_options: dict[str, JsonValue] = Field(default_factory=dict)
     _deployment_file: str | None = PrivateAttr(default=None)
@@ -176,6 +178,13 @@ class Deployment(Model):
             for target in args.targets:
                 if target.startswith("/") and not inside(target, args.workdir):
                     raise ValueError("absolute file targets must belong to workdir")
+
+    def runtime_bindings(self, log_stem):
+        fields={key:getattr(self,key) for key in ('snakefile','profile_path','conda_sh','conda_env')}
+        fields['log_stem']=log_stem
+        if self.backend!='fixture' and (self.backend!='lsf' or self.scheduler_account is not None or self.scheduler_queue is not None):
+            fields.update(scheduler=self.backend,account=self.scheduler_account or '',queue=self.scheduler_queue or '')
+        return fields
 
     def defaults(self) -> dict:
         cfg = yaml.safe_load(Path(self.default_config).read_text())
@@ -294,7 +303,8 @@ class Deployment(Model):
                 "source_hashes": fingerprints, "snakefile": self.snakefile,
                 "profile": self.profile_path, "runtime": self.conda_env,
                 "runtime_activation_sha256": hashlib.sha256(Path(self.conda_sh).read_bytes()).hexdigest(),
-                "backend": self.backend, "mapping_parameters": copy.deepcopy(self.mapping_parameters),
+                "backend": self.backend, "scheduler_account": self.scheduler_account,
+                "scheduler_queue": self.scheduler_queue, "mapping_parameters": copy.deepcopy(self.mapping_parameters),
                 "operator_python": self.operator_python,
                 **({"provider_options": copy.deepcopy(self.provider_options),
                     "provider_sources": list(provider_sources)} if self.action_provider else {})}
@@ -369,10 +379,15 @@ def render(action: str, slots: dict) -> str:
                 "    with os.fdopen(fd, 'w') as stream:\n        stream.write(content)\n"
                 "    os.replace(temporary, path)\n"
                 "print(f'Configuration materialized: {path}')\n")
-    if set(b) != {"snakefile", "profile_path", "conda_sh", "conda_env", "log_stem"}:
+    expected={"snakefile", "profile_path", "conda_sh", "conda_env", "log_stem"}
+    if "scheduler" in b:expected|={"scheduler","account","queue"}
+    if set(b) != expected:
         raise ValueError("invalid runtime bindings")
-    for value in b.values():
-        path_slot(value)
+    for key in ("snakefile","profile_path","conda_sh","conda_env","log_stem"):
+        path_slot(b[key])
+    if "scheduler" in b and (b["scheduler"] not in ("lsf","slurm","sge","local") or
+            any(not re.fullmatch(r"[A-Za-z0-9_.-]*",b[key]) for key in ("account","queue"))):
+        raise ValueError("invalid native scheduler bindings")
     q = shlex.quote
     wait = " -K" if action == "check_readiness" else ""
     hours, minutes = divmod(args.walltime_minutes, 60)
@@ -391,14 +406,62 @@ def render(action: str, slots: dict) -> str:
   {' '.join(q(t) for t in args.targets)}'''
     preflight = (workflow_command.format(tail=" --dry-run") + "\n"
                  if isinstance(args, InitiateRun) and args.defer_readiness else "")
+    if b.get('scheduler') in ('lsf','slurm','sge','local'):
+        body=f"""set -eo pipefail
+source {q(b['conda_sh'])}
+conda activate {q(b['conda_env'])}
+export PATH={q(b['conda_env']+'/bin')}:"$PATH"
+hash -r
+export OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1
+cd {q(args.workdir)}
+{preflight}{workflow_command.format(tail=tail)}
+"""
+        scheduler=b['scheduler']
+        if scheduler=='local':
+            if isinstance(args,InitiateRun) and args.depends_on:
+                raise ValueError('Local execution has no scheduler dependencies')
+            return '%%bash\n'+body
+        from .cluster import controller_tracking
+        body='set -eo pipefail\n'+controller_tracking(scheduler,b['profile_path'])+body.removeprefix('set -eo pipefail\n')
+        if scheduler=='lsf':
+            submit='bsub'+wait
+            directives=(f'#BSUB -J {args.job_name}\n'+
+                        (f'#BSUB -P {b["account"]}\n' if b['account'] else '')+
+                        (f'#BSUB -q {b["queue"]}\n' if b['queue'] else '')+
+                        f'#BSUB -W {hours:02d}:{minutes:02d}\n#BSUB -n {args.controller_cores}\n'+
+                        f'#BSUB -R "span[hosts=1] rusage[mem={args.memory_gb}GB]"\n#BSUB -M {args.memory_gb}GB{dependency}\n'+
+                        f'#BSUB -oo {b["log_stem"]}.%J.out\n#BSUB -eo {b["log_stem"]}.%J.err\n')
+        elif scheduler=='sge':
+            submit='qsub -terse'+(' -sync y' if action=='check_readiness' else '')
+            directives=(f'#$ -N {args.job_name}\n#$ -S /bin/bash\n'+
+                        (f'#$ -P {b["account"]}\n' if b['account'] else '')+
+                        (f'#$ -q {b["queue"]}\n' if b['queue'] else '')+
+                        (f'#$ -pe smp {args.controller_cores}\n' if args.controller_cores>1 else '')+
+                        f'#$ -l h_vmem={(args.memory_gb*1024+args.controller_cores-1)//args.controller_cores}M,h_rt={hours}:{minutes:02}:00\n'+
+                        f'#$ -o {b["log_stem"]}.$JOB_ID.out\n#$ -e {b["log_stem"]}.$JOB_ID.err\n')
+            if isinstance(args,InitiateRun) and args.depends_on:
+                # SGE hold_jid only waits for completion, not predecessor success.
+                raise ValueError('SGE success dependencies are unsupported; verify predecessors before submission')
+        else:
+            submit='sbatch --parsable'+(' --wait' if action=='check_readiness' else '')
+            directives=(f'#SBATCH --job-name={args.job_name}\n#SBATCH --cpus-per-task={args.controller_cores}\n'+
+                        f'#SBATCH --mem={args.memory_gb}G\n#SBATCH --time={hours}:{minutes:02}:00\n'+
+                        (f'#SBATCH --account={b["account"]}\n' if b['account'] else '')+
+                        (f'#SBATCH --partition={b["queue"]}\n' if b['queue'] else '')+
+                        f'#SBATCH --output={b["log_stem"]}.%j.out\n#SBATCH --error={b["log_stem"]}.%j.err\n')
+            if isinstance(args,InitiateRun) and args.depends_on:
+                directives+='#SBATCH --dependency=afterok:'+':'.join(args.depends_on)+'\n'
+        return ('%%bash\nset -eo pipefail\nmkdir -p '+q(args.log_dir)+' '+q(args.workdir)+
+                "\n"+submit+" <<'FUNGEN_JOB'\n#!/bin/bash\n"+directives+body+'FUNGEN_JOB\n')
+    project=b.get('account',args.project);queue=b.get('queue',args.queue)
+    account_directive=f'#BSUB -P {project}\n' if project else ''
+    queue_directive=f'#BSUB -q {queue}\n' if queue else ''
     return f'''%%bash
 set -eo pipefail
 mkdir -p {q(args.log_dir)} {q(args.workdir)}
 bsub{wait} <<'LSF'
 #BSUB -J {args.job_name}
-#BSUB -P {args.project}
-#BSUB -q {args.queue}
-#BSUB -W {hours:02d}:{minutes:02d}
+{account_directive}{queue_directive}#BSUB -W {hours:02d}:{minutes:02d}
 #BSUB -n {args.controller_cores}
 #BSUB -R "span[hosts=1] rusage[mem={args.memory_gb}GB]"
 #BSUB -M {args.memory_gb}GB{dependency}

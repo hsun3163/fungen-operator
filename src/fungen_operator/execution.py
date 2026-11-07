@@ -42,6 +42,14 @@ class Executor:
     def scheduler(self, job_id):
         if not self.can_schedule:
             return {"status": "host_approval_required", "job_id": job_id}
+        if self.deployment.backend in ('slurm','sge'):
+            from .cluster import job_status
+            try:
+                status=job_status(self.deployment.backend,str(job_id))
+                return {'job_id':str(job_id),'status':{'success':'DONE','failed':'EXIT','running':'RUN'}[status],
+                        'exit_code':0 if status=='success' else None}
+            except (OSError,ValueError,RuntimeError,subprocess.SubprocessError) as exc:
+                return {'job_id':str(job_id),'status':'UNKNOWN','diagnostic':str(exc)}
         # Fixed read-only scheduler command; unknown never means finished.
         proc = subprocess.run(["bjobs", "-json", "-o", "jobid stat exit_code", str(int(job_id))],
                               env=self.environment(), text=True, capture_output=True)
@@ -103,6 +111,8 @@ class Executor:
             for key in ("snakefile", "profile_path", "conda_sh", "conda_env"):
                 if b[key] != getattr(self.deployment, key):
                     raise ValueError(f"recorded {key} differs from the registered deployment")
+            if dict(b)!=self.deployment.runtime_bindings(b.log_stem):
+                raise ValueError("runtime scheduler bindings differ from the registered deployment")
             if not inside(b.log_stem, args.log_dir):
                 raise ValueError("log stem must belong to the action log directory")
         if meta.action != "prepare_config" and not self.can_schedule:
@@ -143,7 +153,16 @@ class Executor:
             return {**result, "status": "failed" if error else "controlled",
                     "command": literal[0], "commands": literal,
                     "job_ids": list(meta.slots.bindings.job_ids), "receipt": text}
-        receipt = re.search(r"Job <(\d+)> is submitted", text)
+        if self.deployment.backend=='local':
+            if error:return {**result,'status':'failed','logs':{}}
+            if meta.action=='check_readiness':
+                if re.search(r'(?m)^Nothing to be done(?:\.|\s|$)',text):status='nothing_to_do'
+                elif re.search(r'(?m)^(?:This was a dry-run(?:\s|$)|Job stats:\s*$)',text):status='ready'
+                else:status='unknown'
+                return {**result,'status':status,'logs':{'stdout':text}}
+            return {**result,'status':'completed','logs':{'stdout':text}}
+        receipt = (re.search(r"Job <(\d+)> is submitted", text) if self.deployment.backend in ('lsf','fixture')
+                   else re.search(r"(?m)^(\d+)(?:;[^\s]+)?\s*$",text))
         if not receipt:
             # Nonzero bsub without a receipt can still be ambiguous. Never retry blindly.
             return {**result, "status": "unknown", "diagnostic": "No retained scheduler receipt"}

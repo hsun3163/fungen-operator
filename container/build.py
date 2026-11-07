@@ -18,7 +18,7 @@ import tarfile
 
 ROOT = Path(__file__).resolve().parents[1]
 TOP = {"pyproject.toml", "README.md", "MANIFESTO.md"}
-PREFIX = ("src/", "skills/", "tests/", "container/")
+PREFIX = ("src/", "skills/", "container/")
 EXTRA = {"docs/operator_prototype.md", "benchmark/mws01.py", "benchmark/__init__.py",
          "benchmark/tasks/regression/MWS-01.yaml"}
 
@@ -28,49 +28,66 @@ def admitted(name):
     return (bool(name) and (name in TOP or name in EXTRA or name.startswith(PREFIX))
             and not any(part in {"__pycache__", ".pytest_cache", "evidence"} for part in path.parts)
             and (path.suffix in {".py", ".md", ".toml", ".yaml", ".yml", ".json", ".patch", ".lock", ".R", ".sh", ".lsf", ".def", ".dockerignore"} or path.name in {"Dockerfile", ".gitignore"})
-            and name!="container/VALIDATION.md")
+            and name!="container/VALIDATION.md"
+            and not (name.startswith("container/") and (path.name=="conftest.py" or path.name.startswith("test_"))))
 
 
-def context(destination, refresh=False):
-    if destination.exists() and not refresh:
-        raise ValueError("Use a new context directory to avoid stale/private files.")
-    destination.mkdir(parents=True, exist_ok=refresh)
-    files = subprocess.check_output(["git", "ls-files", "-z"], cwd=ROOT).decode().split("\0")
-    files += subprocess.check_output(["git", "ls-files", "--others", "--exclude-standard", "-z"], cwd=ROOT).decode().split("\0")
-    # Include the container sources during development before the first commit.
-    files += [str(p.relative_to(ROOT)) for p in (ROOT / "container").rglob("*") if p.is_file()]
+def git(*args):
+    return subprocess.check_output(["git", *args], cwd=ROOT).decode()
+
+
+def committed_files(commit):
+    """Read one captured Git tree and refuse differing admitted worktree inputs."""
+    status=git('status','--porcelain=v1','-z','--untracked-files=all','--no-renames').split('\0')
+    dirty=sorted(entry for entry in status if entry and admitted(entry[3:]))
+    if dirty:raise ValueError('Build context must match the commit HEAD. Commit or stash these admitted paths:\n'+'\n'.join('  '+entry for entry in dirty))
+    entries={}
+    for item in git('ls-tree','-r','-z','--full-tree',commit).split('\0'):
+        if not item:continue
+        info,name=item.split('\t',1);mode,kind,oid=info.split()
+        if not admitted(name):continue
+        if kind!='blob' or mode not in ('100644','100755'):
+            raise ValueError('Build allowlist contains a symlink or unsupported Git object: '+name)
+        entries[name]=(mode,oid)
+    raw=subprocess.check_output(['git','cat-file','--batch'],cwd=ROOT,
+                                input=''.join(oid+'\n' for _,oid in entries.values()).encode())
+    stream=io.BytesIO(raw);files={}
+    for name,(mode,oid) in entries.items():
+        header=stream.readline().decode().split()
+        if len(header)!=3 or header[:2]!=[oid,'blob']:raise ValueError('Unexpected Git blob response for '+name)
+        data=stream.read(int(header[2]))
+        if stream.read(1)!=b'\n':raise ValueError('Truncated Git blob response for '+name)
+        source=ROOT/name
+        if source.is_symlink():raise ValueError('Build allowlist contains a symlink: '+name)
+        try:matches=source.read_bytes()==data and bool(source.stat().st_mode&0o111)==(mode=='100755')
+        except OSError:matches=False
+        if not matches:raise ValueError('Build context must match the commit HEAD: '+name)
+        files[name]=(mode,oid,data)
+    return files
+
+
+def context(destination,refresh=False):
+    if destination.exists() and not refresh:raise ValueError('Use a new context directory to avoid stale/private files.')
+    commit=git('rev-parse','HEAD').strip()
+    files=committed_files(commit)
+    destination.mkdir(parents=True,exist_ok=refresh)
     if refresh:
-        expected = {name for name in files if admitted(name)} | {"container/source.json"}
-        for old in destination.rglob("*"):
+        expected=set(files)|{'container/source.json'}
+        for old in destination.rglob('*'):
             if old.is_symlink() or (old.is_file() and str(old.relative_to(destination)) not in expected):
-                raise ValueError(f"Unexpected existing context member: {old.name}")
-    count = 0
-    for name in sorted(set(files)):
-        path = Path(name)
-        if not admitted(name):
-            continue
-        source = ROOT / path
-        if source.is_symlink():
-            raise ValueError(f"Build allowlist contains a symlink: {name}")
-        data = source.read_bytes()
-        try:
-            text = data.decode()
-        except UnicodeDecodeError:
-            raise ValueError(f"Unexpected binary in source allowlist: {name}")
-        # Historical skill snapshots contain site paths. Preserve the procedures
-        # in the portable bundle with /workspace as their deployment placeholder.
-        text = re.sub(r"/(?:sc/arion/(?:projects/load/users|work)|hpc/users)/sunh14", "/workspace", text)
-        text = text.replace("/sc/arion/projects/load/scripts/", "/workspace/site-tools/")
-        target = destination / path
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(text)
-        target.chmod(source.stat().st_mode & 0o777)
-        count += 1
-    identity={"commit": subprocess.check_output(["git", "rev-parse", "HEAD"],cwd=ROOT,text=True).strip(),
-              "files": {str(p.relative_to(destination)): hashlib.sha256(p.read_bytes()).hexdigest()
-                        for p in sorted(destination.rglob("*")) if p.is_file() and p != destination/"container/source.json"}}
-    (destination/"container/source.json").write_text(json.dumps(identity,indent=2)+"\n")
-    print(f"Prepared {count} allowlisted source files in {destination}")
+                raise ValueError(f'Unexpected existing context member: {old.name}')
+    hashes={}
+    for name,(mode,oid,data) in files.items():
+        try:text=data.decode()
+        except UnicodeDecodeError:raise ValueError('Unexpected binary in source allowlist: '+name)
+        text=re.sub(r'/(?:sc/arion/(?:projects/load/users|work)|hpc/users)/sunh14','/workspace',text)
+        text=text.replace('/sc/arion/projects/load/scripts/','/workspace/site-tools/')
+        target=destination/name;target.parent.mkdir(parents=True,exist_ok=True)
+        target.write_text(text);target.chmod(int(mode,8)&0o777)
+        hashes[name]=hashlib.sha256(text.encode()).hexdigest()
+    identity={'commit':commit,'files':hashes,'source_blobs':{name:oid for name,(_,oid,_) in files.items()}}
+    (destination/'container/source.json').write_text(json.dumps(identity,indent=2)+'\n')
+    print(f'Prepared {len(files)} allowlisted source files in {destination}')
 
 
 def add_json(archive, name, data):
@@ -128,7 +145,10 @@ def main():
     p.add_argument("output", type=Path)
     args = parser.parse_args()
     if args.command == "context":
-        context(args.destination.resolve(), args.refresh)
+        try:
+            context(args.destination.resolve(), args.refresh)
+        except ValueError as error:
+            parser.exit(1, f"build.py context: {error}\n")
     else:
         archive_rootfs(args.rootfs.resolve(), args.output.resolve())
 

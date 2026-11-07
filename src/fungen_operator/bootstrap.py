@@ -1,6 +1,7 @@
-"""Install on the host; serve Laguna in Apptainer; run host Codex."""
+"""Install on the host; serve Laguna in Apptainer; run host Codex; switch backend local/openai."""
 from __future__ import annotations
 import argparse
+from dataclasses import dataclass
 import hashlib
 import errno
 import json
@@ -10,6 +11,7 @@ import re
 import shlex
 import shutil
 import socket
+import stat
 import subprocess
 import sys
 import tempfile
@@ -24,11 +26,66 @@ FITS = {'laguna-xs-2.1:q4_K_M':'one 24–48 GB GPU','laguna-xs-2.1:q8_0':'one 48
         'laguna-s-2.1:q8_0':'one 141 GB GPU (tight) or two 80 GB GPUs'}
 MIN_CODEX = (0, 155, 1)
 BUNDLE = Path('/opt/fungen')
+# Written by the local branch of setup; the first five are required to serve.
+LOCAL_KEYS = ('model', 'models', 'gpus', 'context', 'port', 'source_models', 'runtime_models', 'serve_model', 'local_codex')
 OFFLINE = 'No network: download on a login node or another machine, then rerun setup --download no --models-dir FOLDER.'
 
 
 def config_path():
     return Path(os.environ.get('XDG_CONFIG_HOME', str(Path.home()/'.config')))/'fungen/config.toml'
+
+
+def mount_info(path):
+    """Identify the deepest mount, preserving its source and filesystem root."""
+    path=os.path.realpath(path);matches=[]
+    try:
+        lines=Path('/proc/self/mountinfo').read_text().splitlines()
+        for line in lines:
+            fields,sep,tail=line.partition(' - ')
+            fields=fields.split();tail=tail.split()
+            if not sep or len(fields)<6 or len(tail)<3:
+                return None
+            unescape=lambda x:re.sub(r'\\([0-7]{3})',lambda m:chr(int(m.group(1),8)),x)
+            point=unescape(fields[4])
+            if path==point or path.startswith(point.rstrip('/')+'/'):
+                matches.append(dict(point=point,root=unescape(fields[3]),fstype=tail[0],source=unescape(tail[1]),device=fields[2]))
+    except (OSError,UnicodeError):
+        return None
+    if not matches:return None
+    deepest=max(len(x['point']) for x in matches)
+    matches=[x for x in matches if len(x['point'])==deepest]
+    return matches[0] if len(matches)==1 else None
+
+
+def mount_type(path):
+    info=mount_info(path)
+    return info['fstype'] if info else None
+
+
+def host_disk_source(info):
+    """Positive kernel evidence of a physical host block-device source.
+
+    Private loop/dm/ram devices and unavailable device identities are unverified.
+    A subdirectory mount root alone supplies no storage-origin evidence.
+    """
+    try:
+        source=Path(info['source']).stat()
+        device=f'{os.major(source.st_rdev)}:{os.minor(source.st_rdev)}'
+        kernel=Path('/sys/dev/block')/device
+        return (stat.S_ISBLK(source.st_mode) and device==info['device'] and kernel.exists()
+                and '/virtual/' not in str(kernel.resolve()))
+    except (OSError,ValueError,KeyError):
+        return False
+
+
+def host_visible(path):
+    info=mount_info(path)
+    if not info or info['point']=='/' or info['source'] in ('none','overlay','squashfs','tmpfs','ramfs'):
+        return False
+    if info['fstype'] in ('tmpfs','overlay','squashfs','ramfs'):
+        return False
+    shared=info['fstype'] in ('nfs','nfs4','gpfs','lustre','beegfs')
+    return shared or (info['root']!='/' and host_disk_source(info))
 
 
 def read_config():
@@ -79,6 +136,8 @@ def scheduler():
         return 'lsf'
     if shutil.which('sbatch'):
         return 'slurm'
+    if shutil.which('qsub') and (os.environ.get('SGE_ROOT') or shutil.which('qconf')):
+        return 'sge'
     return 'local'
 
 
@@ -290,28 +349,64 @@ def render_serve(config):
         directives = (f"#SBATCH --job-name=fungen-serve\n#SBATCH --gres=gpu:{config['gpus']}\n"
                       f"#SBATCH --cpus-per-task=4\n#SBATCH --mem=64G\n#SBATCH --time=12:00:00\n"
                       f"#SBATCH --output={shlex.quote(str(root/'serve.%j.log'))}\n")
+    elif sched == 'sge':
+        directives = (f"#$ -N fungen-serve\n#$ -S /bin/bash\n"+(f"#$ -P {config['account']}\n" if config.get('account') else '')+"#$ -pe smp 4\n"
+                      f"#$ -l h_rt=12:00:00,h_vmem=16G,gpu={config['gpus']}\n#$ -j y\n"
+                      f"#$ -o {shlex.quote(str(root))}/serve.$JOB_ID.log\n")
     command = runtime(config, nv=True) + ['serve', '--models-dir', '/models', '--model', config.get('serve_model',config['model']),
                '--port', str(config['port']), '--state', str(state), '--context', str(config['context'])]
     return '#!/bin/bash\n'+directives+'set -euo pipefail\nexec '+shlex.join(command)+'\n'
 
 
+def gpu_driver():
+    return any(Path('/proc/driver/nvidia/gpus').glob('*/information'))
+
+
 def setup(args):
+    image = args.image or os.environ.get('APPTAINER_CONTAINER') or os.environ.get('SINGULARITY_CONTAINER')
+    launch = args.runtime or ('apptainer' if os.environ.get('APPTAINER_CONTAINER') or not os.environ.get('SINGULARITY_CONTAINER') else 'singularity')
+    # Without the host home bound, setup would write config and tools into a container-only folder.
+    if BUNDLE.is_dir():
+        destinations=[Path.home(),config_path().parent]
+        unknown=[p for p in destinations if not host_visible(p)]
+        if not Path.home().is_dir() or unknown:
+            command=[launch,'run','--home',f'{Path.home()}:{Path.home()}']
+            for folder in unknown:
+                if not folder.is_relative_to(Path.home()):command+=['--bind',f'{folder}:{folder}']
+            command+=[image or 'fungen.sif']
+            raise ValueError('Host home/config mount identity is unknown or private. Run: '+shlex.join(command))
     previous = read_config()
     interactive = not args.non_interactive
-    def answer(name, prompt, default, choices=None):
+    def answer(name, prompt, default, choices=None, saved=True):
         value = getattr(args, name)
-        return value if value is not None else (ask(prompt, previous.get(name, default), choices) if interactive else previous.get(name, default))
+        default = previous.get(name, default) if saved else default
+        return value if value is not None else (ask(prompt, default, choices) if interactive else default)
     install = Path(answer('install', 'Install folder', str(Path.home()/'.fungen'))).expanduser().resolve()
-    sched = answer('scheduler', 'Scheduler (lsf/slurm/local)', scheduler(), ['lsf','slurm','local'])
+    if BUNDLE.is_dir() and not host_visible(install):
+        raise ValueError(f'Install folder {install} has unknown or private mount identity. Create the folder on the host, then run: '+shlex.join([launch,'run','--home',f'{Path.home()}:{Path.home()}','--bind',f'{install}:{install}',image or 'fungen.sif','setup','--install',str(install)]))
+    detected = scheduler()
+    # A missing scheduler client is unavailable detection, not an explicit local choice.
+    if args.scheduler is None and detected=='local':
+        print('No scheduler client detected; '+('using saved scheduler '+previous['scheduler'] if previous.get('scheduler') else 'defaulting to local')+'. Select explicitly with --scheduler lsf/slurm/sge/local.')
+    sched = answer('scheduler', 'Scheduler (lsf/slurm/sge/local)', detected if detected != 'local' else previous.get('scheduler', 'local'), ['lsf','slurm','sge','local'], saved=False)
+    # The account/project belongs to its scheduler: LSF defaults to acc_LOAD, others to none.
+    account = 'acc_LOAD' if sched == 'lsf' else ''
+    account = previous.get('account', account) if previous.get('scheduler') == sched else account
+    if sched == 'sge':
+        print('SGE project: empty omits -P and requests the site default (not verified here). Enter - to clear a saved project; supply --account PROJECT if your site requires one.')
+        account = answer('account', 'SGE project (-P)', account, saved=False)
+        if account=='-':account=''
+    elif args.account is not None:
+        account=args.account
     backend = answer('backend', 'Model backend (local/openai)', 'local', ['local','openai'])
     memory = gpu_memory()
-    host_gpu=bool(memory) or any(Path('/proc/driver/nvidia/gpus').glob('*/information'))
+    host_gpu=bool(memory) or gpu_driver()
     if backend == 'local' and sched == 'local' and not host_gpu:
         raise ValueError('No GPU visible. Use setup --backend openai, or run on a GPU node with apptainer run --nv fungen.sif.')
     config = {'install': str(install), 'scheduler': sched, 'backend': backend,
-              'image': str(Path(args.image or os.environ.get('APPTAINER_CONTAINER') or os.environ.get('SINGULARITY_CONTAINER') or previous.get('image', '')).resolve()),
+              'image': str(Path(image or previous.get('image', '')).resolve()),
               'runtime': args.runtime or shutil.which('apptainer') or shutil.which('singularity') or previous.get('runtime', 'singularity' if os.environ.get('SINGULARITY_CONTAINER') else 'apptainer'),
-              'account': args.account or previous.get('account', 'acc_LOAD'),
+              'account': account,
               'gpu_queue': args.gpu_queue or previous.get('gpu_queue', 'gpuexpress')}
     if backend == 'local':
         print('Models (download):\n'+ '\n'.join(f'  {m}: {s} GB; {FITS[m]}' for m,s in MODELS.items()))
@@ -326,7 +421,18 @@ def setup(args):
             # A staged advanced preset is usable without modifying its read-only store.
             raise ValueError('Model is incomplete or absent. Rerun with --download yes to resume, or select the exact installed tag.')
     config['codex'] = install_host(install)
+    if backend=='local':
+        # The bundled model catalog is versioned with this exact local client.
+        for name in ('codex','bwrap'):
+            source=BUNDLE/'bin'/name
+            if source.is_file():atomic_copy(source,install/'bin'/name)
+        config['local_codex']=str(install/'bin/codex')
+    if backend == 'openai':
+        config.update({k: previous[k] for k in LOCAL_KEYS if k in previous})
     if backend == 'local':
+        # Codex model metadata for the Laguna tags; fungen codex passes it as model_catalog_json.
+        (install/'codex').mkdir(parents=True, exist_ok=True)
+        atomic_copy(Path(__file__).with_name('resources')/'codex-models.json', install/'codex/models.json')
         if download == 'yes' and not model_present(config['models'], model):
             download_model(config)
         prepare_runtime_store(config)
@@ -351,6 +457,8 @@ def setup(args):
         print('Or set OPENAI_API_KEY in your shell. Credentials stay in Codex home, never the working folder or image.')
     check(config, online=not args.offline_check)
     print('Installed. Run on the host:\n  '+str(install/'bin/fungen')+' serve\n  '+str(install/'bin/fungen')+' codex')
+    if backend == 'local' and not host_gpu:
+        print('No GPU on this host: GPU offload remains unverified until fungen serve starts on the GPU job and fungen check passes. CPU-only model readiness is refused.')
 
 
 def download_model(config):
@@ -401,7 +509,7 @@ def available_port(port):
 
 def inside_serve(args):
     if not gpu_memory():
-        raise ValueError('GPU unavailable. Submit fungen serve on a GPU queue; use apptainer run --nv fungen.sif serve on a GPU node.')
+        raise ValueError('GPU unavailable: refusing CPU-only inference. Run fungen serve on the host to submit the GPU job; on a GPU node use apptainer run --nv fungen.sif serve.')
     port = available_port(args.port)
     env = dict(os.environ, OLLAMA_HOST=f'0.0.0.0:{port}', OLLAMA_MODELS=args.models_dir, OLLAMA_NO_CLOUD='1',
                OLLAMA_CONTEXT_LENGTH=str(args.context), OLLAMA_FLASH_ATTENTION='1', OLLAMA_KEEP_ALIVE='-1', OLLAMA_NOPRUNE='1',
@@ -424,10 +532,10 @@ def inside_serve(args):
                     'think':False,'options':{'num_ctx':args.context,'num_predict':24}}, timeout=1800)
         if not answer.get('response','').strip():
             raise RuntimeError('Model produced no answer; inspect GPU memory and the serve log.')
-        if not any(m.get('size_vram',0)>0 for m in api(url,'/api/ps')['models']):
-            raise RuntimeError('GPU offload unavailable. Use --nv on a GPU node and inspect the host driver/CUDA compatibility in the serve log.')
+        if not any(m.get('name')==model and m.get('size_vram',0)>0 for m in api(url,'/api/ps')['models']):
+            raise RuntimeError('GPU offload unavailable for the selected model; refusing CPU-only model readiness. Run the server as a GPU job with --nv (fungen serve does both) and check the host NVIDIA driver/CUDA compatibility in this log.')
         state = {'endpoint':f'http://{socket.getfqdn()}:{port}','node':socket.getfqdn(),'port':port,
-                 'model':model,'job_id':os.environ.get('LSB_JOBID',os.environ.get('SLURM_JOB_ID','')),
+                 'model':model,'job_id':os.environ.get('LSB_JOBID',os.environ.get('SLURM_JOB_ID',os.environ.get('JOB_ID',''))),
                  'pid':process.pid, 'ready':True}
         Path(args.state).write_text(json.dumps(state,indent=2)+'\n')
         print('FUNGEN_READY '+json.dumps(state),flush=True)
@@ -502,48 +610,241 @@ def inside_download(args):
 
 
 def state(config):
+    return runtime_status(config)[1]
+
+
+def server_request(config):
+    """Validate current receipts and the historical LSF-only receipt schema."""
+    path=Path(config['install'])/'server-request.json'
+    saved=json.loads(path.read_text())
+    if not isinstance(saved,dict):raise ValueError('Invalid server receipt; inspect server-request.json and the native job before retrying.')
+    if set(saved)=={'job_id'}:
+        if config['scheduler']!='lsf':
+            raise ValueError('Legacy server receipt belongs to LSF. Inspect bjobs/bacct for job '+str(saved['job_id'])+' and restore --scheduler lsf before reusing this launch.')
+        saved={**saved,'scheduler':'lsf'}
+    sched=saved.get('scheduler')
+    if sched!=config['scheduler']:raise ValueError('Receipt scheduler differs from configured scheduler; inspect the recorded native job before retrying.')
+    key='pid' if sched=='local' else 'job_id'
+    value=str(saved.get(key,''))
+    if sched not in ('lsf','sge','slurm','local') or not value.isdecimal() or int(value)<=0:
+        raise ValueError('Invalid server receipt identity; inspect the recorded native job before retrying.')
+    if sched=='local' and ('process_start' in saved or 'boot_id' in saved):
+        if not str(saved.get('process_start','')).isdecimal() or not saved.get('boot_id'):
+            raise ValueError('Local process birth identity is incomplete; inspect the recorded PID before retrying.')
+    return saved
+
+
+@dataclass(frozen=True)
+class RuntimeObservation:
+    ready: bool | None
+    info: dict
+    detail: str
+    launch: str | None
+
+
+def local_process_identity(pid):
+    """Return a live process birth identity, or None for a positively ended PID."""
     try:
-        info = json.loads((Path(config['install'])/'server.json').read_text())
-        if info['model'] == config.get('serve_model',config['model']) and any(m['name']==info['model'] for m in api(info['endpoint'])['models']):
-            return info
-    except (OSError, ValueError, KeyError, RuntimeError):
-        pass
-    return {}
+        os.kill(int(pid),0)
+        fields=Path('/proc/'+str(int(pid))+'/stat').read_text().rsplit(')',1)[1].split()
+    except (ProcessLookupError,FileNotFoundError):return None
+    if len(fields)<20:raise ValueError('Local process identity is incomplete')
+    if fields[0] in ('Z','X'):return None
+    return {'process_start':fields[19],'boot_id':Path('/proc/sys/kernel/random/boot_id').read_text().strip()}
+
+
+def runtime_observation(config):
+    root=Path(config['install']);request=root/'server-request.json';state_path=root/'server.json'
+    saved=None;launch=None
+    if request.exists():
+        try:
+            saved=server_request(config)
+            if saved['scheduler']=='local':
+                identity=local_process_identity(saved['pid'])
+                if identity is None or ('process_start' in saved and any(saved[k]!=identity[k] for k in ('process_start','boot_id'))):
+                    launch='not_running'
+                else:launch='running'
+            else:
+                from .cluster import job_status
+                launch=job_status(saved['scheduler'],str(saved['job_id']))
+        except (OSError,ValueError,KeyError,TypeError,RuntimeError,subprocess.SubprocessError) as exc:
+            return RuntimeObservation(False,{},'Launch status retrieval failed: '+str(exc),'unknown')
+        if launch!='running':
+            return RuntimeObservation(False,{},'Recorded server launch is not running ('+launch+'); inspect its job log.',launch)
+    if not state_path.exists():
+        return RuntimeObservation(None,{},'Recorded launch is pending readiness.' if saved else 'Server has not been started.',launch)
+    try:
+        info=json.loads(state_path.read_text());model=config.get('serve_model',config['model'])
+        if info['model']!=model or not info['ready']:raise ValueError('server state does not match selected model/readiness')
+        if saved and (state_path.stat().st_mtime_ns<request.stat().st_mtime_ns or str(info.get('job_id',''))!=str(saved.get('job_id',''))):
+            return RuntimeObservation(None,{},'Current launch has not recorded readiness; previous server state is stale.',launch)
+        models=api(info['endpoint'])['models']
+        if not any(m['name']==model for m in models):raise ValueError('selected model is absent from server')
+        return RuntimeObservation(True,info,'',launch)
+    except (OSError,ValueError,KeyError,TypeError,RuntimeError) as exc:
+        return RuntimeObservation(False,{},'Recorded server is unreachable or invalid: '+str(exc),launch)
+
+
+def runtime_status(config):
+    observed=runtime_observation(config)
+    return observed.ready,observed.info,observed.detail
 
 
 def serve(config):
-    if config['backend'] == 'openai':
-        print('OpenAI backend: run fungen codex. No local model server is needed.')
+    if config['backend']=='openai':
+        print('OpenAI backend: run fungen codex. No local model server is needed. Switch with: fungen backend local')
         return
-    if state(config):
-        print('Server ready: '+state(config)['endpoint'])
-        return
-    request=Path(config['install'])/'server-request.json'
-    if request.exists() and config['scheduler']=='lsf':
-        saved=json.loads(request.read_text())
-        r=subprocess.run(['bjobs','-noheader','-o','stat',str(saved['job_id'])],capture_output=True,text=True)
-        if r.stdout.strip() in ('RUN','PEND','PSUSP','USUSP','SSUSP'):
-            print('Server job '+str(saved['job_id'])+' is '+r.stdout.strip()+'; fungen codex waits for readiness.')
-            return
-        if not r.stdout.strip() and 'not found' not in r.stderr:
-            raise RuntimeError('Server job status unknown. Inspect bjobs before submitting another server.')
-    script = Path(config['install'])/f"serve.{config['scheduler']}.sh"
-    if config['scheduler'] == 'lsf':
-        with script.open() as f:
-            r=run(['bsub'],stdin=f,capture_output=True,text=True)
-        print(r.stdout,end='')
+    observed=runtime_observation(config)
+    if observed.ready:
+        print('Server ready: '+observed.info['endpoint']);return
+    root=Path(config['install']);request=root/'server-request.json'
+    if observed.launch=='unknown':raise RuntimeError(observed.detail)
+    if observed.ready is None and request.exists():
+        print(observed.detail+' fungen check reports NOT VERIFIED until the endpoint and GPU offload pass.');return
+    if observed.launch=='running':
+        raise RuntimeError(observed.detail+' Inspect the current live launch before starting another server.')
+    script=root/f"serve.{config['scheduler']}.sh";sched=config['scheduler']
+    if sched=='lsf':
+        with script.open() as f:r=run(['bsub'],stdin=f,capture_output=True,text=True)
         match=re.search(r'Job <(\d+)>',r.stdout)
-        if not match: raise RuntimeError('Server submission returned no job ID; inspect bjobs before retrying.')
-        request.write_text(json.dumps({'job_id':match.group(1)})+'\n')
-    elif config['scheduler'] == 'slurm':
-        run(['sbatch',script])
+    elif sched in ('slurm','sge'):
+        r=run(['sbatch','--parsable',script] if sched=='slurm' else ['qsub','-terse',script],capture_output=True,text=True)
+        match=re.fullmatch(r'(\d+)(?:;[^\s]+)?\s*',r.stdout) if sched=='slurm' else re.fullmatch(r'(\d+)\s*',r.stdout)
     else:
-        with (Path(config['install'])/'serve.log').open('a') as f:
-            p=subprocess.Popen(['bash',str(script)],stdout=f,stderr=f,start_new_session=True)
-        print(f'Started GPU server PID {p.pid}; log: {f.name}')
+        with (root/'serve.log').open('a') as f:p=subprocess.Popen(['bash',str(script)],stdout=f,stderr=f,start_new_session=True)
+        saved={'scheduler':'local','pid':p.pid}
+        # Retain the new PID immediately, including when identity inspection fails.
+        # This prevents a launched process from becoming an untracked retry.
+        request.write_text(json.dumps(saved)+'\n')
+        identity=local_process_identity(p.pid)
+        if identity is None:raise RuntimeError('Local server process exited before startup identity was recorded; inspect serve.log.')
+        saved.update(identity);request.write_text(json.dumps(saved)+'\n')
+        print(f'Started GPU server PID {p.pid}; log: {f.name}');return
+    print(r.stdout,end='')
+    if not match:raise RuntimeError('Server submission returned no unambiguous job ID; inspect scheduler before retrying.')
+    request.write_text(json.dumps({'scheduler':sched,'job_id':match.group(1)})+'\n')
+
+
+def local_hint(config):
+    return shlex.join([config['runtime'],'run',config['image'],'setup','--backend','local'])
+
+
+def local_catalog(config):
+    catalog=Path(config['install'])/'codex/models.json'
+    try:
+        doc=json.loads(catalog.read_text())
+        shipped=json.loads((Path(__file__).with_name('resources')/'codex-models.json').read_text())
+        if doc!=shipped or not doc.get('models'):
+            raise ValueError('catalog differs from shipped catalog')
+    except (OSError,ValueError,TypeError) as exc:
+        raise ValueError('Local Codex model catalog missing or invalid. Rerun setup: '+local_hint(config)) from exc
+    return catalog
+
+
+def local_client(config):
+    client=config.get('local_codex',config['codex'])
+    try:
+        version=run([client,'--version'],capture_output=True,text=True).stdout.strip()
+    except (OSError,subprocess.SubprocessError) as exc:
+        raise ValueError('Local Codex client unavailable. Rerun setup: '+local_hint(config)) from exc
+    if version!='codex-cli 0.155.1':
+        raise ValueError('Local catalog requires Codex 0.155.1. Rerun setup: '+local_hint(config))
+    return client
+
+
+def served_catalog(config, endpoint, catalog):
+    """Expose exact served IDs whose quantization and context are established by Ollama."""
+    import copy
+    import hashlib
+    doc=json.loads(catalog.read_text())
+    families={m['slug']:m for m in doc['models'] if m['visibility']=='none'}
+    context=config.get('context',32768);selected=config.get('serve_model',config['model'])
+    visible=[]
+    try:
+        tags=api(endpoint)['models']
+        if not isinstance(tags,list):raise ValueError('invalid model inventory')
+        names=[row['name'] for row in tags]
+        if any(not isinstance(name,str) or not name for name in names):raise ValueError('invalid model identity')
+        if len(names)!=len(set(names)):raise ValueError('ambiguous model inventory')
+        loaded={row['name']:row for row in api(endpoint,'/api/ps')['models']}
+        for name in sorted(names):
+            family=name.split(':',1)[0]
+            if family not in families:continue
+            show=api(endpoint,'/api/show',{'model':name})
+            quant=show['details']['quantization_level']
+            tagged=re.search(r':(q4_K_M|q8_0)(?:-|$)',name)
+            if tagged and tagged.group(1).upper()!=quant:
+                raise ValueError('tag and payload quantization differ for '+name)
+            params=dict(re.findall(r'^\s*(\w+)\s+(\S+)\s*$',show['parameters'],re.M))
+            model_info=show['model_info'];arch=model_info['general.architecture']
+            capacity=int(model_info[arch+'.context_length'])
+            # A base tag need not have a num_ctx parameter. Its loaded instance
+            # must then provide positive effective-context evidence instead.
+            configured=int(loaded[name]['context_length'] if name in loaded else params['num_ctx'])
+            if quant not in ('Q4_K_M','Q8_0') or configured not in (32768,262144) or configured>capacity:
+                raise ValueError('unsupported quantization/context for '+name)
+            if configured!=context:continue
+            model=copy.deepcopy(families[family])
+            model.update(slug=name,display_name=name,visibility='list',context_window=context,max_context_window=context,
+                         description=f'{family}, {quant}, {context} tokens; available on the current Ollama endpoint.')
+            visible.append(model)
+        if selected not in {m['slug'] for m in visible}:
+            raise ValueError('selected model has no matching served quantization/context: '+selected)
+    except (OSError,ValueError,KeyError,TypeError,RuntimeError) as exc:
+        raise RuntimeError('Cannot verify local model override choices: '+str(exc)+'. Run fungen serve, then fungen check.') from exc
+    # Exact served IDs precede the hidden family metadata used for prefix lookup.
+    doc['models']=visible+list(families.values())
+    encoded=(json.dumps(doc,indent=2)+'\n').encode()
+    folder=catalog.parent/'served';folder.mkdir(exist_ok=True)
+    target=folder/(hashlib.sha256(encoded).hexdigest()+'.json')
+    if target.exists():
+        if target.read_bytes()!=encoded:
+            raise RuntimeError('Generated local model catalog is invalid; rerun setup before launching Codex.')
+    else:
+        import tempfile
+        with tempfile.NamedTemporaryFile(dir=folder,delete=False) as stream:
+            stream.write(encoded);temporary=Path(stream.name)
+        temporary.replace(target)
+    return target
+
+
+def require_local(config):
+    script=Path(config['install'])/f"serve.{config['scheduler']}.sh"
+    if any(k not in config for k in LOCAL_KEYS[:5]) or not script.is_file():
+        raise ValueError('Local backend is not configured. Run: '+local_hint(config))
+    local_catalog(config)
+    local_client(config)
+    if not model_present(config['models'],config['model']):
+        raise ValueError('Local model is incomplete. Rerun setup: '+local_hint(config))
+    if config.get('runtime_models') and not model_present(config['runtime_models'],config.get('serve_model',config['model'])):
+        raise ValueError('Local runtime model store is incomplete. Rerun setup: '+local_hint(config))
+    if script.read_text()!=render_serve(config):
+        raise ValueError('Local serve script differs from current configuration. Rerun setup: '+local_hint(config))
+
+
+def backend(config,choice=None):
+    if choice is None:
+        print('Active backend: '+config['backend'])
+        try:
+            require_local(config)
+            print(f"local: assets configured ({config['model']}, {config['models']}, serve.{config['scheduler']}.sh); runtime unverified: fungen serve, then fungen check")
+        except ValueError as exc:
+            print('local: not configured — '+str(exc))
+        print('openai: authentication unverified (check with fungen check; sign in with '+shlex.join([config['codex'],'login','--device-auth'])+' or OPENAI_API_KEY)')
+        return 0
+    if choice == 'local': require_local(config)
+    config['backend']=choice
+    write_config(config)
+    print('Backend: '+choice)
+    print('Next: fungen serve, then fungen codex' if choice=='local' else 'Next: fungen codex (no server needed)')
+    return 0
 
 
 def codex(config,args):
+    if args.backend:
+        # One-session override; the saved config keeps its backend.
+        if args.backend == 'local': require_local(config)
+        config={**config,'backend':args.backend}
     env = dict(os.environ)
     extra = args.args[1:] if args.args[:1]==['--'] else args.args
     root_overrides=[]
@@ -555,17 +856,25 @@ def codex(config,args):
         subcommand=['exec'];extra=extra[1:]
     overrides=[];provider=[]
     if config['backend'] == 'local':
+        catalog=local_catalog(config)
+        client=local_client(config)
+        config={**config,'codex':client}
         deadline=time.monotonic()+args.wait
         while not (info:=state(config)):
             if time.monotonic()>=deadline:
                 raise RuntimeError('Server unavailable. Run fungen serve; inspect serve job log and fungen check.')
             time.sleep(2)
+        catalog=served_catalog(config,info['endpoint'],catalog)
         env['CODEX_HOME']=str(Path(config['install'])/'codex')
         env['CODEX_OSS_BASE_URL']=info['endpoint']+'/v1'
         env['CODEX_OLLAMA_MODEL']=config.get('serve_model',config['model'])
         provider=['--oss','--local-provider','ollama','--model',config.get('serve_model',config['model'])]
-        overrides += ['-c','model_context_window='+str(config.get('context',32768)),
+        # The TUI decides on the ChatGPT sign-in screen from the root config, before --oss
+        # applies; naming the built-in ollama provider there skips sign-in.
+        overrides += ['-c','model_provider="ollama"',
+                      '-c','model_context_window='+str(config.get('context',32768)),
                       '-c','model_auto_compact_token_limit='+str(int(config.get('context',32768)*.75))]
+        overrides += ['-c','model_catalog_json='+json.dumps(str(catalog))]
     elif env.get('OPENAI_API_KEY'):
         overrides += ['-c','model_provider="fungen_openai"','-c','model_providers.fungen_openai.name="OpenAI API"',
                       '-c','model_providers.fungen_openai.base_url="https://api.openai.com/v1"',
@@ -584,8 +893,9 @@ def codex(config,args):
 def check(config,online=True):
     rows=[]
     def row(name,good,fix):
-        rows.append((name,bool(good),fix))
-        print(('PASS ' if good else 'FAIL ')+name+('' if good else ': '+fix))
+        # None means verification is incomplete and keeps the aggregate non-successful.
+        rows.append((name,None if good is None else bool(good),fix))
+        print(('PENDING ' if good is None else 'PASS ' if good else 'FAIL ')+name+('' if good else ': '+fix))
     install=Path(config['install'])
     row('install writable',os.access(install,os.W_OK),'Choose setup --install WRITABLE_FOLDER.')
     row('install on PATH',str(install/'bin') in os.environ.get('PATH','').split(':'),'export PATH='+shlex.quote(str(install/'bin'))+':"$PATH"')
@@ -595,7 +905,7 @@ def check(config,online=True):
         imported=False
     row('operator importable',imported,'Rerun apptainer run fungen.sif.')
     row('skill visible',(Path.home()/'.agents/skills/fungen-operator/SKILL.md').is_file(),'Rerun apptainer run fungen.sif.')
-    row('Codex recent enough',recent_codex(config['codex']),'Rerun setup to install bundled Codex 0.155.1.')
+    row('Codex recent enough',recent_codex(config.get('local_codex',config['codex']) if config['backend']=='local' else config['codex']),'Rerun setup to install bundled Codex 0.155.1.')
     if online:
         url=('https://registry.ollama.ai/v2/library/'+config['model'].replace(':','/manifests/')) if config['backend']=='local' else 'https://api.openai.com/v1/models'
         try:
@@ -609,29 +919,49 @@ def check(config,online=True):
     else:
         row('internet reachable',False,OFFLINE)
     if config['backend']=='local':
+        try:
+            require_local(config)
+            assets_good=True;assets_detail=''
+        except ValueError as exc:
+            assets_good=False;assets_detail=str(exc)
+        row('local backend assets',assets_good,assets_detail)
         folder=Path(config['models'])
         present=model_present(folder,config['model'])
         row('model present',present,'Rerun setup --download yes to resume the selected model.')
         row('model folder writable or complete read-only reuse',present or os.access(folder,os.W_OK),'Choose a writable --models-dir for downloading.')
         row('model space and quota',present or (folder.exists() and shutil.disk_usage(folder).free>(MODELS[config['model']]*1.1+2)*1E9),'Free model storage and check your site quota; rerun setup --models-dir FOLDER.')
-        info=state(config)
-        row('server reachable; port selected',bool(info),'Run fungen serve; the GPU job selects and records a free port.')
-        gpu=False
+        runtime_good,info,detail=runtime_status(config)
+        next_action='Run fungen serve, then fungen check.'
+        row('server reachable; port selected',runtime_good,detail+' '+next_action)
+        gpu=None
+        gpu_detail='GPU offload not verified. '+next_action
         if info:
             try:
-                gpu=any(x.get('size_vram',0)>0 for x in api(info['endpoint'],'/api/ps')['models'])
-            except (OSError,KeyError,RuntimeError): pass
-        row('GPU visible in image; compatible driver',gpu,'Submit fungen serve to a GPU queue; use --nv and upgrade the host NVIDIA driver if the serve log reports CUDA incompatibility.')
+                loaded=api(info['endpoint'],'/api/ps')['models']
+                if not isinstance(loaded,list) or any(not isinstance(x,dict) for x in loaded):
+                    raise ValueError('invalid /api/ps model list')
+                selected=[x for x in loaded if x.get('name')==config.get('serve_model',config['model'])]
+                gpu=any(x.get('size_vram',0)>0 for x in selected)
+                gpu_detail='Selected model has no observed GPU offload. '+next_action
+            except (OSError,ValueError,KeyError,TypeError,RuntimeError) as exc:
+                gpu=False
+                gpu_detail='GPU status retrieval failed: '+str(exc)+'. '+next_action
+        row('GPU offload for selected model',gpu,gpu_detail)
     else:
         result=subprocess.run([config['codex'],'login','status'],capture_output=True)
         row('OpenAI sign-in or API key',bool(os.environ.get('OPENAI_API_KEY')) or result.returncode==0,
             shlex.join([config['codex'],'login','--device-auth'])+' (or export OPENAI_API_KEY in your shell).')
-    return all(good for _,good,_ in rows)
+    verified=all(good is True for _,good,_ in rows)
+    if verified:print('VERIFIED')
+    elif any(good is False for _,good,_ in rows):
+        print('NOT VERIFIED: correct failed checks; for local runtime run fungen serve, then fungen check.')
+    else:print('NOT VERIFIED: runtime verification is pending. Run fungen serve, then fungen check.')
+    return verified
 
 
 def main(argv=None):
     argv=list(sys.argv[1:] if argv is None else argv)
-    if BUNDLE.is_dir() and argv[:1] in (['codex'],['xqtl']):
+    if BUNDLE.is_dir() and argv[:1] in (['codex'],['xqtl'],['check'],['backend']):
         install=Path(read_config().get('install',str(Path.home()/'.fungen')))
         print('fungen: Codex and workflows run on the host. Exit the image and run: '+shlex.join([str(install/'bin/fungen'),argv[0]]),file=sys.stderr)
         return 1
@@ -646,7 +976,7 @@ def main(argv=None):
     sub=parser.add_subparsers(dest='command')
     p=sub.add_parser('setup',help='Install host tools and configure a backend')
     p.add_argument('--non-interactive',action='store_true')
-    for name,choices in [('install',None),('backend',['local','openai']),('scheduler',['lsf','slurm','local']),('model',list(MODELS)),('models-dir',None),('download',['yes','no']),('context',['32768','262144']),('add-path',['yes','no']),('image',None),('runtime',None),('account',None),('gpu-queue',None),('port',None)]:
+    for name,choices in [('install',None),('backend',['local','openai']),('scheduler',['lsf','slurm','sge','local']),('model',list(MODELS)),('models-dir',None),('download',['yes','no']),('context',['32768','262144']),('add-path',['yes','no']),('image',None),('runtime',None),('account',None),('gpu-queue',None),('port',None)]:
         p.add_argument('--'+name,choices=choices,default=os.environ.get('FUNGEN_'+name.replace('-','_').upper()))
     p.add_argument('--offline-check',action='store_true',help='Report offline guidance without a network probe')
     for name in ('serve','download'):
@@ -658,9 +988,12 @@ def main(argv=None):
         p.add_argument('--context',type=int,choices=[32768,262144],default=32768)
         p.add_argument('--state',default=str(Path.home()/'.fungen/server.json'))
     p=sub.add_parser('codex',help='Host only: wait for the server, then run Codex')
+    p.add_argument('--backend',choices=['local','openai'],help='Use this backend for one session')
     p.add_argument('--deployment')
     p.add_argument('--wait',type=int,default=1800)
     p.add_argument('args',nargs=argparse.REMAINDER)
+    p=sub.add_parser('backend',help='Host only: show the model backend, or switch it (local/openai)')
+    p.add_argument('choice',nargs='?',choices=['local','openai'])
     p=sub.add_parser('check',help='Report each installation check and its exact fix')
     p.add_argument('--offline',action='store_true')
     p=sub.add_parser('xqtl',help='Host only: guided xQTL setup and synthetic test')
@@ -677,6 +1010,7 @@ def main(argv=None):
         if not config: raise ValueError('Run apptainer run fungen.sif to set up first.')
         if args.command=='serve': return serve(config)
         if args.command=='codex': return codex(config,args)
+        if args.command=='backend': return backend(config,args.choice)
         if args.command=='check': return 0 if check(config,not args.offline) else 1
     except (OSError,ValueError,RuntimeError,subprocess.CalledProcessError,EOFError) as exc:
         print('fungen: '+str(exc),file=sys.stderr)

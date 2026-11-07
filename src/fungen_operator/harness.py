@@ -195,10 +195,8 @@ class Harness:
                         or ready.metadata.fungen.get("run_fingerprint") != fingerprint):
                     raise ValueError("a successful matching check_readiness is required")
             cell_id = uuid.uuid4().hex
-            slots = {"arguments": args.model_dump(), "bindings": {
-                "snakefile": self.deployment.snakefile, "profile_path": self.deployment.profile_path,
-                "conda_sh": self.deployment.conda_sh, "conda_env": self.deployment.conda_env,
-                "log_stem": str(Path(args.log_dir, cell_id))}}
+            slots = {"arguments": args.model_dump(),
+                     "bindings": self.deployment.runtime_bindings(str(Path(args.log_dir, cell_id)))}
             cell = book.append(nb, action, slots, identity, cell_id)
             if action == "initiate_run" and args.defer_readiness:
                 cell.metadata.fungen["readiness_policy"] = "canonical_dry_run_at_controller_start"
@@ -328,6 +326,10 @@ class Harness:
             if result["status"] not in {"materialized", "ready", "nothing_to_do", "submitted", "completed"}:
                 break
             if action == "initiate_run":
+                if self.deployment.backend == "local" and result["status"] == "completed":
+                    # The local executor already waited for this bash cell and
+                    # checked its exit status. Continue the recipe synchronously.
+                    continue
                 state = self.executor.scheduler(result["job_id"])["status"]
                 if state not in {"DONE", "EXIT"}:
                     # Keep the unexecuted suffix active and resume it on the next
@@ -362,14 +364,17 @@ class Harness:
             self.deployment.validate_write_path(notebook)
         return Notebook(notebook, self.registry)
 
-    def _job_snapshot(self, nb, grace_minutes=10, job_ids=None):
+    def _job_snapshot(self, nb, grace_minutes=10, job_ids=None, *, require_coverage=False):
         from .run_jobs import inspect_jobs
         if not getattr(self.executor, "can_inspect", self.executor.can_schedule):
-            return {"count": 0, "dead_children": [], "jobs": {}, "scheduler_ok": False,
+            return {"count": None if require_coverage else 0, "dead_children": [], "jobs": {}, "scheduler_ok": False,
+                    "coverage":{"verified":False,"reason":"host_approval_required"},
                     "observations": ["host_approval_required"]}
-        return inspect_jobs(self.deployment, nb, grace_minutes=grace_minutes, requested_ids=job_ids)
+        return inspect_jobs(self.deployment, nb, grace_minutes=grace_minutes, requested_ids=job_ids,require_coverage=require_coverage)
 
     def propose_control(self, request: ControlRun):
+        if self.deployment.backend not in ("lsf","fixture"):
+            raise ValueError("Job control and sweeps require LSF; use the configured scheduler native tools for job control.")
         book = self._control_notebook(request.notebook)
         nb = book.read()
         if request.operation == "sweep":
@@ -488,9 +493,13 @@ class Harness:
 
     def inspect(self, request):
         nb = Notebook(request.notebook, self.registry).read()
-        snapshot = (self._job_snapshot(nb, request.dead_child_grace_minutes)
-                    if self.deployment.backend == "lsf" else
-                    {"count": 0, "dead_children": [], "jobs": {}, "scheduler_ok": True})
+        if self.deployment.backend in ('lsf','sge','slurm'):
+            snapshot=self._job_snapshot(nb,request.dead_child_grace_minutes,require_coverage=True)
+        elif self.deployment.backend=='local':
+            snapshot={'count':None,'dead_children':[],'jobs':{},'scheduler_ok':None,
+                      'observations':['local synchronous execution; external scheduler inspection is not applicable']}
+        else:
+            snapshot={'count':0,'dead_children':[],'jobs':{},'scheduler_ok':True}
         cells = []
         for c in nb.cells:
             if c.cell_type != "code":
@@ -502,7 +511,7 @@ class Harness:
             job = entry["result"].get("job_id")
             if job:
                 entry["scheduler"] = (snapshot["jobs"].get(str(job), {"status": "UNKNOWN"})
-                                      if self.deployment.backend == "lsf" else self.executor.scheduler(job))
+                                      if self.deployment.backend in ("lsf","sge","slurm") else self.executor.scheduler(job))
                 entry["logs"] = self.executor.logs(meta.slots.bindings.log_stem, job)
             cells.append(entry)
         observations = {}
@@ -517,4 +526,8 @@ class Harness:
         return {"cells": cells, "paths": observations, "active_cells_valid": True,
                 "dead_children": snapshot["dead_children"], "dead_child_count": snapshot["count"],
                 "scheduler_ok": snapshot["scheduler_ok"],
-                "scheduler_observations": snapshot.get("observations", [])}
+                "inspection_status": ('verified' if snapshot.get('coverage',{}).get('verified') else
+                                      'not_verified' if self.deployment.backend in ('lsf','sge','slurm') else 'not_applicable'),
+                "scheduler_observations": snapshot.get("observations", []),
+                "discovery_coverage": snapshot.get("coverage"),
+                "jobs": {job:row for job,row in snapshot.get("jobs",{}).items() if row.get("membership")}}

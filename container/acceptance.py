@@ -249,7 +249,7 @@ def main():
             config=home/'.config/fungen/config.toml';before=config.read_bytes();stamp=config.stat().st_mtime_ns
             setup(root,a.image,a.staged,'laguna-s-2.1:q4_K_M','staged')
             assert config.read_bytes()==before and config.stat().st_mtime_ns==stamp
-            for sched in ['slurm','local']:
+            for sched in ['slurm','sge','local']:
                 # Local rendering is tested independently of GPU setup on a login host.
                 from fungen_operator.bootstrap import read_config,render_serve
                 import tomllib

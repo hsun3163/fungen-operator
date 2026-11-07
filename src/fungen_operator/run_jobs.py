@@ -9,6 +9,7 @@ from __future__ import annotations
 from datetime import datetime
 import json
 import re
+import shlex
 import struct
 import subprocess
 from pathlib import Path
@@ -112,9 +113,16 @@ def _evidence(deployment, nb):
                     if timestamp:
                         scheduled_time = _time(timestamp.group(1), datetime.now().timestamp())
                     match = _SUBMISSION.search(line)
-                    if not match:
+                    native = _NATIVE_SUBMISSION.search(line)
+                    if native:
+                        from .cluster import profile_logs
+                        internal,wrapper=native.groups()
+                        if not wrapper.isdecimal():raise ValueError('Unsupported native wrapper identity: '+wrapper)
+                        log_path=str(profile_logs(deployment.profile_path,deployment.backend)/(wrapper+'.out'))
+                    elif match:
+                        internal, wrapper, log_path = match.groups()
+                    else:
                         continue
-                    internal, wrapper, log_path = match.groups()
                     if ".." in Path(log_path).parts or not Path(log_path).is_relative_to(workdir):
                         continue
                     key = (workdir, args.get("configfile"), log_path)
@@ -134,6 +142,25 @@ def _evidence(deployment, nb):
                         task_dir = resolved_dirs[raw_path]
                     if task_dir and task_dir.is_relative_to(run_root):
                         homes.setdefault(task_dir, []).append(evidence[wrapper])
+                        if native:
+                            streams=_native_logs([log_path,str(Path(log_path).with_suffix('.err'))])
+                            pairs=_native_receipts(streams,_TASK_SUBMISSION,re.compile(r'\bsubmitted\s+to\b|with job id'))
+                            for task_id,child in pairs:
+                                if not re.fullmatch(r't[A-Za-z0-9]+',task_id) or not child.isdecimal():
+                                    raise ValueError('Unsupported native task receipt')
+                                header=_header(task_dir/(task_id+'.task'))
+                                if not header:raise ValueError('Native task state unavailable: '+task_id)
+                                if header['sos_state'] in ('submitted','running'):
+                                    ids=yaml.safe_load((task_dir/(task_id+'.job_id')).read_text())
+                                    script=(task_dir/(task_id+'.sh')).read_text()
+                                    if str(ids['job_id'])!=child or not re.search(r'\bsos\s+execute\s+'+re.escape(task_id)+r'(?:\s|$)',script):
+                                        raise ValueError('Native task identity/provenance differs: '+task_id)
+                                if child in evidence and evidence[child].get('wrapper_job_id')!=wrapper:
+                                    raise ValueError('Ambiguous native child lineage: '+child)
+                                evidence[child]={'job_id':child,'kind':'child','task_id':task_id,**header,
+                                    'task_dir':str(task_dir),'runlog':str(task_dir.parents[3]),
+                                    'wrapper_job_id':wrapper,'wrapper_candidates':[wrapper],
+                                    'rule':rule,'unit':unit,'task_kind':descriptor.get('task_kind',rule),'workdir':workdir}
     for task_dir, wrappers in homes.items():
         # SoS retains .job_id while submitted/running and removes it on completed
         # task packing. This directory-only census avoids decoding task payloads.
@@ -148,6 +175,9 @@ def _evidence(deployment, nb):
             child = str(ids.get("job_id", "")) if isinstance(ids, dict) else ""
             if not child.isdigit() or not header:
                 observations.append({"task_id": task_id, "status": "unresolved_task_record"})
+                continue
+            if child in evidence:
+                if evidence[child].get('task_id')!=task_id:raise ValueError('Native child task identity differs')
                 continue
             # The submission script must name exactly this task; it is executable
             # evidence, read as text only. Its path remains under the isolated home.
@@ -280,7 +310,176 @@ def _membership(evidence, record):
     return matched, "live scheduler record matches retained run evidence" if matched else "live command or scheduler output path differs from this run's recorded job evidence"
 
 
-def inspect_jobs(deployment, nb, *, grace_minutes=10, runner=subprocess.run, now=None, requested_ids=None):
+_NATIVE_SUBMISSION = re.compile(r"(?:Submitted (?:job|group job)|Resuming incomplete job) (\S+) with external jobid '([^']+)'\.")
+_TASK_SUBMISSION = re.compile(r"\b(\S+)\s+submitted\s+to\s+\S+\s+with job id\s+(\S+)")
+_ANSI = re.compile(r'\x1b\[[0-9;]*m')
+
+
+def _native_logs(paths):
+    """Read only the exact streams bound by receipts/profile, with no silent loss."""
+    content=[]
+    for path in paths:
+        try:content.append(Path(path).read_text())
+        except (OSError,UnicodeError) as exc:
+            raise RuntimeError('Native child inspection cannot read retained stream '+str(path)+': '+str(exc)) from exc
+    return _ANSI.sub('', '\n'.join(content))
+
+
+class NativeDiscoveryIncomplete(RuntimeError):
+    def __init__(self,message,jobs):
+        self.observed_jobs={key:dict(row) for key,row in jobs.items()}
+        self.coverage_verified=False
+        statuses=', '.join(key+':'+row['status'] for key,row in list(jobs.items())[:20])
+        super().__init__('Native submission coverage incomplete: '+message+'; observed jobs: '+statuses)
+
+
+def _native_receipts(text,pattern,marker):
+    found=[]
+    for line in text.splitlines():
+        if marker.search(line):
+            match=pattern.search(line)
+            if not match:raise ValueError('Malformed/truncated native submission line: '+line[:300])
+            found.append(match.groups())
+    return list(dict.fromkeys(found))
+
+
+def _submission_graph(records,controllers):
+    begins={};ends={};intents={};receipts={}
+    for record in records:
+        event=record['event'];kind=record['kind']
+        if kind=='controller' and record.get('job_id')!=record['controller']:raise ValueError('Controller boundary identity differs')
+        if kind=='wrapper' and record['parent']!=record['controller']:raise ValueError('Wrapper controller identity differs')
+        if event=='end' and (type(record.get('exit_code')) is not int or not 0<=record['exit_code']<=255):raise ValueError('Invalid native completion exit code')
+        if kind not in ('controller','wrapper','child'):raise ValueError('Unknown submission kind')
+        if event in ('begin','end'):
+            if kind=='child':raise ValueError('Unexpected child boundary')
+            key=(kind,record['job_id'])
+            target=begins if event=='begin' else ends
+            if key in target:raise ValueError('Ambiguous repeated submission boundary')
+            target[key]=record
+        elif event in ('intent','receipt'):
+            if kind=='controller':raise ValueError('Unexpected controller intent')
+            target=intents if event=='intent' else receipts;key=record['attempt']
+            if key in target:raise ValueError('Ambiguous repeated submission intent/receipt')
+            target[key]=record
+        else:raise ValueError('Unknown submission journal event')
+    if set(intents)!=set(receipts):raise ValueError('Native submission intent has no complete receipt; inspect scheduler before retrying')
+    for attempt,intent in intents.items():
+        receipt=receipts[attempt]
+        if {k:v for k,v in receipt.items() if k not in ('event','job_id')}!={k:v for k,v in intent.items() if k!='event'}:
+            raise ValueError('Native intent and receipt identity differ')
+        if not str(receipt['job_id']).isdecimal():raise ValueError('Unsupported journal job identity')
+    for controller in controllers:
+        if ('controller',controller) not in begins:raise ValueError('Controller has no recorded discovery start: '+controller)
+    if any(key not in begins for key in ends):raise ValueError('Discovery end has no matching start')
+    wrappers=[r for r in receipts.values() if r['kind']=='wrapper']
+    children=[r for r in receipts.values() if r['kind']=='child']
+    wrapper_ids={r['job_id'] for r in wrappers}
+    if len({r['job_id'] for r in receipts.values()})!=len(receipts):raise ValueError('Ambiguous repeated native job identity')
+    owners={r['job_id']:r['controller'] for r in wrappers}
+    if any(owners.get(r['parent'])!=r['controller'] for r in children):raise ValueError('Child controller identity differs')
+    if any(r['parent'] not in controllers for r in wrappers) or any(r['parent'] not in wrapper_ids for r in children):
+        raise ValueError('Submission receipt has no identified parent')
+    if any(kind=='wrapper' and job not in wrapper_ids for kind,job in begins):raise ValueError('Wrapper discovery start has no receipt')
+    return begins,ends,wrappers,children
+
+
+def inspect_native_jobs(deployment,nb,*,grace_minutes=10,runner=None,now=None,requested_ids=None):
+    """Verify the current native submission set and query every identified job.
+
+    The canonical adapter journals intent before submission and receipt afterward.
+    Controller/wrapper start/end records prove zero-child boundaries. Exact native
+    streams must agree with this independent set. A stable journal snapshot and
+    complete records are required for verified coverage, including child-free jobs.
+    """
+    from .cluster import job_status,profile_logs,journal_records,task_submit_command
+    runner=subprocess.run if runner is None else runner
+    current=datetime.now().timestamp() if now is None else float(now)
+    scheduler=deployment.backend;jobs={};dead=[];processed=set()
+    def incomplete(message):raise NativeDiscoveryIncomplete(message,jobs)
+    def observe(job,**evidence):
+        if job in jobs:
+            if any(jobs[job].get(k)!=v for k,v in evidence.items() if k in ('kind','controller_job_id','wrapper_job_id','task_id')):
+                incomplete('Ambiguous native job lineage for '+job)
+            return jobs[job]
+        try:status=job_status(scheduler,job,runner=runner)
+        except (OSError,ValueError,RuntimeError,subprocess.SubprocessError) as exc:
+            raise RuntimeError(scheduler+' inspection failed for job '+job+': '+str(exc)) from exc
+        if status not in ('running','success','failed'):raise RuntimeError('Unknown native status for '+job)
+        row=dict(evidence,job_id=job,status={'running':'RUN','success':'DONE','failed':'EXIT'}[status],scheduler=scheduler,
+                 membership=True,membership_reason='verified native submission lineage')
+        jobs[job]=row;return row
+    controllers=[]
+    for cell in nb.cells:
+        meta=cell.metadata.get('fungen',{})
+        if meta.get('action') not in _controller_actions(deployment):continue
+        job=str(meta.get('result',{}).get('job_id',''))
+        if not job:continue
+        if not job.isdecimal():incomplete('Unsupported controller identity: '+job)
+        slots=meta['slots'];args=slots['arguments'];stem=slots['bindings']['log_stem']
+        if not _inside(stem,deployment.run_root) or not _inside(args['workdir'],deployment.run_root):incomplete('Controller evidence outside run root')
+        observe(job,kind='controller');controllers.append((job,args,stem))
+    if not controllers:incomplete('No retained controller receipts')
+    controller_ids={job for job,_,_ in controllers}
+    try:
+        logs=profile_logs(deployment.profile_path,scheduler);journal=logs/'submissions.jsonl'
+        records=journal_records(journal,controller_ids)
+        if any(r['scheduler']!=scheduler for r in records):raise ValueError('Journal scheduler differs from deployment')
+        begins,ends,wrappers,children=_submission_graph(records,controller_ids)
+        for job,args,stem in controllers:
+            text=_native_logs([f'{stem}.{job}.out',f'{stem}.{job}.err'])
+            found=_native_receipts(text,_NATIVE_SUBMISSION,re.compile(r'(?:Submitted (?:job|group job)|Resuming incomplete job|external jobid)'))
+            expected={(r['snakemake_job_id'],r['job_id']) for r in wrappers if r['parent']==job}
+            if set(found)!=expected:incomplete('Controller stream does not establish the journaled rule submissions for '+job)
+            if not expected and (('controller',job) not in ends or jobs[job]['status']=='RUN'):
+                incomplete('Controller has no proven zero-submission completion boundary: '+job)
+            config=yaml.safe_load(Path(args['configfile']).read_text())
+            if config.get('minerva'):
+                hosts=yaml.safe_load(Path(config['minerva']).read_text())['hosts']
+                for host in hosts.values():
+                    if host.get('queue_type')=='pbs' and host.get('submit_cmd')!=task_submit_command(scheduler,logs):
+                        incomplete('SoS task host does not use the canonical tracked native adapter; regenerate scheduler setup')
+            for internal,wrapper in found:
+                row=observe(wrapper,kind='wrapper',controller_job_id=job,snakemake_job_id=internal)
+                if wrapper in processed:continue
+                processed.add(wrapper)
+                if ('wrapper',wrapper) not in begins:incomplete('Wrapper discovery has not started: '+wrapper)
+                output=_native_logs([logs/(wrapper+'.out'),logs/(wrapper+'.err')])
+                task_pairs=_native_receipts(output,_TASK_SUBMISSION,re.compile(r'\bsubmitted\s+to\b|with job id'))
+                expected_tasks={(r['task_id'],r['job_id']) for r in children if r['parent']==wrapper}
+                if set(task_pairs)!=expected_tasks:incomplete('Wrapper stream does not establish the journaled task submissions for '+wrapper)
+                if not expected_tasks and (('wrapper',wrapper) not in ends or row['status']=='RUN'):
+                    incomplete('Wrapper has no proven child-free completion boundary: '+wrapper)
+                for task,child in task_pairs:
+                    if not re.fullmatch(r't[A-Za-z0-9]+',task) or not child.isdecimal():incomplete('Unsupported task/job identity')
+                    home=Path(config['runtime_home']).resolve()
+                    if not home.is_relative_to(Path(deployment.run_root).resolve()):
+                        canonical=yaml.safe_load(Path(deployment.default_config).read_text())
+                        if home!=Path(canonical['runtime_home']).resolve():incomplete('SoS home differs from canonical configuration')
+                    task_dir=home/'.sos/tasks';header=_header(task_dir/(task+'.task'))
+                    if not header:incomplete('SoS task state unavailable for '+task)
+                    child_row=observe(child,kind='child',wrapper_job_id=wrapper,controller_job_id=job,task_id=task,**header)
+                    if header['sos_state'] not in ('submitted','running'):continue
+                    ids=yaml.safe_load((task_dir/(task+'.job_id')).read_text())
+                    if not isinstance(ids,dict) or str(ids.get('job_id'))!=child:incomplete('SoS job-ID record differs for '+task)
+                    script=(task_dir/(task+'.sh')).read_text()
+                    if not re.search(r'\bsos\s+execute\s+'+re.escape(task)+r'(?:\s|$)',script):incomplete('SoS execution script differs for '+task)
+                    submitted=header['submitted_time']
+                    if submitted<=0:incomplete('SoS submission time unavailable')
+                    if current-submitted>grace_minutes*60 and child_row['status'] in ('DONE','EXIT'):
+                        dead.append(dict(task_id=task,job_id=child,wrapper_job_id=wrapper,scheduler=scheduler,
+                                         scheduler_state=child_row['status'],sos_state=header['sos_state'],submitted_time=submitted))
+        if journal_records(journal,controller_ids)!=records:incomplete('Submission set changed during inspection')
+    except NativeDiscoveryIncomplete:raise
+    except (OSError,ValueError,KeyError,TypeError,yaml.YAMLError) as exc:incomplete(str(exc))
+    if requested_ids:
+        for job in requested_ids:
+            if str(job) not in jobs:jobs[str(job)]={'job_id':str(job),'membership':False,'membership_reason':'absent from verified native submission lineage'}
+    coverage={'verified':True,'controllers':len(controller_ids),'wrappers':len(wrappers),'tasks':len(children)}
+    return dict(jobs=jobs,dead_children=dead,count=len(dead),scheduler_ok=True,observations=[],coverage=coverage,grace_minutes=grace_minutes)
+
+
+def inspect_jobs(deployment, nb, *, grace_minutes=10, runner=None, now=None, requested_ids=None, require_coverage=False):
     """Return a single batch snapshot; scheduler failures always fail closed.
 
     ``jobs`` includes all currently retained jobs for the current LSF user so an
@@ -288,10 +487,24 @@ def inspect_jobs(deployment, nb, *, grace_minutes=10, runner=subprocess.run, now
     are queried only for active SoS children missing from the one bjobs result.
     The caller owns host approval and must run this function outside the sandbox.
     """
+    runner=subprocess.run if runner is None else runner
+    if deployment.backend in ('lsf','sge','slurm') and (require_coverage or deployment.backend!='lsf'):
+        try:
+            return inspect_native_jobs(deployment,nb,grace_minutes=grace_minutes,runner=runner,now=now,requested_ids=requested_ids)
+        except NativeDiscoveryIncomplete as exc:
+            if not require_coverage:raise
+            return dict(jobs=exc.observed_jobs,dead_children=[],count=None,scheduler_ok=False,
+                        observations=[str(exc)],coverage={'verified':False,'reason':str(exc)},
+                        grace_minutes=grace_minutes)
+        except (OSError,ValueError,KeyError,TypeError,yaml.YAMLError) as exc:
+            raise RuntimeError('Native child inspection evidence unavailable: '+str(exc)) from exc
+    if deployment.backend not in ('lsf','fixture'):
+        raise ValueError('External scheduler inspection is not applicable to backend '+deployment.backend)
     current = datetime.now().timestamp() if now is None else float(now)
     observations = []
     snapshot = {"jobs": {}, "dead_children": [], "count": 0, "observations": observations,
-                "scheduler_ok": False, "grace_minutes": grace_minutes}
+                "scheduler_ok": False, "grace_minutes": grace_minutes,
+                "coverage": {"verified":False,"reason":"Observed membership only; use public inspect for journal coverage verification."}}
     try:
         proc = runner(["bjobs", "-a", "-json", "-o", _FIELDS], text=True, capture_output=True, timeout=60)
     except (OSError, subprocess.TimeoutExpired) as error:

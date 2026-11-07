@@ -69,7 +69,9 @@ def main():
     elif args.command == "replay":
         print(json.dumps(harness.replay(args.notebook), indent=2))
     else:
-        print(json.dumps(harness.inspect(InspectRun(notebook=args.notebook)), indent=2))
+        result=harness.inspect(InspectRun(notebook=args.notebook))
+        print(json.dumps(result, indent=2))
+        if result.get('inspection_status')=='not_verified':raise SystemExit(1)
 
 
 if __name__ == "__main__":

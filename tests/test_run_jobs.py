@@ -3,6 +3,8 @@ from datetime import datetime
 import json
 from pathlib import Path
 import struct
+import shlex
+import sys
 from types import SimpleNamespace
 
 import nbformat
@@ -10,10 +12,12 @@ import pytest
 import yaml
 
 from fungen_operator.run_jobs import inspect_jobs
+from fungen_operator.actions import Deployment
+from fungen_operator.fixture import create_fixture
 
 
 @pytest.fixture
-def native_run(tmp_path):
+def native_run(tmp_path,monkeypatch):
     root = tmp_path / "run"
     root.mkdir()
     snakefile = tmp_path / "Snakefile"
@@ -46,12 +50,16 @@ def native_run(tmp_path):
     def runner(command, **kwargs):
         calls.append(command)
         return SimpleNamespace(returncode=0, stdout=json.dumps({"RECORDS": records}), stderr="")
-    return SimpleNamespace(root=root, deployment=SimpleNamespace(run_root=str(root), snakefile=str(snakefile),
-                               registry=SimpleNamespace(task_layout=lambda workdir,config,log_path: {
-                                   "rule": "otters_test", "unit": {"gwas": "study", "eqtl": "dataset"},
-                                   "task_kind": "otters_test", "task_directory": task_dir})),
-                           nb=nb, records=records, runner=runner, calls=calls, task=task, task_dir=task_dir,
-                           submitted=submitted, now=submitted + 3600)
+    original=create_fixture(tmp_path/'layout')
+    deployment=Deployment.model_validate({**original.model_dump(),'run_root':str(root),'backend':'lsf'})
+    Path(deployment.snakefile).write_text(snakefile.read_text())
+    registry=deployment.registry
+    registry.task_layout=lambda workdir,config,log_path:{'rule':'otters_test','unit':{'gwas':'study','eqtl':'dataset'},'task_kind':'otters_test','task_directory':task_dir}
+    from fungen_operator import providers
+    load=providers.load_registry
+    monkeypatch.setattr(providers,'load_registry',lambda d,f=None:registry if d is deployment else load(d,f))
+    return SimpleNamespace(root=root,deployment=deployment,nb=nb,records=records,runner=runner,calls=calls,
+                           task=task,task_dir=task_dir,submitted=submitted,now=submitted+3600)
 
 
 def test_startup_lmod_child_exit_leaves_wrapper_running(native_run):
@@ -338,3 +346,350 @@ def test_partial_error_or_truncated_history_does_not_imply_absent_child(native_r
                    for entry in report["observations"])
     else:
         assert report["jobs"]["102"]["status"] == "UNKNOWN"
+
+
+@pytest.fixture(params=['sge','slurm'])
+def native_scheduler_run(tmp_path,request):
+    scheduler=request.param
+    root=tmp_path/'run';root.mkdir()
+    profile=root/'profile';profile.mkdir()
+    logs=root/'rules';logs.mkdir()
+    home=root/'runtime-home';tasks=home/'.sos/tasks';tasks.mkdir(parents=True)
+    config=root/'config.yaml';config.write_text(yaml.safe_dump({'runtime_home':str(home)}))
+    from fungen_operator import cluster
+    command=shlex.join([sys.executable,str(Path(cluster.__file__).resolve()),'submit','--scheduler',scheduler,'--logs',str(logs)])
+    (profile/'config.yaml').write_text(yaml.safe_dump({'cluster':command}))
+    stem=root/'controller'
+    Path(f'{stem}.100.out').write_text('')
+    Path(f'{stem}.100.err').write_text("Submitted job 4 with external jobid '101'.\n")
+    (logs/'101.out').write_text('')
+    task='t0123456789abcdef'
+    (logs/'101.err').write_text(f'INFO: {task} \x1b[32msubmitted\x1b[0m to fungen_{scheduler} with job id 102\n')
+    submitted=1_792_368_000.0
+    (tasks/(task+'.task')).write_bytes(struct.pack('!2h8d',3,2,submitted,submitted,submitted,submitted,0,0,0,0))
+    (tasks/(task+'.job_id')).write_text('job_id: 102\n')
+    (tasks/(task+'.sh')).write_text(f'#!/bin/bash\n/host/bin/sos execute {task} -s build\n')
+    nb=nbformat.v4.new_notebook(cells=[nbformat.v4.new_code_cell('',metadata={'fungen':{
+        'action':'initiate_run','status':'submitted','slots':{'arguments':{'workdir':str(root),'configfile':str(config)},
+            'bindings':{'log_stem':str(stem)}},'result':{'job_id':'100'}}})])
+    original=create_fixture(tmp_path/'layout')
+    Path(original.default_config).write_text(config.read_text())
+    d=Deployment.model_validate({**original.model_dump(),'run_root':str(root),'profile_path':str(profile),'backend':scheduler})
+    from fungen_operator.cluster import journal_event
+    journal=logs/'submissions.jsonl'
+    shared=dict(scheduler=scheduler,controller='100')
+    journal_event(journal,event='begin',kind='controller',job_id='100',**shared)
+    for kind,parent,job,attempt,fields in [('wrapper','100','101','wrapper1',{'snakemake_job_id':'4','rule':'test'}),('child','101','102','child1',{'task_id':task})]:
+        context=dict(kind=kind,parent=parent,attempt=attempt,**fields,**shared)
+        journal_event(journal,event='intent',**context)
+        journal_event(journal,event='receipt',job_id=job,**context)
+        if kind=='wrapper':journal_event(journal,event='begin',kind='wrapper',parent='100',job_id=job,**shared)
+    states={'100':'running','101':'running','102':'failed'};calls=[]
+    def runner(cmd,**kw):
+        calls.append(cmd)
+        job=cmd[2] if cmd[0] in ('qstat','qacct','sacct') else cmd[cmd.index('-j')+1]
+        state=states.get(job)
+        if cmd[0]=='qstat':rc,out=(0,f'job_number: {job}\n') if state=='running' else (1,'')
+        elif cmd[0]=='qacct':
+            rc=0 if state in ('success','failed') else 1
+            out=f'jobnumber {job}\ntaskid undefined\nfailed 0\nexit_status {1 if state=="failed" else 0}\n' if rc==0 else ''
+        elif cmd[0]=='squeue':rc,out=0,(f'{job}|RUNNING\n' if state=='running' else '')
+        elif cmd[0]=='sacct':rc,out=0,(f'{job}|FAILED|1:0\n' if state=='failed' else f'{job}|COMPLETED|0:0\n' if state=='success' else '')
+        else:pytest.fail('inspection used wrong scheduler client: '+str(cmd))
+        return SimpleNamespace(returncode=rc,stdout=out,stderr='')
+    return SimpleNamespace(root=root,deployment=d,nb=nb,states=states,calls=calls,runner=runner,
+                           task=task,tasks=tasks,logs=logs,submitted=submitted,now=submitted+3600,journal=journal)
+
+
+def test_native_child_inspection_follows_every_retained_job(native_scheduler_run):
+    run=native_scheduler_run
+    report=inspect_jobs(run.deployment,run.nb,runner=run.runner,now=run.now)
+    assert report['scheduler_ok'] is True and report['count']==1
+    assert set(report['jobs'])=={'100','101','102'}
+    assert report['jobs']['102']['kind']=='child' and report['jobs']['102']['status']=='EXIT'
+    assert all(row['membership'] for row in report['jobs'].values())
+    assert report['dead_children'][0]['job_id']=='102' and report['dead_children'][0]['wrapper_job_id']=='101'
+    assert report['dead_children'][0]['scheduler']==run.deployment.backend
+    assert {cmd[0] for cmd in run.calls}==({'qstat','qacct'} if run.deployment.backend=='sge' else {'squeue','sacct'})
+
+
+@pytest.mark.parametrize('failed_job',['100','101','102'])
+def test_native_unknown_status_is_an_error(native_scheduler_run,failed_job):
+    run=native_scheduler_run;run.states.pop(failed_job)
+    with pytest.raises(RuntimeError,match='inspection failed for job '+failed_job):
+        inspect_jobs(run.deployment,run.nb,runner=run.runner,now=run.now)
+
+
+def test_native_child_grace_uses_actual_sos_submission(native_scheduler_run):
+    run=native_scheduler_run
+    report=inspect_jobs(run.deployment,run.nb,runner=run.runner,now=run.submitted+599)
+    assert report['count']==0 and report['jobs']['102']['status']=='EXIT'
+    run.states['102']='running'
+    report=inspect_jobs(run.deployment,run.nb,runner=run.runner,now=run.now)
+    assert report['count']==0 and report['jobs']['102']['status']=='RUN'
+
+
+@pytest.mark.parametrize('missing',['task','job_id','script','wrapper_log'])
+def test_native_missing_child_evidence_never_means_clean(native_scheduler_run,missing):
+    run=native_scheduler_run
+    # Corrupt contents in place: preserve each test artifact for diagnostics.
+    path={'task':run.tasks/(run.task+'.task'),'job_id':run.tasks/(run.task+'.job_id'),
+          'script':run.tasks/(run.task+'.sh'),'wrapper_log':run.logs/'101.err'}[missing]
+    if missing=='wrapper_log':
+        # Point the selected profile at a nonexistent exact stream directory.
+        profile=Path(run.deployment.profile_path)/'config.yaml'
+        profile.write_text(profile.read_text().replace(str(run.logs),str(run.root/'unavailable-logs')))
+    else:path.write_text('invalid\n')
+    with pytest.raises(RuntimeError):inspect_jobs(run.deployment,run.nb,runner=run.runner,now=run.now)
+
+
+def test_native_inspection_does_not_adopt_unrelated_shared_home_tasks(native_scheduler_run):
+    run=native_scheduler_run
+    (run.tasks/'tunrelated.job_id').write_text('job_id: 999\n')
+    report=inspect_jobs(run.deployment,run.nb,runner=run.runner,now=run.now,requested_ids=['999'])
+    assert report['jobs']['999']['membership'] is False
+    assert all('999' not in cmd for cmd in run.calls)
+
+
+def test_harness_inspection_surfaces_native_child_failure(native_scheduler_run,monkeypatch):
+    from fungen_operator import harness as h
+    run=native_scheduler_run
+    obj=h.Harness.__new__(h.Harness);obj.deployment=run.deployment;obj.registry=run.deployment.registry
+    obj.executor=SimpleNamespace(can_schedule=True,can_inspect=True,logs=lambda *a:{})
+    monkeypatch.setattr(h,'Notebook',lambda *a:SimpleNamespace(read=lambda:run.nb))
+    monkeypatch.setattr('fungen_operator.run_jobs.subprocess.run',run.runner)
+    request=SimpleNamespace(notebook='/unused',dead_child_grace_minutes=0,paths=[])
+    result=obj.inspect(request)
+    assert result['scheduler_ok'] and result['dead_child_count']==1
+    assert result['cells'][0]['scheduler']['status']=='RUN'
+    run.states.pop('102')
+    with pytest.raises(RuntimeError,match='inspection failed for job 102'):obj.inspect(request)
+
+
+def test_native_duplicate_retained_receipts_count_a_child_once(native_scheduler_run):
+    run=native_scheduler_run
+    path=run.root/'controller.100.err';path.write_text(path.read_text()*2)
+    path=run.logs/'101.err';path.write_text(path.read_text()*2)
+    report=inspect_jobs(run.deployment,run.nb,runner=run.runner,now=run.now)
+    assert report['count']==1
+    assert len([cmd for cmd in run.calls if cmd[0] in ('qacct','sacct')])==1
+
+
+@pytest.mark.parametrize('kind',['wrapper','child'])
+def test_native_unsupported_receipt_is_an_error(native_scheduler_run,kind):
+    run=native_scheduler_run
+    if kind=='wrapper':
+        path=run.root/'controller.100.err';path.write_text(path.read_text().replace("'101'","'101.1-4:1'"))
+    else:
+        path=run.logs/'101.err';path.write_text(path.read_text().replace('job id 102','job id 102.1'))
+    with pytest.raises(RuntimeError):inspect_jobs(run.deployment,run.nb,runner=run.runner,now=run.now)
+
+
+def test_missing_scheduler_discriminator_is_rejected_before_query():
+    called=[]
+    with pytest.raises(AttributeError):
+        inspect_jobs(SimpleNamespace(),nbformat.v4.new_notebook(),runner=lambda *a,**k:called.append(a))
+    assert called==[]
+
+
+def test_lsf_fixture_is_a_valid_deployment(native_run):
+    assert isinstance(native_run.deployment,Deployment) and native_run.deployment.backend=='lsf'
+    native_run.deployment.validate_layout()
+
+
+def test_public_empty_lsf_inspection_is_not_verified(tmp_path,monkeypatch):
+    from fungen_operator import harness as h
+    obj=h.Harness.__new__(h.Harness)
+    d=create_fixture(tmp_path/'layout');obj.deployment=d.model_copy(update={'backend':'lsf'})
+    obj.registry=obj.deployment.registry
+    obj.executor=SimpleNamespace(can_schedule=True,can_inspect=True,logs=lambda *a:{})
+    monkeypatch.setattr(h,'Notebook',lambda *a:SimpleNamespace(read=nbformat.v4.new_notebook))
+    result=obj.inspect(SimpleNamespace(notebook='/unused',dead_child_grace_minutes=0,paths=[]))
+    assert result['inspection_status']=='not_verified'
+    assert result['scheduler_ok'] is False and result['dead_child_count'] is None
+    assert result['discovery_coverage']['verified'] is False
+    assert 'No retained controller receipts' in result['discovery_coverage']['reason']
+    assert result['jobs']=={}
+
+
+@pytest.mark.parametrize('scheduler',['lsf','sge','slurm'])
+def test_public_cli_incomplete_discovery_exits_nonzero(tmp_path,scheduler):
+    import subprocess
+    d=create_fixture(tmp_path/'layout').model_copy(update={'backend':scheduler})
+    deployment=tmp_path/'deployment.json';deployment.write_text(d.model_dump_json())
+    book=Path(d.run_root)/'operator.ipynb';nbformat.write(nbformat.v4.new_notebook(),book)
+    result=subprocess.run([sys.executable,'-m','fungen_operator','inspect','--deployment',str(deployment),
+                           '--notebook',str(book)],capture_output=True,text=True,timeout=30)
+    assert result.returncode==1,result.stderr
+    data=json.loads(result.stdout)
+    assert data['inspection_status']=='not_verified' and data['scheduler_ok'] is False
+    assert data['discovery_coverage']['verified'] is False and data['dead_child_count'] is None
+
+
+def test_public_lsf_missing_journal_retains_observed_controller(native_run,monkeypatch):
+    from fungen_operator import harness as h
+    run=native_run
+    run.nb.cells[0].metadata.fungen.status='submitted'
+    from fungen_operator import cluster
+    logs=run.root/'rules';logs.mkdir()
+    command=shlex.join([sys.executable,str(Path(cluster.__file__).resolve()),'submit','--scheduler','lsf','--logs',str(logs)])
+    (Path(run.deployment.profile_path)/'config.yaml').write_text(yaml.safe_dump({'cluster':command}))
+    obj=h.Harness.__new__(h.Harness);obj.deployment=run.deployment;obj.registry=run.deployment.registry
+    obj.executor=SimpleNamespace(can_schedule=True,can_inspect=True,logs=lambda *a:{})
+    monkeypatch.setattr(h,'Notebook',lambda *a:SimpleNamespace(read=lambda:run.nb))
+    monkeypatch.setattr('fungen_operator.cluster.job_status',lambda scheduler,job,**kw:'running')
+    result=obj.inspect(SimpleNamespace(notebook='/unused',dead_child_grace_minutes=0,paths=[]))
+    assert result['scheduler_ok'] is False and result['dead_child_count'] is None
+    assert result['inspection_status']=='not_verified' and result['discovery_coverage']['verified'] is False
+    assert result['jobs']['100']['status']=='RUN'
+    assert 'submissions.jsonl' in result['discovery_coverage']['reason']
+
+
+def test_lsf_uses_the_common_positive_journal_verifier(native_scheduler_run):
+    """The same graph/stream proof works for LSF; query success alone does not."""
+    run=native_scheduler_run
+    from fungen_operator import cluster
+    d=run.deployment.model_copy(update={'backend':'lsf'})
+    profile=Path(d.profile_path)/'config.yaml'
+    command=shlex.join([sys.executable,str(Path(cluster.__file__).resolve()),'submit','--scheduler','lsf','--logs',str(run.logs)])
+    profile.write_text(yaml.safe_dump({'cluster':command}))
+    records=[json.loads(line) for line in run.journal.read_text().splitlines()]
+    run.journal.write_text(''.join(json.dumps(dict(row,scheduler='lsf'))+'\n' for row in records))
+    calls=[]
+    def runner(cmd,**kwargs):
+        calls.append(cmd);assert cmd[0]=='bjobs'
+        job=cmd[-1];state={'running':'RUN','success':'DONE','failed':'EXIT'}[run.states[job]]
+        return SimpleNamespace(returncode=0,stdout=state+'\n',stderr='')
+    result=inspect_jobs(d,run.nb,runner=runner,now=run.now,require_coverage=True)
+    assert result['coverage']==dict(verified=True,controllers=1,wrappers=1,tasks=1)
+    assert result['scheduler_ok'] is True and result['count']==1
+    assert set(result['jobs'])=={'100','101','102'}
+    assert len(calls)==3
+    # Controller-only historical journals cannot account for emitted wrappers.
+    run.journal.write_text(''.join(json.dumps(dict(row,scheduler='lsf'))+'\n' for row in records if row['kind']=='controller'))
+    result=inspect_jobs(d,run.nb,runner=runner,now=run.now,require_coverage=True)
+    assert result['coverage']['verified'] is False and result['scheduler_ok'] is False
+    assert result['count'] is None
+    assert 'Controller stream does not establish' in result['coverage']['reason']
+
+
+@pytest.mark.parametrize('stream,content',[
+    ('controller',''),('wrapper',''),
+    ('controller',"Submitted job 4 with external jobid '101'"),
+    ('controller','Submitted job 4 with unrecognized receipt data\n'),
+    ('wrapper','INFO: t0123456789abcdef submitted to fungen_sge with job id\n'),
+    ('wrapper','workflow noise without submission evidence\n')])
+def test_readable_incomplete_native_stream_never_claims_coverage(native_scheduler_run,stream,content):
+    from fungen_operator.run_jobs import NativeDiscoveryIncomplete
+    run=native_scheduler_run
+    path=run.root/'controller.100.err' if stream=='controller' else run.logs/'101.err'
+    path.write_text(content)
+    with pytest.raises(NativeDiscoveryIncomplete) as error:
+        inspect_jobs(run.deployment,run.nb,runner=run.runner,now=run.now)
+    assert error.value.coverage_verified is False
+    assert error.value.observed_jobs['100']['status']=='RUN'
+    if stream=='wrapper':assert error.value.observed_jobs['101']['status']=='RUN'
+
+
+def test_unfinished_native_submission_intent_is_unverified(native_scheduler_run):
+    from fungen_operator.cluster import journal_event
+    from fungen_operator.run_jobs import NativeDiscoveryIncomplete
+    run=native_scheduler_run
+    journal_event(run.journal,event='intent',kind='wrapper',controller='100',parent='100',scheduler=run.deployment.backend,attempt='unresolved',snakemake_job_id='5',rule='test')
+    with pytest.raises(NativeDiscoveryIncomplete,match='intent has no complete receipt'):
+        inspect_jobs(run.deployment,run.nb,runner=run.runner,now=run.now)
+
+
+def test_positive_child_free_wrapper_requires_closed_native_boundary(native_scheduler_run):
+    from fungen_operator.cluster import journal_event
+    from fungen_operator.run_jobs import NativeDiscoveryIncomplete
+    run=native_scheduler_run
+    records=[json.loads(line) for line in run.journal.read_text().splitlines()]
+    run.journal.write_text(''.join(json.dumps(r)+'\n' for r in records if r['kind']!='child'))
+    (run.logs/'101.err').write_text('Non-SoS rule completed.\n')
+    run.states['101']='success'
+    with pytest.raises(NativeDiscoveryIncomplete,match='child-free completion boundary'):
+        inspect_jobs(run.deployment,run.nb,runner=run.runner,now=run.now)
+    journal_event(run.journal,event='end',kind='wrapper',controller='100',parent='100',job_id='101',scheduler=run.deployment.backend,exit_code=0)
+    report=inspect_jobs(run.deployment,run.nb,runner=run.runner,now=run.now)
+    assert report['count']==0 and report['coverage']==dict(verified=True,controllers=1,wrappers=1,tasks=0)
+    assert report['jobs']['101']['status']=='DONE'
+
+
+def test_positive_zero_rule_controller_requires_closed_native_boundary(native_scheduler_run):
+    from fungen_operator.cluster import journal_event
+    from fungen_operator.run_jobs import NativeDiscoveryIncomplete
+    run=native_scheduler_run
+    records=[json.loads(line) for line in run.journal.read_text().splitlines()]
+    run.journal.write_text(''.join(json.dumps(r)+'\n' for r in records if r['kind']=='controller'))
+    (run.root/'controller.100.err').write_text('Nothing to be done (all requested files are present and up to date).\n')
+    run.states['100']='success'
+    with pytest.raises(NativeDiscoveryIncomplete,match='zero-submission completion boundary'):
+        inspect_jobs(run.deployment,run.nb,runner=run.runner,now=run.now)
+    journal_event(run.journal,event='end',kind='controller',controller='100',job_id='100',scheduler=run.deployment.backend,exit_code=0)
+    report=inspect_jobs(run.deployment,run.nb,runner=run.runner,now=run.now)
+    assert report['count']==0 and report['coverage']==dict(verified=True,controllers=1,wrappers=0,tasks=0)
+
+
+def test_partial_valid_stream_cannot_hide_a_second_receipt(native_scheduler_run):
+    from fungen_operator.cluster import journal_event
+    from fungen_operator.run_jobs import NativeDiscoveryIncomplete
+    run=native_scheduler_run
+    event=dict(kind='child',controller='100',parent='101',scheduler=run.deployment.backend,attempt='second',task_id='tsecond')
+    journal_event(run.journal,event='intent',**event)
+    journal_event(run.journal,event='receipt',job_id='103',**event)
+    with pytest.raises(NativeDiscoveryIncomplete,match='Wrapper stream does not establish'):
+        inspect_jobs(run.deployment,run.nb,runner=run.runner,now=run.now)
+
+
+def test_native_journal_change_during_status_queries_is_incomplete(native_scheduler_run,monkeypatch):
+    from fungen_operator import cluster
+    from fungen_operator.run_jobs import NativeDiscoveryIncomplete
+    run=native_scheduler_run;read=cluster.journal_records;calls=[]
+    def changing(path,controllers):
+        calls.append(1)
+        if len(calls)==2:
+            cluster.journal_event(path,event='intent',kind='child',controller='100',parent='101',scheduler=run.deployment.backend,attempt='new',task_id='tnew')
+        return read(path,controllers)
+    monkeypatch.setattr(cluster,'journal_records',changing)
+    with pytest.raises(NativeDiscoveryIncomplete,match='Submission set changed'):
+        inspect_jobs(run.deployment,run.nb,runner=run.runner,now=run.now)
+
+
+def test_native_profile_cannot_bypass_submission_journaling(native_scheduler_run):
+    run=native_scheduler_run
+    path=Path(run.deployment.profile_path)/'config.yaml'
+    doc=yaml.safe_load(path.read_text());doc['cluster']=doc['cluster'].replace('cluster.py','untracked.py');path.write_text(yaml.safe_dump(doc))
+    with pytest.raises(RuntimeError,match='canonical tracked cluster adapter'):
+        inspect_jobs(run.deployment,run.nb,runner=run.runner,now=run.now)
+
+
+def test_native_task_host_cannot_bypass_submission_journaling(native_scheduler_run):
+    run=native_scheduler_run
+    host=run.root/'untracked.yaml';host.write_text(yaml.safe_dump({'hosts':{'bad':{'queue_type':'pbs','submit_cmd':'qsub -terse {job_file}'}}}))
+    path=run.root/'config.yaml';doc=yaml.safe_load(path.read_text());doc['minerva']=str(host);path.write_text(yaml.safe_dump(doc))
+    with pytest.raises(RuntimeError,match='SoS task host does not use the canonical tracked'):
+        inspect_jobs(run.deployment,run.nb,runner=run.runner,now=run.now)
+
+
+def test_local_deployment_never_selects_lsf_inspection(tmp_path):
+    original=create_fixture(tmp_path/'local-layout')
+    deployment=Deployment.model_validate({**original.model_dump(),'backend':'local'})
+    with pytest.raises(ValueError,match='not applicable to backend local'):
+        inspect_jobs(deployment,nbformat.v4.new_notebook(),runner=lambda *a,**k:pytest.fail('local backend selected LSF'))
+
+
+def test_lsf_canonical_adapter_receipts_link_exact_native_children(native_run):
+    from fungen_operator import cluster
+    run=native_run
+    logs=run.root/'logs/rules';logs.mkdir(parents=True)
+    profile=Path(run.deployment.profile_path)
+    (profile/'config.yaml').write_text(yaml.safe_dump({'cluster':shlex.join([
+        sys.executable,str(Path(cluster.__file__).resolve()),'submit','--scheduler','lsf','--logs',str(logs)])}))
+    Path(str(run.root/'controller')+'.100.err').write_text("Submitted job 4 with external jobid '101'.\n")
+    (logs/'101.out').write_text('INFO: t47c2496b7e5a91cb submitted to premium with job id 102\n')
+    (logs/'101.err').write_text('')
+    run.records[1]['OUTPUT_FILE']=str(logs/'101.out')
+    report=inspect_jobs(run.deployment,run.nb,runner=run.runner,now=run.now)
+    assert all(report['jobs'][job]['membership'] for job in ('100','101','102'))
+    assert report['count']==1 and report['dead_children'][0]['wrapper_job_id']=='101'
