@@ -6,7 +6,7 @@ Status: round 2 implementation contract, 2026-10-20. Local build and acceptance 
 
 One public Apptainer image is the installer and the model server for the fungen operator. It recreates on any machine the setup Minerva uses today: the Ollama image only serves the model (on a GPU, as a batch job on a cluster), while Codex and the operator run on the host and submit jobs through the host's own scheduler.
 
-    apptainer pull fungen.sif library://<sylabs-user>/fungen/operator:<version>
+    apptainer pull fungen.sif oras://ghcr.io/hsun3163/fungen-operator:<tag>
     apptainer run fungen.sif            # setup: installs onto the host
     apptainer run --nv fungen.sif serve # model server (the only thing that runs inside the image)
 
@@ -40,7 +40,7 @@ Not in the image: models, credentials, data, site-specific paths, anything from 
    | `laguna-s-2.1:q8_0` | 128 GB | one 141 GB GPU (tight) or two 80 GB GPUs |
 
    Default: the largest choice that fits the GPU memory setup can see (it asks the scheduler or runs a short GPU probe); `laguna-xs-2.1:q4_K_M` when it cannot tell. The serve job requests a matching GPU count. An advanced option sets a longer context window (for example 256k), built locally as a Modelfile variant; it needs extra GPU memory.
-5. **Server launcher (local backend):** detects the scheduler (LSF, Slurm or none) and writes `~/.fungen/serve.<scheduler>.sh`, a GPU job that runs `apptainer run --nv fungen.sif serve` and records the node and port. On a laptop it is a plain background command.
+5. **Server launcher (local backend):** detects the scheduler (LSF, Slurm, SGE or none) and writes `~/.fungen/serve.<scheduler>.sh`, a GPU job that runs `apptainer run --nv fungen.sif serve` and records the node and port. On a laptop it is a plain background command.
 6. **Config:** `~/.config/fungen/config.toml` (backend, model, model folder, image path, port, scheduler).
 7. **Check (§5)**, then prints the two commands for next time.
 
@@ -63,15 +63,15 @@ After the wizard the user runs `fungen codex` and asks to set up the xQTL protoc
    - **mamba**, from conda environment files carrying pinned versions (the route that must pass);
    - **pixi**, through StatFunGen's pixi-setup (upstream's documented route), offered with any limitation found on test sites stated.
 3. **Reference data:** name and size the references required by the selected starting boundary. The prepared PLINK/normalized phenotype-BED chain uses GRCh38 coordinates and fixture-derived trait annotation (under 100 KB); its LD comes from the synthetic genotypes, so it requires zero external reference bytes. Raw RNA alignment would additionally need the protocol's Ensembl 103 FASTA (about 840 MB) and GTF (about 47 MB); record these as optional, rather than downloading unused references.
-4. **Scheduler:** detects LSF, Slurm or none and writes the Snakemake profile with resource defaults.
+4. **Scheduler:** detects LSF, Slurm, SGE or none and writes the Snakemake profile with resource defaults.
 5. **Test run up to fine-mapping** on synthetic data with planted eQTLs: genotype QC → phenotype preparation → covariates (PCA, hidden factors) → cis-eQTL scan (TensorQTL) → SuSiE fine-mapping on a few regions. Passes when every step finishes on the user's scheduler and the planted eQTLs are recovered.
 6. **Hand-off:** an operator deployment for the user's own data and the notebook recording what was installed and tested.
 
-The selected test is a de novo seeded fixture, never a legacy MWE or real individual: 500 participants, four regions, 512 variants, six RNA contexts, 24 planted traits and 24 null traits. Freeze the recovery criterion before fitting: every planted causal pair has nominal P < 5E-8 in its expected counted-allele direction and belongs to a 95% SuSiE credible set; at most one null trait crosses that threshold. The seed is 20261020. The upstream workflow pin is `f66555213b5deeb68d347690493b694de923ef4d`; retain and record its interface patch for current QtlDataset/SoS workers, scheduler integration, normal SoS signatures and PCA/FAM sample identity. Statistical calculations remain upstream. Mamba uses pinned Miniforge 26.7.2-0 and the versioned environment file plus its explicit 790-package hash lock, including susieR 0.16.6 required by pecotmr 0.9.3. Pixi remains offered with the tested Minerva limitation stated explicitly.
+The selected test is a de novo seeded fixture, never a legacy MWE or real individual: 500 participants, four regions, 512 variants, six RNA contexts, 24 planted traits and 24 null traits. Freeze the recovery criterion before fitting: every planted causal pair has nominal P < 5E-8 in its expected counted-allele direction and belongs to a 95% SuSiE credible set; at most one null trait crosses that threshold. The seed is 20261020. The upstream workflow pin is `e1095f6354da6a4d2c43ef812eeb099a19fe93d2`; retain and record its interface patch for current QtlDataset/SoS workers, scheduler integration, normal SoS signatures and PCA/FAM sample identity. Statistical calculations remain upstream. Mamba uses pinned Miniforge 26.7.2-0 and the versioned environment file plus its explicit 800-package hash lock, including susieR 0.16.6 required by pecotmr 0.9.5. Pixi remains offered with the tested Minerva limitation stated explicitly.
 
 ## 5. Checks (`fungen check`)
 
-Each item reports pass or fail with the exact fix.
+Each item reports PASS, FAIL or PENDING with the exact next action. PENDING runtime checks produce an overall NOT VERIFIED result and nonzero exit status. Run `fungen serve`, then `fungen check`. Runtime readiness uses the recorded launch/job, endpoint and selected-model positive VRAM observation; failed status retrieval and empty/failed GPU observations block success. The post-warm-up VRAM criterion refuses CPU-only readiness and permits partial offload; exclusive GPU inference is unverified.
 
 | Check | Applies to |
 |---|---|
@@ -96,17 +96,20 @@ On Minerva, as a stranger would: a fresh shell, a clean home-like directory and 
 | Port 11434 busy | another port chosen and recorded |
 | No network | offline guidance (download on a login node or another machine, then point at the folder) |
 | Re-run after a completed setup; after an interrupted download | no changes; download resumes |
-| Slurm and no-scheduler serve scripts | generated and syntax-checked (live run on LSF only) |
+| Slurm, SGE and no-scheduler serve scripts | generated and syntax-checked (live run on LSF only) |
 
 ## 7. Distribution
 
 | Item | Value |
 |---|---|
-| Registry | Sylabs library, public: `library://<sylabs-user>/fungen/operator` |
-| Tags | `<operator version>` and `latest` |
-| Build | Sylabs remote builder from `container/fungen.def`; also buildable from `container/Dockerfile` |
-| Signing | Signed with Hao's Sylabs key when available |
+| Registry | GitHub Container Registry through ORAS, public package: `oras://ghcr.io/hsun3163/fungen-operator` (replaces the Sylabs Cloud Library, which reached end of life in late October 2026) |
+| Tags | `ollama0.40.6-codex0.155.1` and `latest` |
+| Build | Native Minerva build (`container/build.lsf`) from `container/Dockerfile` and `container/fungen.def` |
+| Publishing | `singularity remote login --username <user> --password-stdin oras://ghcr.io` with a GitHub token that has `write:packages`, then `singularity push <sif> oras://ghcr.io/hsun3163/fungen-operator:<tag>`; set the package visibility to public in its GitHub package settings |
+| Signing | Identified by the SIF SHA256 and the bundled source commit (`source.json`), recorded in `container/VALIDATION.md` with the publication of a given build |
 | Source | `container/` in the fungen-operator repository |
+
+    apptainer pull fungen.sif oras://ghcr.io/hsun3163/fungen-operator:<tag>   # or singularity pull
 
 ## 8. Out of scope
 
@@ -116,6 +119,22 @@ Claude Code; Ollama Cloud; models other than Laguna XS and S; the scientific wor
 
 | Decision | Proposed default |
 |---|---|
-| Sylabs account and collection name | `<sylabs-user>/fungen/operator` |
+| Registry package | `ghcr.io/hsun3163/fungen-operator`, public |
 | Install folder and PATH edit | `~/.fungen`, PATH edit after confirmation |
 | Operator version in the first public tag | the current main commit once its push is done |
+
+
+Current host persistence checks require named shared storage or a matching physical
+host block-device identity in the kernel. Private/memory/virtual sources and
+unproven subdirectory binds stop before installation writes. Native SGE/Slurm
+inspection traces retained controller, rule and SoS task receipts and queries the
+configured scheduler; missing evidence and unknown job/accounting state are errors.
+Local actions complete synchronously and replay proceeds without a scheduler ID.
+
+Native discovery verifies an intent/receipt journal against controller/rule streams
+and SoS task records. Readable empty or malformed streams are incomplete when the
+journal expects submissions. Positive completion boundaries prove genuinely
+child-free jobs; observed statuses remain attached to incomplete-coverage errors.
+Build contexts read the captured commit's Git blobs, not mutable worktree content.
+Local restart uses observed process birth identity; a live failing endpoint is
+reported without a duplicate launch and a proven vanished PID can start afresh.

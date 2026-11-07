@@ -1,14 +1,14 @@
 # Container validation — round 2, 2026-10-21
 
-Status: **required local acceptance PASS**, including the fresh Mamba RNA chain. Pixi has the optional upstream installation failure documented below. This record replaces the obsolete round-1 Ollama architecture blocker. No registry publication or push is part of this round.
+Status: **required local acceptance PASS**, including the fresh Mamba RNA chain. Pixi has the optional upstream installation failure documented below. SGE support and the BU SCC field feedback fixes are later source additions (2026-11-05 and 2026-11-06 entries below) awaiting an image rebuild. This record replaces the obsolete round-1 Ollama architecture blocker. No registry publication or push is part of this round.
 
 ## Pinned payload and build
 
 - Base: **ollama/ollama:0.40.6**, the latest official release resolved for this round; published 2026-10-16. [Official release](https://github.com/ollama/ollama/releases/tag/v0.40.6).
 - Bundled host Codex: **0.155.1**; existing **0.162.1** is retained. A newer client was tested during tool-startup diagnosis and was not needed.
 - Host Python: **3.12.13**; uv: **0.13.4**. The offline operator wheel and dependencies are installed with bundled uv.
-- Scientific environment: Python **3.11.13**, Snakemake **7.32.4**, R **4.5.1**, TensorQTL **1.0.10**, pecotmr **0.9.3**, pinned Miniforge **26.7.2-0**. The environment YAML pins direct packages; the bundled explicit lock records 790 package URLs and hashes.
-- Upstream xQTL: **f66555213b5deeb68d347690493b694de923ef4d**, Snakemake entrypoint `code/snakemake`.
+- Scientific environment (current source, 2026-11-06): Python **3.11.13**, Snakemake **7.32.4**, R **4.5.1**, TensorQTL **1.0.10**, pecotmr **0.9.5**, pinned Miniforge **26.7.2-0**. The environment YAML pins direct packages; the bundled explicit lock records 800 package URLs and hashes.
+- Upstream xQTL (current source, 2026-11-06): **e1095f6354da6a4d2c43ef812eeb099a19fe93d2**, Snakemake entrypoint `code/snakemake`.
 
 The Minerva build reuses the allowlisted context, user-namespace `unshare`/chroot installer, local Docker archive and Singularity 3.11 `docker-archive://` conversion. No Docker daemon or registry push is involved. Runtime home isolation uses `--home`, not `--env HOME`. The context excludes models, personal data, credentials and caches; historical personal path examples are replaced with portable placeholders.
 
@@ -48,7 +48,7 @@ One initial RNA6 KING task was aborted after SoS reported a missing pulse file (
 
 The retained upstream interface patch supplies the current QtlDataset and per-gene SoS arguments, normal SoS execution signatures, LSF integration, and PCA projection IDs derived from PLINK FAM order. It also normalizes FID=IID consistently with the upstream phenotype-ID convention. Statistical calculations remain upstream. A separate native R regression passes three FAM identity conventions and three sample-count mismatch guards (job **277596531**).
 
-A fresh environment exposed a missing runtime dependency constraint: the YAML-only solve selected susieR 0.14.2, while pecotmr 0.9.3 requires at least 0.16.4. The working environment and existing explicit lock use **0.16.6**. The YAML now pins it, and the installer uses the complete **790-package hash lock** for native create/install operations. Changing either specification invalidates the software stamp. A fresh prefix installed from that lock and passed every runtime import check (job **277611572 DONE**); the failed unlocked prefix remains for evidence. The subsequent delivered-image sequence uses this new prefix, source checkout and newly generated fixture.
+During round 2, a fresh environment exposed a missing runtime dependency constraint: the YAML-only solve selected susieR 0.14.2 although the runtime required at least 0.16.4. The round-2 environment and hash lock used **0.16.6**; the fresh-prefix import check passed in job **277611572 DONE**. The current source retains **susieR 0.16.6** for **pecotmr 0.9.5** and uses the expanded **800-package hash lock**. Its new fresh-prefix validation is recorded in the dated 2026-11-06 section below. Changing the YAML, lock or retained SoS pulse repair invalidates the software stamp.
 
 The prepared PLINK/normalized phenotype-BED boundary needs **zero external reference download bytes**: GRCh38 coordinates and synthetic trait annotations are under 100 KB, and LD comes from the fixture genotypes. Optional raw-RNA alignment references are named separately: Ensembl 103 FASTA about 840 MB compressed and GTF about 47 MB compressed. Unused references are not downloaded.
 
@@ -77,6 +77,34 @@ The final edge replay **277601243 DONE** ran from the delivered locked SIF. Earl
 Only this session's test jobs were stopped. The XS server **277603122** was stopped after its operator proof completed. The remaining staged S server **277597292** was stopped after the final edge replay. The earlier failed XS test actor **277609167** was stopped after repeated tool calls made that attempt fail its purpose. Unrelated user jobs, staging_models and minerva_jobs were not modified.
 
 
+## SGE support and backend switching — 2026-11-05
+
+`fungen backend` (show and switch `local`/`openai`), `fungen codex --backend` and setup's retention of local model settings under `--backend openai` are a source change with unit tests, included in the pending rebuild.
+
+SGE support is added in source: setup detection and the `sge` scheduler choice, `~/.fungen/serve.sge.sh` submitted with `qsub`, and the `profiles/sge` Snakemake profile through the operator's cluster adapter. Unit tests and `bash -n` syntax checks pass for it. Live SGE execution is the remaining validation; Minerva runs LSF, so no SGE cluster was available. The round-2 image predates this change; next step: rebuild and re-run acceptance.
+
+## Field feedback fixes (BU SCC) — 2026-11-06
+
+Source changes with unit tests, included in the pending rebuild:
+
+1. **Home mount check.** Setup requires named shared-storage or verified physical host block-device identity for home/config/install destinations; memory/private/unknown sources stop before installation writes and stops before writing with `Host home/config mount identity is unknown or private. Run: <runtime> run --home $HOME:$HOME <image>` when Singularity/Apptainer runs with home mounting disabled (`--contain` or a site configuration). A chosen install folder outside home must be visible too (`--bind FOLDER:FOLDER`).
+2. **Selected-model GPU offload.** The server refuses CPU-only readiness (no GPU, or selected model without positive VRAM after warm-up); partial offload may pass and exclusive GPU inference is unverified, and the serve job fails with the GPU-job/`--nv` fix. Setup on a login host reports that GPU offload remains unverified until the current launch starts and fungen check passes.
+3. **`fungen check` runtime verification.** PENDING denotes incomplete verification and the overall NOT VERIFIED result exits nonzero. Run `fungen serve`, then `fungen check`. Runtime checks use the recorded launch/job, endpoint and selected-model GPU observation. Failed status/API retrieval, empty GPU observations and failed jobs remain blocking.
+4. **SGE project.** With the `sge` scheduler, setup asks `SGE project (-P) []:` (also `--account`/`FUNGEN_ACCOUNT`), saves it as config `account`, and adds it as `#$ -P` to `serve.sge.sh` and as `-P` to pipeline `qsub` jobs. `fungen xqtl` inherits the launcher's account for a new xQTL root only for the same scheduler; `--account` overrides it. The account default follows the scheduler: `acc_LOAD` for LSF, empty otherwise. The scheduler default is the freshly detected scheduler; a previous answer is the default when detection finds none. `sos.yaml` (the LSF task host) is written for LSF; Slurm and SGE now generate native resource-aware SoS task hosts; local runs tasks in host rule processes. Scheduler-aware handoff/controller rendering and status are host-tested; site-native execution remains unverified for this source revision. The README adds the SGE interactive tip: add `-now no` to `qrsh` to wait for a GPU.
+5. **Host suite.** Run `.venv/bin/python -m pytest -q tests` on the host with the root README test environment (htslib, SoS/sos-pbs, host Codex 0.155.1). Required grader tools fail loudly when missing; tests are excluded from the image context. Historical in-image counts above describe the older build and do not validate the current host contract.
+6. **Build provenance.** `container/build.py context` refuses when any admitted file differs from HEAD (modified, staged, deleted or untracked), and records HEAD plus copied file hashes in `source.json`. The round-3 context implementation now reads one captured Git tree/blob snapshot and records source blob IDs, retaining dirty-input refusal and testing concurrent HEAD/worktree edits and index-hidden differences.
+7. **Distribution.** Images move from the Sylabs Cloud Library (end of life in late October 2026) to GitHub Container Registry through ORAS: `oras://ghcr.io/hsun3163/fungen-operator`, tags `ollama0.40.6-codex0.155.1` and `latest`. The publication of a given build is recorded here.
+8. **Local Codex launch.** On the local backend, interactive `fungen codex` selects the Ollama provider before onboarding: it sets `-c model_provider="ollama"` alongside `--oss`. `fungen codex -- exec` is unchanged.
+9. **Laguna model catalog.** Setup requires the shipped `<install>/codex/models.json` and pinned host client 0.155.1. It includes exact Q4_K_M/Q8_0 descriptors for both families and 32768/262144 contexts. Local launch validates the current endpoint inventory/quantization/context and supplies an immutable served-ID catalog. Model-facing overrides list only verified served IDs at the session context. Full host request comparisons preserve all base/message/tool assertions and explicitly allow only the changed picker list plus validated invocation identities/timestamps. The isolated endpoint covers both families and presets; live inventory/metadata replay in round 6 verifies only `laguna-s-2.1:q8_0-256k-t2` (Q8_0, 262144), without delegated inference. Other live availability and interactive configurations remain unverified.
+
+Current host suite counts and item-level evidence are recorded in `temp_reference/codex_fix_20261106/report.md`; this source awaits a rebuilt-image acceptance run.
+
+Suite: **669 passed, 0 failed, 0 skipped**, frozen host suite LSF **281314035** (2026-11-07). The 238-file source snapshot remained unchanged throughout; `temp_reference/codex_fix_20261106/round7-suite.json` records exit 0. Fresh guided xQTL acceptance: driver **281314034**, controller **281314225**, **259/259 DONE**, grader **24/24** nominal/direction and **24/24** credible-set recoveries, **0** null calls. Rebuilt-image installer/serve acceptance remains pending.
+
+**Live SGE validation (previous build).** A BU SCC user ran the previous build on SGE: SGE job submission works, an L40S GPU served the model, and `fungen check` passed 11/11.
+
+**Remaining validation:** re-run acceptance on the rebuilt image.
+
 ## Scope and evidence
 
 The specification was corrected to record the resolved pins, local-only acceptance, prepared-input reference boundary, frozen synthetic criterion and upstream interface patch. Section 7 publishing remains out of scope. No registry or git push occurred. The initial untracked portable MESA design document is preserved without adding it to these commits.
@@ -88,3 +116,47 @@ Final index: [~/sunh14_project/fungen-operator/temp_reference/container_round2/a
 Executed setup notebook: [~/sunh14_project/fungen-operator/temp_reference/container_round2/release/first-task/xqtl/setup.ipynb](http://127.0.0.1:30548/lab/tree/sunh14_project/fungen-operator/temp_reference/container_round2/release/first-task/xqtl/setup.ipynb)
 
 This single validation record and the consolidated acceptance JSON index are the review entrypoints. Native transcripts, notebooks and child logs remain together beneath that evidence folder. OpenAI device-code transcripts need not be opened to verify the bounded no-credential checks.
+
+
+## pecotmr 0.9.5 workflow update — 2026-11-06
+
+The current source pins xQTL `e1095f6354da6a4d2c43ef812eeb099a19fe93d2`,
+pecotmr 0.9.5 and susieR 0.16.6 with the existing 800-package explicit lock.
+Historical acceptance rows above describe their dated builds. The new host-only
+guided setup and final host suite are recorded in
+`temp_reference/codex_workflow_20261106/report.md`.
+
+Sample selection now reaches both analysis workers through the upstream
+`susie_twas --keep-samples` interface. The construct worker receives the unfiltered
+dataset inputs. The retained SoS 0.25.1 monitor patch keeps its published pulse
+path present during startup; native missing-heartbeat failure detection remains
+active. A deterministic regression exercises the real SoS monitor and status reader,
+reproduces the original false abort and verifies the repair.
+
+`container/onboarding.lsf` installs the explicit lock and applies the same monitor
+repair as guided software setup. To regenerate the lock after a pin change, use
+`python -m fungen_operator.lock` as documented in README: it overrides configured
+channels with the YAML channel order and writes the lock after a successful solve.
+The 800-package lock was retained for this update.
+
+
+**Fresh host guided setup: PASS.** Controller **281128220 DONE** completed all
+seven steps on its first attempt: a fresh pinned checkout, fresh 800-package
+software prefix, reference contract, scheduler profiles, frozen fixture, native
+`xqtl_core` dry-run/execution and validated handoff. The notebook records execution
+counts 1–7. All 81 Snakemake steps completed, with **48 nonempty fit RDS files**
+and **48 nonempty TWAS-weight RDS files**. The unchanged grader reports **24/24**
+nominal/direction recoveries, **24/24** causal variants in 95% credible sets and
+**0/24** null crossings. No pulse-file abort or ordinary resume occurred.
+The run used `bsub -K` with in-process waiting. Native logs and job receipts are
+retained beside the report through its `run/` link. This validates host workflow
+execution; image rebuilding/publication remain separate from this run.
+
+
+**Final host validation:** job **281141052 DONE** ran
+`.venv/bin/python -m pytest -q tests`: **587 passed in 118.94 seconds**, zero
+failed or skipped. The same job passed the retained PCA/FAM R regression for
+three sample-ID conventions and three count-mismatch guards. Focused cause
+regressions passed **31 tests** in job **281126926 DONE**. Final native job IDs,
+logs, package/patch hashes and frozen grading rows are indexed in
+`temp_reference/codex_workflow_20261106/report.md`.

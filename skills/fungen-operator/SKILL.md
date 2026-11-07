@@ -46,7 +46,22 @@ Setup, exact constraints, examples, and limitations: [prototype architecture](..
 ## First task: guided xQTL setup through fine-mapping
 
 Codex and this operator run on the host. The SIF installs the tools and serves
-Laguna on a GPU. Use `fungen serve`, `fungen codex`, and `fungen check` on the host.
+Laguna on a GPU. Use `fungen serve`, `fungen codex`, `fungen check`, and
+`fungen backend` (show or switch `local`/`openai`) on the host. `fungen check`
+rows are PASS, FAIL or PENDING; the server and GPU rows stay PENDING until
+`fungen serve` starts the GPU job and `fungen check` verifies the current endpoint and selected-model offload. PENDING produces NOT VERIFIED and a nonzero exit; run `fungen serve`, then `fungen check`. Failed scheduler/API retrieval is a failure.
+Local `fungen codex` uses the Ollama provider and the required shipped Laguna
+catalog. It validates exact IDs, quantization and context against the endpoint;
+`spawn_agent` lists only served Laguna choices matching the session context.
+Pinned 0.155.1 host captures verify both families/Q4/Q8/context presets against a
+model-free endpoint. The live round-6 inventory and metadata replay verify only
+`laguna-s-2.1:q8_0-256k-t2` at Q8_0/262144; other live choices and delegated
+inference remain unverified. A missing selected model or metadata is an error.
+Public native inspection requires the same journal proof on LSF, SGE and Slurm.
+Incomplete coverage is `not_verified` with `scheduler_ok: false`, an unknown
+dead-child count and a nonzero CLI exit. Fresh LSF, SGE and Slurm setups use the same tracked native rule/task adapter.
+Historical launches without intent/receipt records remain unverified; generate a
+fresh setup for the complete protocol.
 
 When asked to set up the xQTL protocol, use `fungen xqtl --root FOLDER`.
 It writes `setup.ipynb` before executing anything. Each fixed step asks the user
@@ -67,9 +82,10 @@ the notebook cells individually or resume with `--step STEP`.
    GRCh38 coordinates, a tiny synthetic trait annotation, fixture-derived LD.
    Full genome FASTA, dbSNP and RNA alignment indexes are upstream of this chain.
    Name and size optional Ensembl 103 references before any requested acquisition.
-4. `scheduler`: generate the detected LSF, Slurm or local profile. Cluster job
-   caps are 2000. Submit the controller on the host approval path outside the
-   sandbox. Each native Snakemake rule uses the same scheduler profile.
+4. `scheduler`: generate the detected LSF, Slurm, SGE or local profile. Cluster
+   job caps are 2000. Submit the controller on the host approval path outside the
+   sandbox. Each native Snakemake rule uses the same scheduler profile. On SGE the
+   saved project (`account`) becomes `qsub -P`; Slurm and SGE use native resource-aware SoS task hosts. Local runs tasks in host rule processes.
 5. `fixture`: generate 500 samples de novo with seed 20261020, four regions,
    512 variants and six artificial RNA contexts. Preserve 13 genotype covariate
    PCs, native hidden factors, TensorQTL and five-fold SuSiE/TWAS CV. Freeze the
