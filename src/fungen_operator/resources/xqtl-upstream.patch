@@ -204,7 +204,7 @@
  	                --phenotype-file {params.normalized_pheno_manifest} \
 --- a/code/snakemake/rules/06_univariate_finemapping.smk
 +++ b/code/snakemake/rules/06_univariate_finemapping.smk
-@@ -11,140 +11,95 @@
+@@ -11,140 +11,96 @@
  # ------------------------------------
  # Step 6.1 — Univariate SuSiE fine-mapping + TWAS weights
  # ------------------------------------
@@ -236,7 +236,6 @@
 +    input:
 +        genotype = lambda wc: get_plink_qc_bed(),
 +        manifest = "{cwd}/finemapping/{theme}/susie_twas/phenotype_manifest.tsv",
-+        samples = "{cwd}/finemapping/{theme}/susie_twas/sample_ids.txt",
 +    output:
 +        dataset = "{cwd}/finemapping/{theme}/susie_twas/qtl_dataset/{theme}.qtl_dataset.rds",
 +    params:
@@ -250,7 +249,7 @@
 +        Rscript {params.worker:q} --study {wildcards.theme:q} \
 +          --genotype-prefix $(printf '%s' {input.genotype:q} | sed 's/\\.bed$//') \
 +          --phenotype-manifest {input.manifest:q} --transpose-covariates \
-+          --keep-samples {input.samples:q} --output {output.dataset:q}
++          --output {output.dataset:q}
 +        """
 +
  rule susie_twas:
@@ -264,6 +263,7 @@
 +        covariates = lambda wc: get_hidden_factors(wc),
 +        dataset = "{cwd}/finemapping/{theme}/susie_twas/qtl_dataset/{theme}.qtl_dataset.rds",
 +        regions = "{cwd}/finemapping/{theme}/susie_twas/region_ids.txt",
++        samples = "{cwd}/finemapping/{theme}/susie_twas/sample_ids.txt",
      output:
          done = "{cwd}/finemapping/{theme}/susie_twas/.done_susie_twas",
      params:
@@ -369,6 +369,7 @@
 +          --cwd {params.outdir:q} --name {wildcards.theme:q} \
 +          --genoFile {input.genotype:q} --phenoFile {input.manifest:q} --covFile {input.covariates:q} \
 +          --region-name "${{genes[@]}}" --cis-window {params.window} \
++          --keep-samples {input.samples:q} \
 +          --seed {params.seed} --cv-folds 5 --cv-threads 1 \
 +          --modular-script-dir {params.scripts:q} --numThreads {threads} {params.sos_sched}
 +        python - {params.outdir:q} {input.regions:q} {wildcards.theme:q} <<'PY'
@@ -425,7 +426,7 @@
  # Step 6.2 — Fine-mapping credible set plots
 --- a/code/script/data_preprocessing/genotype/PCA.R
 +++ b/code/script/data_preprocessing/genotype/PCA.R
-@@ -112,6 +112,7 @@
+@@ -112,11 +112,23 @@
      if (!"FID" %in% colnames(pheno)) pheno$FID <- pheno$IID
    }
  
@@ -433,10 +434,10 @@
    pheno$ID <- paste(pheno$FID, pheno$IID, sep = ":")
    if (length(unique(pheno$ID)) != length(pheno$ID)) {
      stop("There are duplicated names in IID column of phenoFile")
-@@ -119,6 +119,17 @@
+   }
    pheno
- }
- 
++}
++
 +projection_with_ids <- function(projection, bed_file) {
 +  # flashpcaR's PLINK reader preserves FAM order but supplies no sample names.
 +  ids <- read_pheno_metadata(sub("\\.bed$", ".fam", bed_file))$ID
@@ -446,12 +447,10 @@
 +  pca <- tibble::rownames_to_column(pca, "ID")
 +  colnames(pca) <- c("ID", paste0("PC", seq_len(ncol(pca) - 1L)))
 +  pca
-+}
-+
+ }
+ 
  read_bim_reference <- function(geno_file) {
-   bim_file <- sub("\\.bed$", ".bim", resolve_bed_file(geno_file))
-   if (!file.exists(bim_file)) stop("Missing BIM file: ", bim_file)
-@@ -298,9 +309,7 @@
+@@ -298,9 +310,7 @@
      rownames(result$loadings) <- bim_reference$snp_ids
    }
  
@@ -462,7 +461,7 @@
  
    pheno <- read_pheno_metadata(pheno_file)
    pheno <- filter_pheno_by_pops(pheno, opt$`pop-col`, opt$`label-col`, pops)
-@@ -382,9 +391,7 @@
+@@ -382,9 +392,7 @@
                         orig_sd = f$scale[overlapped_variants],
                         ref_allele = bim_reference$ref_alleles)
  

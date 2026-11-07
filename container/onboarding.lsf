@@ -15,6 +15,12 @@ mamba=${FUNGEN_MAMBA:-$FUNGEN_TRIAL_ROOT/mamba/bin/mamba}
 if [[ ! -x $mamba ]]; then
     "$LS_SUBCWD/.venv/bin/python" -c 'from fungen_operator.onboarding import acquire_mamba; import os; acquire_mamba(os.environ["FUNGEN_TRIAL_ROOT"])'
 fi
+# Install the reviewed 800-package explicit lock; no channel solve is needed.
+# Regenerate only when pins change, on a host LSF allocation:
+# .venv/bin/python -m fungen_operator.lock --mamba "$mamba" \
+#   --prefix "$FUNGEN_TRIAL_ROOT/lock-solve" \
+#   --output "$LS_SUBCWD/src/fungen_operator/resources/xqtl-linux-64.lock"
 operation=create
-if [[ -f "$FUNGEN_TRIAL_ROOT/software/conda-meta/history" ]]; then operation=update; fi
-"$mamba" env "$operation" -y -p "$FUNGEN_TRIAL_ROOT/software" -f "$LS_SUBCWD/src/fungen_operator/resources/xqtl-mamba.yaml"
+if [[ -f "$FUNGEN_TRIAL_ROOT/software/conda-meta/history" ]]; then operation=install; fi
+"$mamba" "$operation" -y -p "$FUNGEN_TRIAL_ROOT/software" --file "$LS_SUBCWD/src/fungen_operator/resources/xqtl-linux-64.lock"
+"$LS_SUBCWD/.venv/bin/python" -c 'from fungen_operator.onboarding import patch_sos; import os; patch_sos({"software": os.environ["FUNGEN_TRIAL_ROOT"]+"/software"})'
