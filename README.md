@@ -7,18 +7,16 @@ operator wheel bundle and its skill. Models and credentials stay on the host.
 The current build targets Linux x86-64 with Apptainer/Singularity. The local
 backend needs an NVIDIA GPU; the OpenAI backend runs host Codex without one.
 
-The GitHub Container Registry package is private until the owner makes it public.
+The GitHub Container Registry image is public; pulling it requires no login.
 Release tags are `ollama0.40.6-codex0.155.1` and `latest`; the publication and
 acceptance of each build are recorded in [container/VALIDATION.md](container/VALIDATION.md).
-Authenticate with a GitHub token that has `read:packages` and package access, then pull:
 
 ```bash
-gh auth token | apptainer registry login --username hsun3163 --password-stdin oras://ghcr.io
-apptainer pull fungen.sif oras://ghcr.io/hsun3163/fungen-operator:ollama0.40.6-codex0.155.1
+apptainer pull fungen.sif oras://ghcr.io/hsun3163/fungen-operator:latest
 ```
 
-On Minerva, use `singularity remote login` for the login command and
-`singularity pull` for the pull. Check `sha256sum fungen.sif` against the release
+On Minerva, use `singularity pull` for the pull and retain the site's normal
+HTTP/HTTPS proxy environment on compute nodes. Check `sha256sum fungen.sif` against the release
 evidence. A registry manifest digest identifies metadata; the SIF SHA-256 identifies
 the downloaded image. You can also build `fungen.sif` with the [build recipe](container/README.md).
 
@@ -84,6 +82,9 @@ Only exact served IDs matching the session context become model-facing
 `spawn_agent` override choices. The selected model must have matching metadata;
 unavailable or invalid evidence blocks launch with the serve/check instruction.
 Downloaded templates alone do not establish that an endpoint serves a choice.
+`fungen check` validates the same served catalog before reporting local readiness;
+a tag/payload quantization mismatch is a failed metadata check, even when GPU
+inference itself is healthy.
 Host Codex 0.155.1 request captures verify both Laguna families, Q4/Q8 and both
 contexts against an isolated endpoint. They compare the complete request and
 every tool definition: the intentional behavior change is the local picker list;
@@ -94,7 +95,9 @@ The live service inventory checked in round 6 contains only
 the pinned host client lists exactly that alias. Other live model availability,
 interactive configurations and actual delegated inference remain unverified.
 The launcher requires the shipped catalog and pinned client, with rerun-setup
-instructions for missing or invalid assets. Setup upgrades to the image's operator bundle on re-run.
+instructions for missing or invalid assets. After the image has copied the installer bundle, `fungen setup` can reconfigure
+the retained installation on the host. Running the image installer again upgrades
+the installation to that image's operator bundle.
 Unchanged files are kept, and changed binaries are replaced atomically so a
 running host client retains its existing executable mapping.
 The PATH line is appended only after an explicit `yes`.
@@ -184,6 +187,8 @@ Ask Codex to “set up the xQTL protocol through fine-mapping”, or run:
 fungen xqtl --root /scratch/user/xqtl-setup
 ```
 
+The new-root guide asks for the freshly detected scheduler and, on SGE,
+`SGE project (-P) []:`; `--scheduler` and `--account` supply those answers.
 It writes `setup.ipynb` with one confirmed cell per step: pinned upstream workflow,
 software, references, scheduler profile, a new synthetic fixture, the native test
 chain, and hand-off. Each step checks its predecessors and retains a native log.

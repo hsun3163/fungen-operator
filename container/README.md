@@ -54,8 +54,8 @@ job IDs, exact scenario outcomes, image hash and remaining limitations belong in
 ## Publish and pull through GHCR
 
 GHCR replaces the retired Sylabs Cloud Library distribution path. Models and
-runtime state stay outside the image. The package stays private until the owner
-changes its visibility in GitHub package settings.
+runtime state stay outside the image. The released package is public and supports anonymous pulls. Authentication is
+needed only when publishing or accessing a private package.
 
 For a Minerva-built SIF from reviewed, committed source, run the publisher outside
 the sandbox on a network-capable host. Provide `GHCR_TOKEN` with `write:packages`
