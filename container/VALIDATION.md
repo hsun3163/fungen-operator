@@ -1,6 +1,6 @@
 # Container validation
 
-Status: **round-4 rebuilt-image acceptance PASS**, with **670 host tests passed, 0 failed/skipped**. The current image records source commit `33730da90f31edaa47a1f5c637f2b011080671c0`. Its installer, host Codex connection, selected-model GPU offload and all 12 `fungen check` rows passed. Both private GHCR release tags and the Google Drive replacement have matching-byte verification. The round-2 record below is historical; current release details are in the round-4 section at the end.
+Status: **round-5 / Release 2 rebuilt-image acceptance PASS**, with **696 frozen host tests passed, 0 failed/skipped**. Source **9910940bbd0ffbcb0095bc9381a3284d7c7ed1d5**. Native XS acceptance and all requested local S/XS interactive checks passed; task services and test terminals are stopped. The GHCR package is public. Current details are in the round-5 section at the end; earlier sections are historical.
 
 ## Pinned payload and build
 
@@ -185,3 +185,29 @@ Both `oras://ghcr.io/hsun3163/fungen-operator:ollama0.40.6-codex0.155.1` and `:l
 The same SIF replaced only `cosi_drive:fungen-operator/fungen-operator-ollama0.40.6-codex0.155.1.sif`. `rclone check` found **1 matching file, 0 differences**. Remote size is **3,633,692,672 bytes**, SHA-256 matches the built image, and MD5 is `015b458d85962128b9e97f1fc70454f5`.
 
 Owner steps: [make the package public in its settings](https://github.com/users/hsun3163/packages/container/fungen-operator/settings) when ready; optionally grant `hsun3163/fungen-operator` **Write** under **Manage Actions access** for future CI publication. Package visibility and repository settings were preserved throughout this release.
+
+
+## Round 5 / Release 2 acceptance — 2026-11-07
+
+**PASS.** Source commit **9910940bbd0ffbcb0095bc9381a3284d7c7ed1d5** was fast-forward pushed before building. The embedded and both installed host source.json records match that pushed context. Image: [~/sunh14_project/OLLAMA/images/round5/fungen-operator-ollama0.40.6-codex0.155.1.sif](http://127.0.0.1:30548/lab/tree/sunh14_project/OLLAMA/images/round5/fungen-operator-ollama0.40.6-codex0.155.1.sif)
+
+Size **3,633,700,864 bytes**; SHA-256 **3f6ff0ee3dbd5fb8b76c25c87e5006c752c759604c5e5ade96769ddf90d4117f**. Native build jobs **281377907 DONE** (pinned base) and **281378158 DONE** (install/archive/SIF conversion), using container/build.lsf in a new round5 folder. The 63-file context was captured from the pushed commit.
+
+| Acceptance | Native result |
+| --- | --- |
+| Pre-release gate | Round-2 host suite **281365521**, **696 passed, 0 failed/skipped**; 242-file before/after/current snapshot equal; zero changes in 2401 monitoring checks. Read-only 37-hunk hiding audit **APPROVE**. |
+| Existing native acceptance.py XS path | Driver **281378735 DONE**, service **281380131**, node **lg05e17**. Image installer and exact XS Q4 download/reuse path; host Codex answered **FUNGEN_AGENT_CONNECTED**; **13/13** health checks PASS, positive GPU offload and 32768 context. No optional H100/busy-port script modifications. |
+| Image installer and host setup | Real tmux PTY, isolated scratch HOME; installer exit 0 and every host setup prompt exercised, host setup exit 0 using the copied bundle. Installed bootstrap bytes match source. No source overlay/PYTHONPATH override. |
+| Before/after serve | Fresh check exits 1 with PENDING runtime rows; after service readiness and XS warm-up, **13/13 PASS / VERIFIED**, exit 0, including the exact launch catalog validator. |
+| Two-model service | **281380467**, **lg03e10**, two H100 80 GB GPUs; unmodified native script uses shared CUDA process mode and job-exclusive reservation, explicit residency=2. Exact S Q4 and XS Q4 at **32768** context, GPU VRAM **97,185,924,378** and **20,543,805,849 bytes**, respectively. S retains its true mixed Q4_K/Q8_0 payload and Q8_0 global header, accepted only through exact official identity pins. |
+| Local composer and actual answer | Codex **0.155.1** local S Q4 trust/composer; no sign-in screen or metadata warning. Real shell tool wrote/read a three-line README; native assistant answered **RELEASE2_README_OK**. Independent file hash **3862e8d872d429229cfd810094f66b5742323061105a0b011a41e9e41b609050**. Ordinary client update-available notice retained. |
+| Both model choices and real delegation | Parent **01a1b8e1-c456-7c22-85a1-7e927775e15d** listed both exact served IDs. Spawned XS **01a1b8e5-49b9-7133-ae69-940c5da6db91**, fork_context=false; actual child model is XS, answered **XS_CHILD_RELEASE2_OK**, parent waited and closed it. Native CUDA request/response evidence retained. |
+| Backend round trip | Saved local → openai → local switches and status pass; unsigned OpenAI onboarding inspected and exited 0. Returned local composer answered **LOCAL_RETURN_RELEASE2_OK**. All saved local config values preserved; both auth.json paths absent. |
+| Fake SGE guide | Fresh isolated guide detects **sge**, renders scheduler and empty project prompts; test-before-workflow and non-empty-root refusals both exit 1 with exact errors. These are fake-client prompt/guard checks. Live SGE/qrsh at BU remains unverified on Minerva. |
+| Clean exits and jobs | Both local TUI exits and unsigned OpenAI exit **0**; child closed; all four tmux shell PIDs and server PID gone. Only own services **281380131** and **281380467** were bkill'ed, awaited in-process, and confirmed **EXIT 130**. All three build/acceptance CPU jobs finished DONE. No watcher armed. |
+
+Evidence: [~/sunh14_project/fungen-operator/temp_reference/codex_release2_20261107/report.md](http://127.0.0.1:30548/lab/tree/sunh14_project/fungen-operator/temp_reference/codex_release2_20261107/report.md) . Screens: [~/sunh14_project/fungen-operator/temp_reference/codex_release2_20261107/screens/](http://127.0.0.1:30548/lab/tree/sunh14_project/fungen-operator/temp_reference/codex_release2_20261107/screens/) . Native session/tool evidence: [~/sunh14_project/fungen-operator/temp_reference/codex_release2_20261107/session-evidence.json](http://127.0.0.1:30548/lab/tree/sunh14_project/fungen-operator/temp_reference/codex_release2_20261107/session-evidence.json) . GPU native log: [~/sunh14_project/fungen-operator/temp_reference/codex_release2_20261107/interactive-server.log](http://127.0.0.1:30548/lab/tree/sunh14_project/fungen-operator/temp_reference/codex_release2_20261107/interactive-server.log) .
+
+Retained execution diagnostics: my first installer invocation used unsupported --gpus 2 and exited at parsing before setup; ordinary native prompts then passed. The SGE observer initially expected Software manager instead of the actual Package manager label. Bounded loading/response observations expired while native work continued; later completed outputs and actual assistant response formatting were inspected. No source/test/guard was changed for these observations. The report retains exact earlier path/startup errors as well. No functional image acceptance failed, and no test was skipped or weakened.
+
+GHCR and single-file Drive delivery verification for this exact SIF is recorded in the Release 2 report. Older validation sections describe their dated images.
