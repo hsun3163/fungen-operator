@@ -1,6 +1,6 @@
 # Container validation
 
-Status: **round-5 / Release 2 rebuilt-image acceptance PASS**, with **696 frozen host tests passed, 0 failed/skipped**. Source **9910940bbd0ffbcb0095bc9381a3284d7c7ed1d5**. Native XS acceptance and all requested local S/XS interactive checks passed; task services and test terminals are stopped. The GHCR package is public. Current details are in the round-5 section at the end; earlier sections are historical.
+Status: **round-5 / Release 2 rebuilt-image acceptance PASS**, with **696 frozen host tests passed, 0 failed/skipped**. Source **9910940bbd0ffbcb0095bc9381a3284d7c7ed1d5**. Native XS acceptance and all requested local S/XS interactive checks passed; task services and test terminals are stopped. Both GHCR release tags, anonymous pull and the single Drive replacement have matching-byte verification; the package remains public. Current details are in the round-5 section at the end; earlier sections are historical.
 
 ## Pinned payload and build
 
@@ -211,3 +211,10 @@ Evidence: [~/sunh14_project/fungen-operator/temp_reference/codex_release2_202611
 Retained execution diagnostics: my first installer invocation used unsupported --gpus 2 and exited at parsing before setup; ordinary native prompts then passed. The SGE observer initially expected Software manager instead of the actual Package manager label. Bounded loading/response observations expired while native work continued; later completed outputs and actual assistant response formatting were inspected. No source/test/guard was changed for these observations. The report retains exact earlier path/startup errors as well. No functional image acceptance failed, and no test was skipped or weakened.
 
 GHCR and single-file Drive delivery verification for this exact SIF is recorded in the Release 2 report. Older validation sections describe their dated images.
+
+
+### Round-5 verified delivery
+
+Both GHCR tags **ollama0.40.6-codex0.155.1** and **latest** are published with manifest digest **sha256:d32217d97d6515307894209cdb51cdd3b59efd9d7e848d2a18bbf6851e26910f**. The native publisher verified authenticated manifests/tag listings and both cache-disabled pulled SIF hashes. An independent **anonymous latest pull**, with a fresh scratch HOME and empty Docker/Singularity auth configs, matched SHA-256 **3f6ff0ee3dbd5fb8b76c25c87e5006c752c759604c5e5ade96769ddf90d4117f**. Package visibility remains **public**.
+
+Only **cosi_drive:fungen-operator/fungen-operator-ollama0.40.6-codex0.155.1.sif** was replaced. `rclone check` confirms **1 matching file, 0 differences** (MD5 comparison). Drive reports **3,633,700,864 bytes**, MD5 **a892ee33a077352f747b48066d8b6564**, and the same SIF SHA-256 as the build and GHCR pulls. The report links publication, anonymous-pull and Drive raw evidence. The release changed no package visibility/repository settings and deleted no packages. All task jobs and terminals remain stopped. Live SGE/qrsh at BU remains unverified.
