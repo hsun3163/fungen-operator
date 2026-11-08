@@ -35,7 +35,7 @@ def test_existing_unrelated_notebook_is_preserved(tmp_path):
 
 def test_refusing_a_step_prevents_execution(tmp_path,monkeypatch):
     (tmp_path/'setup.json').write_text('{}')
-    monkeypatch.setattr(o,'ask',lambda *a:'no')
+    monkeypatch.setattr(o,'ask',lambda prompt,default,*a:'no' if prompt=='Run this step? (yes/no)' else default)
     monkeypatch.setattr(o,'run',lambda *a,**k:pytest.fail('execution after refusal'))
     with pytest.raises(RuntimeError,match='prepared'):
         o.perform(tmp_path,'workflow')
@@ -80,7 +80,7 @@ def test_native_profile_and_task_host(tmp_path,monkeypatch,sched,submit,status):
 def test_new_setup_account_defaults(tmp_path,monkeypatch,sched,config,flag,expected):
     monkeypatch.setenv('XDG_CONFIG_HOME',str(tmp_path/'config'))
     if config:(tmp_path/'config/fungen').mkdir(parents=True);(tmp_path/'config/fungen/config.toml').write_text(config)
-    monkeypatch.setattr(o,'ask',lambda *a:'no')
+    monkeypatch.setattr(o,'ask',lambda prompt,default,*a:'no' if prompt=='Run this step? (yes/no)' else default)
     root=tmp_path/'xqtl'
     with pytest.raises(RuntimeError,match='prepared'):
         o.main(['--root',str(root),'--step','workflow','--manager','mamba','--software',str(tmp_path/'software'),'--scheduler',sched]+(['--account',flag] if flag else []))
@@ -169,7 +169,7 @@ def test_new_setup_requires_new_or_empty_root(tmp_path,monkeypatch):
 def test_existing_setup_root_is_accepted(tmp_path,monkeypatch):
     (tmp_path/'setup.json').write_text(json.dumps({'manager':'mamba','software':str(tmp_path/'software'),'scheduler':'lsf','mamba':'managed','account':'a','queue':'q'}))
     (tmp_path/'other.txt').write_text('kept')
-    monkeypatch.setattr(o,'ask',lambda *a:'no')
+    monkeypatch.setattr(o,'ask',lambda prompt,default,*a:'no' if prompt=='Run this step? (yes/no)' else default)
     with pytest.raises(RuntimeError,match='prepared'):
         o.main(['--root',str(tmp_path),'--step','workflow'])
     assert (tmp_path/'setup.ipynb').is_file()
@@ -184,7 +184,7 @@ def test_software_folder_must_differ_from_root(tmp_path):
 @pytest.mark.parametrize('sched',['sge','slurm'])
 def test_cross_scheduler_account_is_not_inherited(tmp_path,monkeypatch,sched):
     monkeypatch.setattr(o,'read_config',lambda:dict(scheduler='lsf',account='acc_LOAD'))
-    monkeypatch.setattr(o,'ask',lambda *a:'no')
+    monkeypatch.setattr(o,'ask',lambda prompt,default,*a:'no' if prompt=='Run this step? (yes/no)' else default)
     root=tmp_path/'setup'
     with pytest.raises(RuntimeError,match='prepared'):
         o.main(['--root',str(root),'--scheduler',sched,'--step','workflow','--manager','mamba','--software',str(tmp_path/'software')])
@@ -237,3 +237,23 @@ def test_emitted_deployment_registers_disjoint_guided_runtime(tmp_path,scheduler
     assert not Path(d.run_root).is_relative_to(Path(d.repository))
     with pytest.raises(ValueError,match='outside canonical source'):
         d.validate_write_path(str(snakefile))
+
+
+def test_fresh_sge_guide_prompts_and_checks_predecessors(tmp_path,monkeypatch):
+    monkeypatch.setattr(o,'scheduler',lambda:'sge')
+    monkeypatch.setattr(o,'read_config',lambda:dict(scheduler='lsf',account='acc_LOAD'))
+    answers=iter(['','','','science'])
+    prompts=[]
+    def respond(prompt):
+        prompts.append(prompt)
+        return next(answers)
+    monkeypatch.setattr('builtins.input',respond)
+    no_execution(monkeypatch)
+    root=tmp_path/'guide'
+    with pytest.raises(ValueError,match='Step test needs workflow first'):
+        o.main(['--root',str(root),'--step','test'])
+    assert 'Scheduler (lsf/slurm/sge/local) [sge]: ' in prompts
+    assert 'SGE project (-P) []: ' in prompts
+    assert o.settings(root)['scheduler']=='sge'
+    assert o.settings(root)['account']=='science'
+    assert len(prompts)==4

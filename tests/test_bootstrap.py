@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock,Mock
 import pytest
 from fungen_operator import bootstrap as b
+from ollama_inventory import inventory_model
 
 @pytest.mark.parametrize('memory,model', [([], 'laguna-xs-2.1:q4_K_M'),([24],'laguna-xs-2.1:q4_K_M'),([80],'laguna-xs-2.1:q8_0'),([80,80],'laguna-s-2.1:q8_0'),([141],'laguna-s-2.1:q8_0')])
 def test_model_default(memory,model):
@@ -19,7 +20,10 @@ def test_serve_scripts(tmp_path,scheduler):
     text=script.read_text()
     assert '--nv' in text and '--home' in text and ' serve ' in text
     assert 'codex' not in text
-    if scheduler=='lsf': assert 'num=2' in text
+    if scheduler=='lsf':
+        assert 'num=2' in text
+        assert 'mode=shared:j_exclusive=yes' in text
+        assert 'mode=exclusive_process' not in text
     if scheduler=='sge': assert 'gpu=2' in text and '#$ -pe smp 4' in text and 'serve.$JOB_ID.log' in text
 
 @pytest.mark.parametrize('tools,env,expected',[({'bsub','sbatch','qsub'},{},'lsf'),({'sbatch'},{},'slurm'),
@@ -71,9 +75,8 @@ def test_codex_host_config_untouched(tmp_path,monkeypatch):
     monkeypatch.setattr(b,'run',lambda *a,**k:SimpleNamespace(stdout='codex-cli 0.155.1\n'))
     monkeypatch.setattr(b,'state',lambda c:{'endpoint':'http://gpu:11435'})
     monkeypatch.setattr(b,'api',lambda url,path='/api/tags',data=None,**kw:
-                        {'models':[{'name':'laguna-xs-2.1:q4_K_M','context_length':32768}]} if path in ('/api/tags','/api/ps') else
-                        {'details':{'quantization_level':'Q4_K_M'},'parameters':'num_ctx 32768',
-                         'model_info':{'general.architecture':'laguna','laguna.context_length':262144}})
+                        {'models':[inventory_model('laguna-xs-2.1:q4_K_M')[0]]} if path in ('/api/tags','/api/ps') else
+                        inventory_model('laguna-xs-2.1:q4_K_M')[1])
     captured=[];monkeypatch.setattr(b.os,'execvpe',lambda *a:captured.append(a))
     c={'install':str(tmp_path),'backend':'local','codex':'/host/codex','model':'laguna-xs-2.1:q4_K_M'}
     b.codex(c,SimpleNamespace(backend=None,args=['exec','hello'],wait=0,deployment='/run/deployment.json'))
@@ -202,9 +205,8 @@ def test_codex_explicit_root_override_precedes_exec(tmp_path,monkeypatch):
     monkeypatch.setattr(b,'run',lambda *a,**k:SimpleNamespace(stdout='codex-cli 0.155.1\n'))
     monkeypatch.setattr(b,'state',lambda c:{'endpoint':'http://gpu:11434'})
     monkeypatch.setattr(b,'api',lambda url,path='/api/tags',data=None,**kw:
-                        {'models':[{'name':'laguna-xs-2.1:q4_K_M','context_length':32768}]} if path in ('/api/tags','/api/ps') else
-                        {'details':{'quantization_level':'Q4_K_M'},'parameters':'num_ctx 32768',
-                         'model_info':{'general.architecture':'laguna','laguna.context_length':262144}})
+                        {'models':[inventory_model('laguna-xs-2.1:q4_K_M')[0]]} if path in ('/api/tags','/api/ps') else
+                        inventory_model('laguna-xs-2.1:q4_K_M')[1])
     captured=[];monkeypatch.setattr(b.os,'execvpe',lambda *a:captured.append(a))
     override='mcp_servers.fungen.tools.initiate_run.approval_mode="approve"'
     b.codex({'install':str(tmp_path),'backend':'local','codex':'codex','model':'laguna-xs-2.1:q4_K_M'},
@@ -341,9 +343,8 @@ def test_codex_backend_override_is_one_session(tmp_path,monkeypatch,saved,overri
     backend_config(tmp_path,monkeypatch,backend=saved);before=b.config_path().read_bytes()
     monkeypatch.setattr(b,'state',lambda c:{'endpoint':'http://gpu:11434'})
     monkeypatch.setattr(b,'api',lambda url,path='/api/tags',data=None,**kw:
-                        {'models':[{'name':'laguna-xs-2.1:q4_K_M','context_length':32768}]} if path in ('/api/tags','/api/ps') else
-                        {'details':{'quantization_level':'Q4_K_M'},'parameters':'num_ctx 32768',
-                         'model_info':{'general.architecture':'laguna','laguna.context_length':262144}})
+                        {'models':[inventory_model('laguna-xs-2.1:q4_K_M')[0]]} if path in ('/api/tags','/api/ps') else
+                        inventory_model('laguna-xs-2.1:q4_K_M')[1])
     captured=[];monkeypatch.setattr(b.os,'execvpe',lambda *a:captured.append(a))
     b.main(['codex','--backend',override,'exec','hello'])
     assert ('--oss' in captured[0][1])==(override=='local')
@@ -481,6 +482,7 @@ def check_config(tmp_path,monkeypatch):
 def test_check_requires_runtime_evidence(tmp_path,monkeypatch,capsys,scenario,server,gpu,ok):
     from fungen_operator import cluster
     c=check_config(tmp_path,monkeypatch)
+    monkeypatch.setattr(b,'served_catalog',lambda *a:tmp_path/'verified-catalog.json')
     if scenario not in ('fresh','pending'):
         (tmp_path/'server.json').write_text(json.dumps(dict(model=c['model'],ready=True,endpoint='http://gpu:1',job_id='5')))
     if scenario in ('failed_job','status_error','pending'):
@@ -593,3 +595,66 @@ def test_private_subdirectory_tmpfs_stops_before_installation(tmp_path,monkeypat
     assert b.main(['setup','--non-interactive','--runtime','apptainer','--image','/fungen.sif'])==1
     assert 'mount identity is unknown or private' in capsys.readouterr().err
     assert not list(home.iterdir())
+
+
+def test_host_setup_reuses_the_copied_bundle(tmp_path, monkeypatch):
+    """A real host rerun must use its retained assets without requiring /opt/fungen."""
+    import hashlib
+    import sys
+    home = tmp_path/'home'; home.mkdir()
+    install = home/'.fungen'
+    for name in ('python/bin', 'wheels', 'skills/fungen-operator', 'bin', 'venv/bin'):
+        (install/name).mkdir(parents=True, exist_ok=True)
+    (install/'python/bin/python3').symlink_to(sys.executable)
+    (install/'venv/bin/python').symlink_to(sys.executable)
+    (install/'wheels/operator.whl').write_bytes(b'retained offline wheel')
+    (install/'skills/fungen-operator/SKILL.md').write_text('host skill')
+    (install/'bin/uv').write_text('retained uv')
+    client=install/'bin/codex'
+    client.write_text('#!/bin/sh\necho codex-cli 0.155.1\n'); client.chmod(0o755)
+    identity=hashlib.sha256(b'retained offline wheelhost skill').hexdigest()
+    (install/'bundle.sha256').write_text(identity)
+    monkeypatch.setattr(b, 'BUNDLE', tmp_path/'no-image')
+    monkeypatch.setattr(b.Path, 'home', lambda: home)
+    monkeypatch.setattr(b, 'host_codex', lambda: None)
+    monkeypatch.setenv('XDG_DATA_HOME', str(home/'.local/share'))
+    monkeypatch.delenv('JUPYTER_DATA_DIR', raising=False)
+    assert b.install_host(install)==str(client)
+    assert (home/'.agents/skills/fungen-operator/SKILL.md').read_text()=='host skill'
+    assert (install/'bundle.sha256').read_text()==identity
+    with pytest.raises(ValueError, match='Host installer bundle is incomplete'):
+        b.install_host(home/'empty')
+
+
+@pytest.mark.parametrize('quant,verified', [('Q4_K_M', True), ('Q8_0', True), ('Q8_0', False)])
+def test_check_validates_the_actual_codex_catalog(tmp_path,monkeypatch,capsys,quant,verified):
+    c=check_config(tmp_path,monkeypatch)
+    monkeypatch.setattr(b,'runtime_status',lambda _: (True,{'endpoint':'http://gpu:1'},''))
+    def api(url,path='/api/tags',data=None,**kw):
+        row,show=inventory_model(c['model'])
+        if path=='/api/show':
+            show['details']['quantization_level']=quant
+            if not verified:show['modelfile']='FROM /models/blobs/sha256-'+('f'*64)+'\n'
+            return show
+        return {'models':[{**row,'size_vram':5}]}
+    monkeypatch.setattr(b,'api',api)
+    assert b.check(c) is verified
+    output=capsys.readouterr().out
+    assert ('PASS' if verified else 'FAIL')+' local Codex model metadata' in output
+    if not verified:
+        assert 'model-layer digest mismatch' in output
+        assert 'NOT VERIFIED' in output
+
+
+@pytest.mark.parametrize('max_loaded',[None,'2'])
+def test_gpu_serve_honors_explicit_model_residency(tmp_path,monkeypatch,max_loaded):
+    model='laguna-s-2.1:q4_K_M'
+    proc=serving(monkeypatch,[{'name':model,'size_vram':96_000_000_000}])
+    captured=[]
+    monkeypatch.setattr(b.subprocess,'Popen',lambda *a,**kw:captured.append(kw['env']) or proc)
+    if max_loaded is None:monkeypatch.delenv('OLLAMA_MAX_LOADED_MODELS',raising=False)
+    else:monkeypatch.setenv('OLLAMA_MAX_LOADED_MODELS',max_loaded)
+    b.inside_serve(SimpleNamespace(model=model,port=11434,models_dir=str(tmp_path),context=32768,state=str(tmp_path/'server.json')))
+    assert captured[0]['OLLAMA_MAX_LOADED_MODELS']==('1' if max_loaded is None else max_loaded)
+    assert json.loads((tmp_path/'server.json').read_text())['ready'] is True
+    assert proc.terminate.called

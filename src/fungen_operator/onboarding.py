@@ -390,8 +390,17 @@ def main(argv=None):
         software=(a.software or Path(ask('Software folder',str(root/'software')))).expanduser().resolve()
         if software==root:raise ValueError(f'Software folder must differ from the xQTL root; use the default {root/"software"}.')
         launcher=read_config()
-        a.scheduler=a.scheduler or scheduler()
+        if a.scheduler is None:
+            detected=scheduler()
+            default=detected if detected!='local' else launcher.get('scheduler','local')
+            if detected=='local':
+                print('No scheduler client detected; '+('using saved scheduler '+default if launcher.get('scheduler') else 'defaulting to local')+'. Select explicitly with --scheduler lsf/slurm/sge/local.')
+            a.scheduler=ask('Scheduler (lsf/slurm/sge/local)',default,['lsf','slurm','sge','local'])
         account=a.account if a.account is not None else (launcher.get('account','') if launcher.get('scheduler')==a.scheduler else 'acc_LOAD' if a.scheduler=='lsf' else '')
+        if a.scheduler=='sge' and a.account is None:
+            print('SGE project: empty omits -P and requests the site default (not verified here). Enter - to clear a saved project; supply --account PROJECT if your site requires one.')
+            account=ask('SGE project (-P)',account)
+            if account=='-':account=''
         (root/'setup.json').write_text(json.dumps({'manager':manager,'software':str(software.resolve()),'scheduler':a.scheduler,
                       'mamba':a.mamba or 'managed','account':account,'queue':a.queue if a.queue is not None else 'premium' if a.scheduler=='lsf' else ''},indent=2)+'\n')
     else:

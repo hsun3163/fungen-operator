@@ -6,6 +6,7 @@ import shutil
 import subprocess
 import pytest
 from fungen_operator import bootstrap as b
+from ollama_inventory import inventory_model
 
 
 def launch(tmp_path,monkeypatch,backend,args,**extra):
@@ -17,11 +18,10 @@ def launch(tmp_path,monkeypatch,backend,args,**extra):
         (tmp_path/'codex/models.json').write_bytes((Path(b.__file__).with_name('resources')/'codex-models.json').read_bytes())
         monkeypatch.setattr(b,'run',lambda *a,**k:SimpleNamespace(stdout='codex-cli 0.155.1\n'))
         model=extra.get('serve_model','laguna-xs-2.1:q4_K_M');context=extra.get('context',32768)
+        row,show=inventory_model(model,context,tmp_path/'models')
         monkeypatch.setattr(b,'api',lambda url,path='/api/tags',data=None,**kw:
-                            {'models':[{'name':model,'context_length':context}]} if path in ('/api/tags','/api/ps') else
-                            {'details':{'quantization_level':'Q4_K_M'},'parameters':f'num_ctx {context}',
-                             'model_info':{'general.architecture':'laguna','laguna.context_length':262144}})
-    config={'install':str(tmp_path),'backend':backend,'codex':'/host/codex','model':'laguna-xs-2.1:q4_K_M','context':32768,**extra}
+                            {'models':[row]} if path in ('/api/tags','/api/ps') else show)
+    config={'install':str(tmp_path),'backend':backend,'codex':'/host/codex','model':'laguna-xs-2.1:q4_K_M','context':32768,'runtime_models':str(tmp_path/'models'),**extra}
     b.codex(config,SimpleNamespace(backend=None,args=args,wait=0,deployment=None))
     file,cmd,env=captured[0]
     assert file==cmd[0]=='/host/codex'
@@ -94,9 +94,10 @@ def test_local_override_catalog_requires_positive_endpoint_evidence(tmp_path,mon
     selected='laguna-xs-2.1:q4_K_M'
     def api(url,path='/api/tags',data=None,**kwargs):
         if fault=='api_failure':raise RuntimeError('status retrieval failed')
-        if path=='/api/tags':return {'models':[] if fault=='missing_selected' else {} if fault=='bad_inventory' else [{'name':selected}]}
+        if path=='/api/tags':return {'models':[] if fault=='missing_selected' else {} if fault=='bad_inventory' else [inventory_model(selected)[0]]}
         if path=='/api/ps':return {'models':[]}
-        return {'details':{'quantization_level':'Q8_0' if fault=='wrong_quantization' else 'Q4_K_M'},
+        return {'modelfile':inventory_model(selected)[1]['modelfile'],
+                'details':{'quantization_level':'BF16' if fault=='wrong_quantization' else 'Q4_K_M'},
                 'parameters':'' if fault=='missing_context' else 'num_ctx '+('262144' if fault in ('wrong_context','excess_context') else '32768'),
                 'model_info':{'general.architecture':'laguna','laguna.context_length':32768 if fault=='excess_context' else 262144}}
     monkeypatch.setattr(b,'api',api)
@@ -110,8 +111,9 @@ def test_local_base_model_requires_loaded_context_when_parameter_absent(tmp_path
     catalog=tmp_path/'models.json';catalog.write_bytes((Path(b.__file__).with_name('resources')/'codex-models.json').read_bytes())
     selected='laguna-xs-2.1:q4_K_M'
     def api(url,path='/api/tags',data=None,**kwargs):
-        if path in ('/api/tags','/api/ps'):return {'models':[{'name':selected,'context_length':32768}]}
-        show={'details':{'quantization_level':'Q4_K_M'},
+        if path in ('/api/tags','/api/ps'):return {'models':[inventory_model(selected)[0]]}
+        show={'modelfile':inventory_model(selected)[1]['modelfile'],
+              'details':{'quantization_level':'Q4_K_M'},
               'model_info':{'general.architecture':'laguna','laguna.context_length':262144}}
         if parameters is not None:show['parameters']=parameters
         return show
@@ -208,7 +210,7 @@ def capture_pinned_request(client,folder,catalog=None,model="laguna-xs-2.1:q4_K_
         def do_GET(self):
             ids=[tag+('-256k' if context==262144 else '') for tag in b.MODELS]
             if inventory is not None:ids=[row['id'] for row in inventory['models']]
-            models=[{'name':name,'model':name,'context_length':context} for name in ids]
+            models=[inventory_model(name,context,folder/'models')[0] for name in ids]
             if inventory is not None and self.path.endswith('/ps'):models=inventory['loaded']
             body=json.dumps({'models':models,'data':[]}).encode()
             self.send_response(200);self.send_header('Content-Type','application/json');self.end_headers();self.wfile.write(body)
@@ -216,9 +218,7 @@ def capture_pinned_request(client,folder,catalog=None,model="laguna-xs-2.1:q4_K_
             body=json.loads(self.rfile.read(int(self.headers['Content-Length'])))
             if self.path.endswith('/show'):
                 name=body['model'];quant='Q8_0' if ':q8_0' in name else 'Q4_K_M'
-                show={'model_info':{'general.architecture':'laguna','laguna.context_length':262144},
-                                 'details':{'quantization_level':quant},'parameters':f'num_ctx {context}',
-                                 'capabilities':['completion','tools']}
+                show=inventory_model(name,context,folder/'models')[1]
                 if inventory is not None:show=next(row for row in inventory['models'] if row['id']==name)
                 data=json.dumps(show).encode()
                 self.send_response(200);self.send_header('Content-Type','application/json');self.end_headers();self.wfile.write(data);return
@@ -243,7 +243,7 @@ def capture_pinned_request(client,folder,catalog=None,model="laguna-xs-2.1:q4_K_
           '-c','model_context_window='+str(context),'-c','model_auto_compact_token_limit='+str(int(context*.75))]
     if catalog:
         installed=folder/'models.json';installed.write_bytes(catalog.read_bytes())
-        catalog=b.served_catalog({'model':model,'context':context},endpoint,installed)
+        catalog=b.served_catalog({'model':model,'context':context,'runtime_models':str(folder/'models')},endpoint,installed)
         args+=['-c','model_catalog_json='+json.dumps(str(catalog))]
     args+=['exec','--oss','--local-provider','ollama','--model',model,'--skip-git-repo-check','--ephemeral','--sandbox','read-only','--json','Reply exactly READY.']
     try:result=subprocess.run(args,cwd=folder,env=env,capture_output=True,text=True,timeout=45)
@@ -333,3 +333,82 @@ def test_pinned_catalog_preserves_effective_instruction_delivery(tmp_path,model,
         previous=json.loads(path.read_text()) if path.exists() else {}
         cases=previous.get('cases',{});cases[model+'/'+str(context)]=evidence
         path.write_text(json.dumps({'client':'codex-cli 0.155.1','cases':cases},indent=2)+'\n')
+
+
+@pytest.mark.parametrize('tag',list(b.MODELS))
+@pytest.mark.parametrize('context',[32768,262144])
+def test_official_payload_identity_and_context(tmp_path,monkeypatch,tag,context):
+    """All pins, including the mixed-header S Q4 and create variants, launch."""
+    name=tag+('-256k' if context==262144 else '')
+    row,show=inventory_model(name,context,tmp_path/'store')
+    monkeypatch.setattr(b,'api',lambda url,path='/api/tags',data=None,**kw:
+                        show if path=='/api/show' else {'models':[row]})
+    source=Path(b.__file__).with_name('resources')/'codex-models.json'
+    catalog=tmp_path/'models.json';catalog.write_bytes(source.read_bytes())
+    generated=b.served_catalog({'model':name,'context':context,'runtime_models':str(tmp_path/'store')},'http://fixture',catalog)
+    visible=[m for m in json.loads(generated.read_text())['models'] if m['visibility']=='list']
+    assert len(visible)==1 and visible[0]['slug']==name
+    assert visible[0]['context_window']==visible[0]['max_context_window']==context
+    if tag=='laguna-s-2.1:q4_K_M':
+        assert show['details']['quantization_level']=='Q8_0'
+        assert 'Q4_K_M (mixed Q4_K/Q8_0)' in visible[0]['description']
+
+
+@pytest.mark.parametrize('fault,message',[
+    ('wrong_layer','model-layer digest mismatch'),
+    ('missing_layer','must expose one exact model-layer SHA-256'),
+    ('unknown_tag','unsupported local model tag'),
+    ('unknown_digest','unknown or mismatched manifest digest'),
+    ('missing_digest','manifest digest is missing or invalid'),
+    ('wrong_size','served manifest digest/size mismatch'),
+    ('string_size','served manifest digest/size mismatch')])
+def test_identity_refuses_wrong_unknown_or_incomplete_evidence(tmp_path,monkeypatch,fault,message):
+    name='laguna-s-2.1:q4_K_M';row,show=inventory_model(name)
+    if fault=='wrong_layer':show['modelfile']='FROM /models/blobs/sha256-'+('f'*64)+'\n'
+    if fault=='missing_layer':show.pop('modelfile')
+    if fault=='unknown_tag':name=row['name']='laguna-s-2.1:q4_K_M-unverified'
+    if fault=='unknown_digest':row['digest']='f'*64
+    if fault=='missing_digest':row.pop('digest')
+    if fault=='wrong_size':row['size']+=1
+    if fault=='string_size':row['size']=str(row['size'])
+    monkeypatch.setattr(b,'api',lambda url,path='/api/tags',data=None,**kw:
+                        show if path=='/api/show' else {'models':[row]})
+    catalog=tmp_path/'models.json';catalog.write_bytes((Path(b.__file__).with_name('resources')/'codex-models.json').read_bytes())
+    with pytest.raises(RuntimeError,match=message):b.served_catalog({'model':name},'http://fixture',catalog)
+    assert not (tmp_path/'served').exists()
+
+
+@pytest.mark.parametrize('fault,message',[
+    ('unknown_manifest','manifest is unreadable'),
+    ('corrupt_manifest','manifest digest mismatch'),
+    ('wrong_layer_size','model-layer digest/size mismatch')])
+def test_context_variant_requires_exact_manifest_and_layer_size(tmp_path,monkeypatch,fault,message):
+    import hashlib
+    name='laguna-s-2.1:q4_K_M-256k';store=tmp_path/'store'
+    row,show=inventory_model(name,262144,store)
+    path=store/'blobs'/('sha256-'+row['digest'])
+    if fault=='unknown_manifest':row['digest']='f'*64
+    if fault=='corrupt_manifest':path.write_bytes(b'corrupt')
+    if fault=='wrong_layer_size':
+        doc=json.loads(path.read_text());doc['layers'][0]['size']+=1
+        raw=json.dumps(doc).encode();row['digest']=hashlib.sha256(raw).hexdigest();row['size']+=1
+        (store/'blobs'/('sha256-'+row['digest'])).write_bytes(raw)
+    monkeypatch.setattr(b,'api',lambda url,path='/api/tags',data=None,**kw:
+                        show if path=='/api/show' else {'models':[row]})
+    catalog=tmp_path/'models.json';catalog.write_bytes((Path(b.__file__).with_name('resources')/'codex-models.json').read_bytes())
+    with pytest.raises(RuntimeError,match=message):
+        b.served_catalog({'model':name,'context':262144,'runtime_models':str(store)},'http://fixture',catalog)
+    assert not (tmp_path/'served').exists()
+
+
+def test_registry_pins_bind_recorded_provenance():
+    import hashlib
+    doc=json.loads((Path(b.__file__).with_name('resources')/'ollama-models.json').read_text())
+    assert set(doc['models'])==set(b.MODELS)
+    for name,pin in doc['models'].items():
+        assert pin['url']=='https://registry.ollama.ai/v2/library/'+name.replace(':','/manifests/')
+        assert pin['manifest_digest']=='sha256:'+hashlib.sha256(pin['raw_manifest'].encode()).hexdigest()
+        assert pin['manifest']==json.loads(pin['raw_manifest'])
+        assert pin['model_layer'] in pin['manifest']['layers']
+        assert pin['api_size']==pin['manifest']['config']['size']+sum(layer['size'] for layer in pin['manifest']['layers'])
+        assert pin['retrieved_utc']

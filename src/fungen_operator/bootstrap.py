@@ -269,25 +269,26 @@ def atomic_copy(source,target):
 
 def install_host(install):
     install.mkdir(parents=True, exist_ok=True)
-    if not BUNDLE.is_dir():
-        raise ValueError('Run setup from the SIF: apptainer run fungen.sif')
+    bundle = BUNDLE if BUNDLE.is_dir() else install
+    if not all((bundle/name).exists() for name in ('python/bin/python3', 'wheels', 'skills/fungen-operator', 'bin/uv')):
+        raise ValueError('Host installer bundle is incomplete. Copy it first: apptainer run fungen.sif')
     identity = hashlib.sha256()
-    for source in sorted((BUNDLE/'wheels').glob('*')):
+    for source in sorted((bundle/'wheels').glob('*')):
         identity.update(source.read_bytes())
-    for source in sorted((BUNDLE/'skills/fungen-operator').rglob('*')):
+    for source in sorted((bundle/'skills/fungen-operator').rglob('*')):
         if source.is_file(): identity.update(source.read_bytes())
-    if (BUNDLE/'README.md').exists(): identity.update((BUNDLE/'README.md').read_bytes())
+    if (bundle/'README.md').exists(): identity.update((bundle/'README.md').read_bytes())
     version = identity.hexdigest()
     stamp = install/'bundle.sha256'
     changed = not stamp.exists() or stamp.read_text() != version
     if changed:
         for name in ('python', 'wheels', 'skills'):
-            shutil.copytree(BUNDLE/name, install/name, dirs_exist_ok=True,copy_function=atomic_copy)
-        if (BUNDLE/'docs').is_dir(): shutil.copytree(BUNDLE/'docs',install/'docs',dirs_exist_ok=True,copy_function=atomic_copy)
-        if (BUNDLE/'README.md').exists(): atomic_copy(BUNDLE/'README.md',install/'README.md')
-    if (BUNDLE/'source.json').exists(): atomic_copy(BUNDLE/'source.json',install/'source.json')
+            shutil.copytree(bundle/name, install/name, dirs_exist_ok=True,copy_function=atomic_copy)
+        if (bundle/'docs').is_dir(): shutil.copytree(bundle/'docs',install/'docs',dirs_exist_ok=True,copy_function=atomic_copy)
+        if (bundle/'README.md').exists(): atomic_copy(bundle/'README.md',install/'README.md')
+    if (bundle/'source.json').exists(): atomic_copy(bundle/'source.json',install/'source.json')
     (install/'bin').mkdir(exist_ok=True)
-    atomic_copy(BUNDLE/'bin/uv', install/'bin/uv')
+    atomic_copy(bundle/'bin/uv', install/'bin/uv')
     python = install/'python/bin/python3'
     venv = install/'venv'
     if not (venv/'bin/python').exists():
@@ -303,7 +304,7 @@ def install_host(install):
         print(f'Keeping host Codex: {codex}')
     else:
         for name in ('codex', 'bwrap'):
-            atomic_copy(BUNDLE/'bin'/name, install/'bin'/name)
+            atomic_copy(bundle/'bin'/name, install/'bin'/name)
         codex = str(install/'bin/codex')
         print('Installed bundled Codex 0.155.1 on the host.')
     for name in ('fungen', 'fungen-operator'):
@@ -344,7 +345,7 @@ def render_serve(config):
     if sched == 'lsf':
         directives = (f"#BSUB -J fungen-serve\n#BSUB -P {config['account']}\n#BSUB -q {config['gpu_queue']}\n"
                       f"#BSUB -n 2\n#BSUB -R \"rusage[mem=32000] span[hosts=1]\"\n#BSUB -M 64000\n#BSUB -W 12:00\n"
-                      f"#BSUB -gpu \"num={config['gpus']}:gmem={(MODELS[config['model']]+(24 if config['context']==262144 else 4)+config['gpus']-1)//config['gpus']}G:mode=exclusive_process\"\n#BSUB -o {shlex.quote(str(root/'serve.%J.log'))}\n")
+                      f"#BSUB -gpu \"num={config['gpus']}:gmem={(MODELS[config['model']]+(24 if config['context']==262144 else 4)+config['gpus']-1)//config['gpus']}G:mode=shared:j_exclusive=yes\"\n#BSUB -o {shlex.quote(str(root/'serve.%J.log'))}\n")
     elif sched == 'slurm':
         directives = (f"#SBATCH --job-name=fungen-serve\n#SBATCH --gres=gpu:{config['gpus']}\n"
                       f"#SBATCH --cpus-per-task=4\n#SBATCH --mem=64G\n#SBATCH --time=12:00:00\n"
@@ -513,7 +514,7 @@ def inside_serve(args):
     port = available_port(args.port)
     env = dict(os.environ, OLLAMA_HOST=f'0.0.0.0:{port}', OLLAMA_MODELS=args.models_dir, OLLAMA_NO_CLOUD='1',
                OLLAMA_CONTEXT_LENGTH=str(args.context), OLLAMA_FLASH_ATTENTION='1', OLLAMA_KEEP_ALIVE='-1', OLLAMA_NOPRUNE='1',
-               OLLAMA_KV_CACHE_TYPE='q8_0', OLLAMA_NUM_PARALLEL='1', OLLAMA_MAX_LOADED_MODELS='1')
+               OLLAMA_KV_CACHE_TYPE='q8_0', OLLAMA_NUM_PARALLEL='1', OLLAMA_MAX_LOADED_MODELS=os.environ.get('OLLAMA_MAX_LOADED_MODELS','1'))
     process = subprocess.Popen(['ollama', 'serve'], env=env)
     url = f'http://127.0.0.1:{port}'
     try:
@@ -752,11 +753,62 @@ def local_client(config):
     return client
 
 
+def served_identity(config, row, show, identities):
+    """Bind the served layer and size to a pinned official registry identity.
+
+    /api/tags digest names the manifest, not the GGUF. /api/show's FROM
+    names the GGUF layer. Base manifests are pinned; setup-created context
+    variants have a different manifest whose bytes remain in the runtime store.
+    """
+    name=row['name'];base=name.removesuffix('-256k')
+    if base not in identities:
+        raise ValueError('unsupported local model tag '+name+'; supported tags: '+', '.join(identities)+'. Configure an official tag with: fungen setup --backend local --model SUPPORTED_TAG --download yes')
+    identity=identities[base]
+    fix='Refetch the official model with: fungen setup --backend local --model '+base+' --download yes; stop the recorded server job, then run fungen serve and fungen check'
+    def refuse(detail):
+        raise ValueError(detail+' for '+name+'. '+fix)
+    layers=re.findall(r'^FROM\s+.*?(?:sha256-|sha256:)([0-9a-f]{64})["\']?\s*$',show.get('modelfile',''),re.M)
+    if len(layers)!=1:
+        refuse('Ollama /api/show Modelfile must expose one exact model-layer SHA-256')
+    if 'sha256:'+layers[0]!=identity['model_layer']['digest']:
+        refuse('model-layer digest mismatch')
+    digest=row.get('digest','')
+    if not isinstance(digest,str) or not re.fullmatch(r'(?:sha256:)?[0-9a-f]{64}',digest):
+        refuse('Ollama /api/tags manifest digest is missing or invalid')
+    digest=digest.removeprefix('sha256:')
+    if name==base:
+        if 'sha256:'+digest!=identity['manifest_digest']:
+            refuse('unknown or mismatched manifest digest')
+        doc=identity['manifest']
+    else:
+        # No inference from a tag suffix or a GGUF header: read the exact
+        # manifest selected by the server, then verify its content hash.
+        store=config.get('runtime_models') or config.get('models')
+        if not store:refuse('runtime model store is unavailable for context-variant identity')
+        path=Path(store)/'blobs'/('sha256-'+digest)
+        try:
+            with path.open('rb') as stream:raw=stream.read(1048577)
+        except OSError as exc:
+            refuse('served context-variant manifest is unreadable: '+str(exc))
+        if len(raw)>1048576 or hashlib.sha256(raw).hexdigest()!=digest:
+            refuse('served context-variant manifest digest mismatch')
+        doc=json.loads(raw)
+    model_layers=[layer for layer in doc['layers'] if layer['mediaType']=='application/vnd.ollama.image.model']
+    if len(model_layers)!=1 or any(model_layers[0][key]!=identity['model_layer'][key] for key in ('digest','size')):
+        refuse('model-layer digest/size mismatch')
+    sizes=[doc['config']['size'],*(layer['size'] for layer in doc['layers'])]
+    if any(type(size) is not int or size<0 for size in sizes):refuse('invalid manifest byte sizes')
+    if type(row.get('size')) is not int or row['size']!=sum(sizes):
+        refuse('served manifest digest/size mismatch')
+    return identity['quantization']
+
+
 def served_catalog(config, endpoint, catalog):
-    """Expose exact served IDs whose quantization and context are established by Ollama."""
+    """Expose exact served IDs with pinned payload identity and proven context."""
     import copy
     import hashlib
     doc=json.loads(catalog.read_text())
+    identities=json.loads((Path(__file__).with_name('resources')/'ollama-models.json').read_text())['models']
     families={m['slug']:m for m in doc['models'] if m['visibility']=='none'}
     context=config.get('context',32768);selected=config.get('serve_model',config['model'])
     visible=[]
@@ -772,9 +824,7 @@ def served_catalog(config, endpoint, catalog):
             if family not in families:continue
             show=api(endpoint,'/api/show',{'model':name})
             quant=show['details']['quantization_level']
-            tagged=re.search(r':(q4_K_M|q8_0)(?:-|$)',name)
-            if tagged and tagged.group(1).upper()!=quant:
-                raise ValueError('tag and payload quantization differ for '+name)
+            payload=served_identity(config,next(row for row in tags if row['name']==name),show,identities)
             params=dict(re.findall(r'^\s*(\w+)\s+(\S+)\s*$',show.get('parameters',''),re.M))
             model_info=show['model_info'];arch=model_info['general.architecture']
             capacity=int(model_info[arch+'.context_length'])
@@ -786,7 +836,7 @@ def served_catalog(config, endpoint, catalog):
             if configured!=context:continue
             model=copy.deepcopy(families[family])
             model.update(slug=name,display_name=name,visibility='list',context_window=context,max_context_window=context,
-                         description=f'{family}, {quant}, {context} tokens; available on the current Ollama endpoint.')
+                         description=f'{family}, {payload}, {context} tokens; pinned official payload on the current Ollama endpoint.')
             visible.append(model)
         if selected not in {m['slug'] for m in visible}:
             raise ValueError('selected model has no matching served quantization/context: '+selected)
@@ -947,6 +997,16 @@ def check(config,online=True):
                 gpu=False
                 gpu_detail='GPU status retrieval failed: '+str(exc)+'. '+next_action
         row('GPU offload for selected model',gpu,gpu_detail)
+        metadata=None
+        metadata_detail='Local Codex model metadata not verified. '+next_action
+        if info and assets_good:
+            try:
+                served_catalog(config,info['endpoint'],local_catalog(config))
+                metadata=True
+            except (OSError,ValueError,RuntimeError) as exc:
+                metadata=False
+                metadata_detail=str(exc)
+        row('local Codex model metadata',metadata,metadata_detail)
     else:
         result=subprocess.run([config['codex'],'login','status'],capture_output=True)
         row('OpenAI sign-in or API key',bool(os.environ.get('OPENAI_API_KEY')) or result.returncode==0,
