@@ -1,5 +1,9 @@
 # Fungen Operator
 
+Operator **1.2.0** uses semantic versions independently of bundled components.
+See [CHANGELOG.md](CHANGELOG.md) for release identities and the cause of each fix.
+Run `fungen --version` to identify the installed operator.
+
 Install a workflow operator on your host and serve Laguna from one Apptainer
 image. Host Codex uses the operator's notebook actions and your scheduler. The
 image contains Ollama **0.40.6**, Codex **0.155.1**, uv **0.13.4**, an offline
@@ -8,7 +12,8 @@ The current build targets Linux x86-64 with Apptainer/Singularity. The local
 backend needs an NVIDIA GPU; the OpenAI backend runs host Codex without one.
 
 The GitHub Container Registry image is public; pulling it requires no login.
-Release tags are `ollama0.40.6-codex0.155.1` and `latest`; the publication and
+Immutable release tags are `1.2.0` and `1.2.0-ollama0.40.6-codex0.155.1`;
+`ollama0.40.6-codex0.155.1` and `latest` track the accepted release. Publication and
 acceptance of each build are recorded in [container/VALIDATION.md](container/VALIDATION.md).
 
 ```bash
@@ -20,10 +25,11 @@ HTTP/HTTPS proxy environment on compute nodes. Check `sha256sum fungen.sif` agai
 evidence. A registry manifest digest identifies metadata; the SIF SHA-256 identifies
 the downloaded image. You can also build `fungen.sif` with the [build recipe](container/README.md).
 
-With `fungen.sif`, the local backend quick start is two shell commands:
+With `fungen.sif`, copy the installer, then configure and launch on the host:
 
 ```bash
 apptainer run fungen.sif
+~/.fungen/python/bin/python3 -m fungen_operator.bootstrap setup --install "$HOME/.fungen" --image "$PWD/fungen.sif" --runtime apptainer
 ~/.fungen/bin/fungen serve && ~/.fungen/bin/fungen codex
 ```
 
@@ -36,7 +42,7 @@ Local builds, acceptance and the publication of a given build are recorded in
 
 Try the distribution on Minerva with the [try-out notebook](examples/try_fungen_operator.ipynb).
 
-Setup asks, in order:
+The image asks for the install folder, copies the offline installer and prints the host setup command. Run that command after exiting the image. Host setup asks, in order:
 
 ```text
 Install folder [~/.fungen]:
@@ -56,7 +62,7 @@ Add the install bin folder to your shell PATH? (yes/no) [no]:
 
 With the `sge` scheduler, setup also asks `SGE project (-P) []:` right after the
 scheduler question (or takes `--account`/`FUNGEN_ACCOUNT`); an empty answer uses
-the site's default project without verifying that the site permits it. Enter `-` to clear a saved project, or pass `--account ''`; sites requiring a project need `--account PROJECT`. The model questions apply to the local backend. On clusters setup warns about
+the site's default project without verifying that the site permits it. Enter `-` to clear a saved project, or pass `--account ''`; sites requiring a project need `--account PROJECT`. Host detection uses visible scheduler clients and scheduler environment evidence (`SGE_ROOT`/`SGE_CELL`, `LSF_ENVDIR`/`LSF_BINDIR`, `SLURM_CONF`). Without evidence, interactive setup still asks for the scheduler. The model questions apply to the local backend. On clusters setup warns about
 home quotas. A new download requires a writable folder and model size plus 10%
 plus 2 GB free space; check the site's quota too. Ollama resumes partial blobs.
 If an interruption leaves an empty or truncated Ollama progress record, setup
@@ -65,9 +71,17 @@ rebuilds its native partition descriptor with zero completed bytes for that
 chunk. Valid progress and partial blob bytes stay intact; Ollama resumes the
 remaining chunks and verifies their hash.
 A complete existing model folder may be read-only. Advanced 256k context creates
-a local Modelfile variant in a writable overlay, reusing the base blobs. Ollama
+a local Modelfile variant in a writable overlay, reusing the base blobs. Host setup launches both acquisition and variant creation through the image download command; direct host `fungen download` refuses with the host setup instruction. Ollama
 refreshes blob timestamps during variant creation, so this advanced option needs
 a writable base model store; use the default 32768 context for read-only reuse.
+
+GPU capacity is derived once from the model plus context allowance (4 GB normally; 24 GB at 262144 tokens), divided across the requested GPUs and rounded up. LSF's GPU directive and RAM request remain unchanged. SGE setup/render and submission read the host's `qconf -sc`. Setup records the requestable GPU-memory capacity complex; when discovery is ambiguous or finds none, supply its name or explicitly `none` with `--sge-gpu-memory-complex`. Explicit `none` prints and records the capacity limitation. Failed discovery or a disappeared configured complex stops setup/submission.
+
+SGE host RAM starts at 64 GB and scales to the model/context GPU budget plus 16 GB when larger. Four slots reserve one quarter each, rounded up. Discovery prefers the physical per-slot `mem_per_core` mechanism, then `h_rss`, then `h_vmem` if those are unavailable. `--sge-memory-complex NAME` selects a site's per-slot memory mechanism. For a virtual-only site, `h_vmem` requests four times the RAM budget, at least 256 GB aggregate over four slots, and explains this CUDA address-space headroom. This is a virtual limit, not a measurement of resident demand. Check the site's accounting for larger reservations.
+
+On BU SCC, the public [GPU guide](https://www.bu.edu/tech/support/research/software-and-programming/programming/multiprocessor/gpu-computing/) defines `gpu_memory` as minimum RAM per GPU. The [resource policy](https://www.bu.edu/tech/support/research/system-usage/running-jobs/resources-jobs/) and [RAM allocation guide](https://www.bu.edu/tech/support/research/system-usage/running-jobs/allocating-memory-for-your-job/) describe `mem_per_core` with the slot count for host RAM. An XS Q4 service at 32768 context therefore requests `gpu=1,gpu_memory=24G,mem_per_core=16G` over four slots, using the complexes actually discovered on that host. Site names are discovered, not assumed from the hostname.
+
+Slurm has [no standard direct VRAM request](https://slurm.schedmd.com/sbatch.html): `--mem-per-gpu` requests host RAM. Setup and the script state the per-GPU requirement and this limitation. If a site advertises a GPU capacity node Feature, choose it with `--slurm-gpu-constraint FEATURE`; host `sinfo --format=%f` validates that name, and the script uses standard `--constraint=FEATURE`. Record the site-guaranteed VRAM per GPU with `--slurm-gpu-memory-gb GB`; rendering refuses a missing or insufficient guarantee against the same computed requirement. The site must document that Feature's GPU capacity. With `none`, the GPU count alone cannot enforce VRAM size. Slurm host RAM uses the same model-scaled budget as SGE.
 
 Setup installs under the chosen folder and retains host Codex 0.155.1 or newer for OpenAI. Local sessions use the bundled host Codex 0.155.1, matching the catalog version. It installs the Codex skill without
 replacing the user's Codex configuration. Backend settings live in
@@ -97,7 +111,7 @@ interactive configurations and actual delegated inference remain unverified.
 The launcher requires the shipped catalog and pinned client, with rerun-setup
 instructions for missing or invalid assets. After the image has copied the installer bundle, `fungen setup` can reconfigure
 the retained installation on the host. Running the image installer again upgrades
-the installation to that image's operator bundle.
+the installer bundle; run the printed host setup command to finish the upgrade. Dangling skill links and links into a recognizable older Fungen installation are replaced. A real skill directory or a foreign link is preserved and setup prints its exact move-aside command.
 Unchanged files are kept, and changed binaries are replaced atomically so a
 running host client retains its existing executable mapping.
 The PATH line is appended only after an explicit `yes`.

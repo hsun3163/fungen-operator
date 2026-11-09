@@ -36,7 +36,7 @@ daemon, subordinate UID mapping or remote builder is required.
 `install.sh` pins Python 3.12.13, Codex 0.155.1 and uv 0.13.4 and checks download
 hashes. It builds the operator wheel and downloads its dependency wheels for
 offline host installation with uv. The image's default command copies this bundle
-and installs onto the host. `serve` is the model service with a positive selected-model GPU-offload readiness gate; Codex and the
+and prints the command that completes setup on the host, where scheduler clients are visible. `serve` is the model service with a positive selected-model GPU-offload readiness gate; Codex and the
 operator execute on the host. The runtime uses an explicit `--home` bind rather
 than the unsupported `--env HOME` override. Setup inside the image checks that the
 host storage has positive shared-filesystem or physical block-device/kernel evidence and stops before installation writes with the exact
@@ -91,3 +91,32 @@ singularity pull fungen.sif oras://ghcr.io/hsun3163/fungen-operator:ollama0.40.6
 
 Check `sha256sum fungen.sif` against the publication evidence. Record functional
 image acceptance separately in [VALIDATION.md](VALIDATION.md).
+
+## Operator release tags
+
+Operator semantic versions are independent of the Ollama/Codex component pins.
+Annotated Git tags `v1.0.0`, `v1.1.0`, and `v1.2.0` identify release commits;
+GitHub releases contain the corresponding [CHANGELOG](../CHANGELOG.md) entry.
+The immutable GHCR tags for this release are `1.2.0` and
+`1.2.0-ollama0.40.6-codex0.155.1`. The component-only
+`ollama0.40.6-codex0.155.1` and `latest` tags move to the accepted release.
+Existing version tags must never be repointed to different bytes. Historical
+`1.0.0` and `1.1.0` tags refer to their original registry manifests; if an original
+manifest is unavailable, the changelog records that fact without a rebuilt substitute.
+
+The package version is defined in `src/fungen_operator/__init__.py`; setuptools
+reads it through `tool.setuptools.dynamic.version`. `fungen --version` reports
+that value and the build context records the value from the captured source blob
+in `source.json` beside the image source commit. The changelog and validation
+record distinguish image source commits from later release documentation commits.
+
+For release 1.2.0, publish all four tags through the native publisher:
+
+```bash
+python3 container/publish.py "$SIF_PATH" 1.2.0 \
+  1.2.0-ollama0.40.6-codex0.155.1 ollama0.40.6-codex0.155.1 latest \
+  --output "$EVIDENCE_DIR/publish.json"
+singularity pull fungen.sif oras://ghcr.io/hsun3163/fungen-operator:1.2.0
+```
+
+Keep package visibility and repository settings unchanged.
