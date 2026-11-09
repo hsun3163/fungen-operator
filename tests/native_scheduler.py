@@ -50,6 +50,9 @@ def main():
         fcntl.flock(stream,fcntl.LOCK_EX)
         stream.write(json.dumps(dict(client=name,argv=args,controller=os.environ.get('FUNGEN_CONTROLLER_ID'),
                                     journal=os.environ.get('FUNGEN_SUBMISSIONS')))+'\n')
+    if name == 'qconf':
+        if args != ['-sc']: raise RuntimeError('Expected qconf -sc')
+        print((root.parent/'complexes.txt').read_text(), end=''); return
     if name in ('bsub','qsub','sbatch'):
         scheduler={'bsub':'lsf','qsub':'sge','sbatch':'slurm'}[name]
         with (root/'counter').open('a+') as counter:
@@ -105,3 +108,25 @@ def main():
 
 
 if __name__=='__main__':main()
+
+
+SGE_SCC_COMPLEXES = """#name shortcut type relop requestable consumable default urgency
+h_vmem h_vmem MEMORY <= YES YES 0 0
+mem_per_core mpc MEMORY <= YES NO 0 0
+gpu gpu INT <= YES YES 0 0
+gpu_memory gm MEMORY <= YES NO 0 0
+"""
+
+
+def fake_sge_clients(root, monkeypatch, complexes=SGE_SCC_COMPLEXES):
+    """Install logged host clients; no scheduler or container allocation occurs."""
+    root = Path(root); root.mkdir(parents=True, exist_ok=True)
+    client = root/'native_scheduler.py'
+    client.write_text('#!'+sys.executable+'\n'+Path(__file__).read_text())
+    for name in ('qsub','qstat','qacct','qconf'):
+        link = root/name
+        if not link.exists(): link.symlink_to(client)
+    client.chmod(0o755)
+    (root/'complexes.txt').write_text(complexes)
+    monkeypatch.setenv('PATH',str(root)+':'+os.environ.get('PATH',''))
+    return root

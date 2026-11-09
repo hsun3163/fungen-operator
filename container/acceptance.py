@@ -78,9 +78,17 @@ def setup(root,image,staged,model,scenario='staged',host_codex=None,sched='lsf',
     command=[runtime,'run','--home',f'{home}:{home}']
     if staged:command+=['--bind',f'{staged}:{staged}'+('' if scenario in ('xs','advanced') else ':ro')]
     command += [image,'setup','--runtime',runtime]
-    answers=[('Install folder',str(home/'.fungen')),('Scheduler',sched),('Model backend',backend)]
+    drive(command,[('Install folder',str(home/'.fungen'))],root/f'{scenario}.installer.pty.log',env,work)
+    # Scheduler clients, Codex and operator configuration belong to the host.
+    command=[home/'.fungen/python/bin/python3','-m','fungen_operator.bootstrap','setup',
+             '--install',home/'.fungen','--image',image,'--runtime',runtime]
+    answers=[('Scheduler',sched)]
+    if sched=='sge': answers += [('SGE project (-P)','')]
+    answers += [('Model backend',backend)]
     if backend=='local':
         answers += [('Model tag',model),('Download model?','yes' if scenario=='xs' else 'no'),('Model folder',str(staged)),('Context',str(context))]
+        if sched=='sge': answers += [('SGE GPU-memory complex',''),('SGE host-memory complex','')]
+        if sched=='slurm': answers += [('Slurm GPU capacity Feature','none')]
     answers += [('Add the install bin','no')]
     drive(command,answers,root/f'{scenario}.pty.log',env,work)
     env['PATH']=str(home/'.fungen/bin')+':'+env['PATH']

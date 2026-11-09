@@ -6,13 +6,15 @@ from unittest.mock import MagicMock,Mock
 import pytest
 from fungen_operator import bootstrap as b
 from ollama_inventory import inventory_model
+from native_scheduler import fake_sge_clients, SGE_SCC_COMPLEXES
 
 @pytest.mark.parametrize('memory,model', [([], 'laguna-xs-2.1:q4_K_M'),([24],'laguna-xs-2.1:q4_K_M'),([80],'laguna-xs-2.1:q8_0'),([80,80],'laguna-s-2.1:q8_0'),([141],'laguna-s-2.1:q8_0')])
 def test_model_default(memory,model):
     assert b.model_default(memory)==model
 
 @pytest.mark.parametrize('scheduler',['lsf','slurm','sge','local'])
-def test_serve_scripts(tmp_path,scheduler):
+def test_serve_scripts(tmp_path,scheduler,monkeypatch):
+    if scheduler=='sge': fake_sge_clients(tmp_path/'clients',monkeypatch)
     c=dict(install=str(tmp_path),scheduler=scheduler,account='acc_LOAD',gpu_queue='gpuexpress',gpus=2,
            runtime='apptainer',models='/models with spaces',image='/some image.sif',model='laguna-s-2.1:q4_K_M',port=11434,context=32768)
     script=tmp_path/'serve.sh';script.write_text(b.render_serve(c))
@@ -29,7 +31,7 @@ def test_serve_scripts(tmp_path,scheduler):
 @pytest.mark.parametrize('tools,env,expected',[({'bsub','sbatch','qsub'},{},'lsf'),({'sbatch'},{},'slurm'),
     ({'qsub'},{'SGE_ROOT':'/opt/sge'},'sge'),({'qsub','qconf'},{},'sge'),({'qsub'},{},'local')])
 def test_scheduler_detection(monkeypatch,tools,env,expected):
-    for key in ('LSF_BINDIR','SGE_ROOT'): monkeypatch.delenv(key,raising=False)
+    for key in ('LSF_BINDIR','LSF_ENVDIR','SGE_ROOT','SGE_CELL','SLURM_CONF'): monkeypatch.delenv(key,raising=False)
     for key,value in env.items(): monkeypatch.setenv(key,value)
     monkeypatch.setattr(b.shutil,'which',lambda name: '/bin/'+name if name in tools else None)
     assert b.scheduler()==expected
@@ -115,8 +117,13 @@ def test_advanced_context_preserves_source_store(tmp_path,monkeypatch):
     m.write_text(json.dumps({'config':{'digest':'sha256:abc','size':4},'layers':[]}))
     before=(blob.read_bytes(),m.read_bytes(),blob.stat().st_mtime_ns)
     install=tmp_path/'install';install.mkdir()
-    calls=[];monkeypatch.setattr(b,'inside_download',lambda a:calls.append(a))
-    c={'install':str(install),'models':str(source),'model':model}
+    calls=[]
+    def download(command):
+        assert command[0:2]==['apptainer','run'] and 'download' in command
+        calls.append(SimpleNamespace(skip_pull='--skip-pull' in command,
+                                     context=int(command[command.index('--context')+1])))
+    monkeypatch.setattr(b,'run',download)
+    c={'install':str(install),'models':str(source),'model':model,'runtime':'apptainer','image':'/image.sif'}
     b.context_variant(c)
     assert (blob.read_bytes(),m.read_bytes(),blob.stat().st_mtime_ns)==before
     assert (install/'server-models/blobs/sha256-abc').is_symlink()
@@ -398,6 +405,7 @@ def test_setup_stops_when_home_is_container_only(tmp_path,monkeypatch,capsys):
 
 
 def local_setup(tmp_path,monkeypatch,detected,previous=None,answers=None,args=()):
+    fake_sge_clients(tmp_path/'clients',monkeypatch)
     (tmp_path/'home/.fungen').mkdir(parents=True,exist_ok=True);home=tmp_path/'home';models=tmp_path/'models';models.mkdir(exist_ok=True)
     monkeypatch.setattr(b.Path,'home',lambda:home)
     monkeypatch.setattr(b,'config_path',lambda:home/'.config/fungen/config.toml')
@@ -437,7 +445,8 @@ def test_account_default_follows_scheduler(tmp_path,monkeypatch,detected,previou
 
 
 @pytest.mark.parametrize('account,directive',[('xqtl','#$ -P xqtl\n'),('',None)])
-def test_sge_project_directive(tmp_path,account,directive):
+def test_sge_project_directive(tmp_path,account,directive,monkeypatch):
+    fake_sge_clients(tmp_path/'clients',monkeypatch)
     c=dict(install=str(tmp_path),scheduler='sge',account=account,gpus=1,runtime='apptainer',models='/m',image='/i.sif',
            model='laguna-xs-2.1:q4_K_M',port=11434,context=32768)
     text=b.render_serve(c)
@@ -469,6 +478,10 @@ def check_config(tmp_path,monkeypatch):
     monkeypatch.setenv('PATH',str(tmp_path/'bin'));monkeypatch.setattr(b.Path,'home',lambda:tmp_path)
     skill=tmp_path/'.agents/skills/fungen-operator/SKILL.md';skill.parent.mkdir(parents=True);skill.write_text('skill')
     c=backend_config(tmp_path,monkeypatch,backend='local');c['scheduler']='sge'
+    # The shared backend fixture simulates Codex --version, so return real SGE
+    # complex data for the newly required native discovery command as well.
+    version_run=b.run
+    monkeypatch.setattr(b,'run',lambda cmd,**kw:SimpleNamespace(stdout=SGE_SCC_COMPLEXES) if cmd==['qconf','-sc'] else version_run(cmd,**kw))
     (tmp_path/'serve.sge.sh').write_text(b.render_serve(c))
     return c
 

@@ -27,7 +27,7 @@ FITS = {'laguna-xs-2.1:q4_K_M':'one 24–48 GB GPU','laguna-xs-2.1:q8_0':'one 48
 MIN_CODEX = (0, 155, 1)
 BUNDLE = Path('/opt/fungen')
 # Written by the local branch of setup; the first five are required to serve.
-LOCAL_KEYS = ('model', 'models', 'gpus', 'context', 'port', 'source_models', 'runtime_models', 'serve_model', 'local_codex')
+LOCAL_KEYS = ('model', 'models', 'gpus', 'context', 'port', 'source_models', 'runtime_models', 'serve_model', 'local_codex', 'sge_gpu_memory_complex', 'sge_memory_complex', 'sge_memory_per_slot_gb', 'slurm_gpu_constraint', 'slurm_gpu_memory_gb')
 OFFLINE = 'No network: download on a login node or another machine, then rerun setup --download no --models-dir FOLDER.'
 
 
@@ -132,11 +132,11 @@ def api(url, path='/api/tags', data=None, timeout=5):
 
 
 def scheduler():
-    if shutil.which('bsub') or os.environ.get('LSF_BINDIR'):
+    if shutil.which('bsub') or any(os.environ.get(k) for k in ('LSF_BINDIR','LSF_ENVDIR')):
         return 'lsf'
-    if shutil.which('sbatch'):
+    if shutil.which('sbatch') or os.environ.get('SLURM_CONF'):
         return 'slurm'
-    if shutil.which('qsub') and (os.environ.get('SGE_ROOT') or shutil.which('qconf')):
+    if any(os.environ.get(k) for k in ('SGE_ROOT','SGE_CELL')) or (shutil.which('qsub') and shutil.which('qconf')):
         return 'sge'
     return 'local'
 
@@ -319,8 +319,20 @@ def install_host(install):
         source = install/'skills/fungen-operator'
         if dest.is_symlink() and dest.resolve() == source.resolve():
             continue
-        if dest.exists():
-            raise ValueError(f'Existing skill at {dest}; move it aside explicitly before setup.')
+        if dest.is_symlink():
+            target = dest.resolve()
+            if not dest.exists() or (target.name == 'fungen-operator' and target.parent.name == 'skills'
+                                     and (target.parent.parent/'bundle.sha256').is_file()
+                                     and (target.parent.parent/'wheels').is_dir()
+                                     and (target.parent.parent/'python/bin/python3').exists()):
+                # Only a dangling link or a recognizable offline Fungen install.
+                dest.unlink()
+            else:
+                raise ValueError(f'Existing skill at {dest}; move it aside explicitly before setup. Run: '+
+                                 shlex.join(['mv',str(dest),str(dest)+'.before-fungen']))
+        elif dest.exists():
+            raise ValueError(f'Existing skill at {dest}; move it aside explicitly before setup. Run: '+
+                             shlex.join(['mv',str(dest),str(dest)+'.before-fungen']))
         dest.symlink_to(source, target_is_directory=True)
     return codex
 
@@ -337,23 +349,146 @@ def runtime(config, nv=False):
     return command
 
 
-def render_serve(config):
+def serve_memory(config):
+    """GiB of GPU capacity per device and GB of host RAM for the selected model."""
+    total = MODELS[config['model']] + (24 if config['context'] == 262144 else 4)
+    gpus = config['gpus']
+    if not isinstance(gpus, int) or gpus < 1:
+        raise ValueError('GPU count must be a positive integer')
+    return (total + gpus - 1)//gpus, max(64, total + 16)
+
+
+def sge_complexes():
+    """Read requestable memory complexes through the host's native client."""
+    try:
+        result = run(['qconf', '-sc'], capture_output=True, text=True)
+    except (OSError, subprocess.CalledProcessError) as exc:
+        raise ValueError('SGE resource discovery failed: qconf -sc must succeed on the host. '
+                         'Load the site SGE environment and rerun host fungen setup/serve. '+str(exc)) from exc
+    complexes = {}
+    for line in result.stdout.splitlines():
+        fields = line.split()
+        if not fields or fields[0].startswith('#'):
+            continue
+        if len(fields) < 8:
+            raise ValueError('Invalid qconf -sc row: '+line)
+        name, shortcut, kind, relation, requestable, consumable = fields[:6]
+        if kind == 'MEMORY' and requestable in ('YES', 'FORCED') and relation in ('<=', '=='):
+            complexes[name] = dict(shortcut=shortcut, consumable=consumable)
+    return complexes
+
+
+def configure_sge(config, *, interactive=False, gpu_complex=None, memory_complex=None, announce=False):
+    complexes = sge_complexes()
+    gpu_candidates = [name for name in complexes if ('gpu' in name.lower() or 'vram' in name.lower())
+                      and ('mem' in name.lower() or 'vram' in name.lower())]
+    def choose(key, supplied, candidates, prompt, allow_none=False):
+        value = supplied if supplied is not None else config.get(key)
+        if value is None:
+            default = candidates[0] if len(candidates) == 1 else ''
+            if interactive:
+                value = ask(prompt, default)
+            elif default:
+                value = default
+            else:
+                raise ValueError(prompt+'; specify --'+key.replace('_','-')+
+                                 (' NAME or none explicitly.' if allow_none else ' NAME.'))
+        if value == 'none' and allow_none:
+            if announce: print('SGE GPU-memory selection explicitly disabled (none); GPU capacity cannot be constrained by this site.')
+        elif value not in complexes:
+            raise ValueError('SGE complex '+repr(value)+' is not a requestable MEMORY complex in host qconf -sc. '+
+                             'Rerun fungen setup --'+key.replace('_','-')+' NAME'+(' (or none).' if allow_none else '.'))
+        config[key] = value
+    choose('sge_gpu_memory_complex', gpu_complex, gpu_candidates,
+           'SGE GPU-memory complex (name from qconf -sc, or explicit none)', True)
+    # Prefer a physical per-core placement request, then a resident-memory limit.
+    # h_vmem is used only when the site exposes no physical request mechanism.
+    memory_candidates = [name for name in ('mem_per_core', 'h_rss', 'h_vmem') if name in complexes]
+    choose('sge_memory_complex', memory_complex, memory_candidates[:1],
+           'SGE host-memory complex (per slot, name from qconf -sc)')
+    gpu_name = config['sge_gpu_memory_complex']
+    if gpu_name != 'none' and complexes[gpu_name]['consumable'] != 'NO':
+        raise ValueError('SGE GPU-memory complex must describe per-device capacity (non-consumable); '
+                         'a consumable memory pool cannot express the per-GPU requirement. Choose a capacity complex or explicit none.')
+    gpu, host = serve_memory(config)
+    per_slot = (host + 3)//4
+    if config['sge_memory_complex'] == 'h_vmem':
+        # CUDA maps address space well beyond resident RAM. Reserve at least
+        # 256 GiB aggregate and four times the model RAM budget, over four slots.
+        per_slot = max(256, host*4)//4
+        if announce: print(f'SGE h_vmem virtual headroom: {per_slot}G per slot x 4; '
+              f'4 x host RAM ({host}G), minimum 256G aggregate. Physical RAM demand remains {host}G.')
+    config['sge_memory_per_slot_gb'] = per_slot
+    if announce: print(f'SGE serve resources: {gpu}G per GPU; host RAM {host}G across 4 slots; '
+          f"{config['sge_memory_complex']}={per_slot}G per slot.")
+
+
+def slurm_gpu_constraint(feature, required_gb, capacity_gb=None):
+    """A site's advertised node Feature can select GPU capacity; never infer it."""
+    if not feature or feature == 'none':
+        return ''
+    if capacity_gb is None or int(capacity_gb) < required_gb:
+        raise ValueError(f'Slurm capacity Feature must guarantee at least {required_gb}G per GPU. '
+                         'Set --slurm-gpu-memory-gb from the site policy, or choose a larger Feature.')
+    if not re.fullmatch(r'[A-Za-z0-9_.-]+', feature):
+        raise ValueError('Choose one advertised Slurm GPU capacity Feature name (no constraint expression).')
+    try:
+        result = run(['sinfo','--noheader','--format=%f'],capture_output=True,text=True)
+    except (OSError,subprocess.CalledProcessError) as exc:
+        raise ValueError('Slurm Feature discovery failed on the host: '+str(exc)) from exc
+    advertised = {name for line in result.stdout.splitlines() for name in line.strip().split(',')}
+    if feature not in advertised:
+        raise ValueError('Slurm GPU capacity Feature '+repr(feature)+' is absent from host sinfo --format=%f; '
+                         'ask the site for its GPU capacity policy and rerun setup --slurm-gpu-constraint FEATURE.')
+    return f'#SBATCH --constraint={feature}\n'
+
+
+def copy_host_installer(install, args, image, launch):
+    """Image operation: copy assets and print the command to execute on the host."""
+    if not all((BUNDLE/name).exists() for name in ('python/bin/python3','wheels','skills/fungen-operator','bin/uv')):
+        raise ValueError('Image host installer bundle is incomplete.')
+    install.mkdir(parents=True, exist_ok=True)
+    for name in ('python','wheels','skills','bin','docs'):
+        if (BUNDLE/name).is_dir():
+            shutil.copytree(BUNDLE/name, install/name, dirs_exist_ok=True, copy_function=atomic_copy)
+    for name in ('README.md','source.json'):
+        if (BUNDLE/name).is_file(): atomic_copy(BUNDLE/name, install/name)
+    command = [str(install/'python/bin/python3'), '-m', 'fungen_operator.bootstrap', 'setup',
+               '--install', str(install), '--image', str(Path(image or 'fungen.sif').resolve()), '--runtime', launch]
+    for key, value in vars(args).items():
+        if key in ('command','install','image','runtime') or value is None or value is False:
+            continue
+        command += ['--'+key.replace('_','-')]
+        if value is not True: command += [str(value)]
+    print('Installer copied. Exit the image and run setup on the host:\n  '+shlex.join(command))
+
+
+def render_serve(config, *, announce=False):
     root = Path(config['install'])
     state = root/'server.json'
     sched = config['scheduler']
     directives = ''
+    gpu_gb, host_gb = serve_memory(config)
     if sched == 'lsf':
         directives = (f"#BSUB -J fungen-serve\n#BSUB -P {config['account']}\n#BSUB -q {config['gpu_queue']}\n"
                       f"#BSUB -n 2\n#BSUB -R \"rusage[mem=32000] span[hosts=1]\"\n#BSUB -M 64000\n#BSUB -W 12:00\n"
-                      f"#BSUB -gpu \"num={config['gpus']}:gmem={(MODELS[config['model']]+(24 if config['context']==262144 else 4)+config['gpus']-1)//config['gpus']}G:mode=shared:j_exclusive=yes\"\n#BSUB -o {shlex.quote(str(root/'serve.%J.log'))}\n")
+                      f"#BSUB -gpu \"num={config['gpus']}:gmem={gpu_gb}G:mode=shared:j_exclusive=yes\"\n#BSUB -o {shlex.quote(str(root/'serve.%J.log'))}\n")
     elif sched == 'slurm':
-        directives = (f"#SBATCH --job-name=fungen-serve\n#SBATCH --gres=gpu:{config['gpus']}\n"
-                      f"#SBATCH --cpus-per-task=4\n#SBATCH --mem=64G\n#SBATCH --time=12:00:00\n"
-                      f"#SBATCH --output={shlex.quote(str(root/'serve.%j.log'))}\n")
+        constraint = slurm_gpu_constraint(config.get('slurm_gpu_constraint'), gpu_gb, config.get('slurm_gpu_memory_gb'))
+        directives = constraint + (f"#SBATCH --job-name=fungen-serve\n#SBATCH --gres=gpu:{config['gpus']}\n"
+                      f"#SBATCH --cpus-per-task=4\n#SBATCH --mem={host_gb}G\n#SBATCH --time=12:00:00\n"
+                      f"#SBATCH --output={shlex.quote(str(root/'serve.%j.log'))}\n"
+                      f"# Per-GPU VRAM required: {gpu_gb}G; Slurm has no standard VRAM request. Select a site GPU type/feature with this capacity.\n")
     elif sched == 'sge':
+        configure_sge(config, announce=announce)
+        gpu_request = '' if config['sge_gpu_memory_complex']=='none' else f",{config['sge_gpu_memory_complex']}={gpu_gb}G"
         directives = (f"#$ -N fungen-serve\n#$ -S /bin/bash\n"+(f"#$ -P {config['account']}\n" if config.get('account') else '')+"#$ -pe smp 4\n"
-                      f"#$ -l h_rt=12:00:00,h_vmem=16G,gpu={config['gpus']}\n#$ -j y\n"
+                      f"#$ -l h_rt=12:00:00,{config['sge_memory_complex']}={config['sge_memory_per_slot_gb']}G,gpu={config['gpus']}{gpu_request}\n#$ -j y\n"
                       f"#$ -o {shlex.quote(str(root))}/serve.$JOB_ID.log\n")
+    if sched == 'sge' and config['sge_gpu_memory_complex'] == 'none':
+        directives += '# GPU-memory complex: explicit none; site cannot constrain per-GPU VRAM.\n'
+    if sched == 'sge' and config['sge_memory_complex'] == 'h_vmem':
+        directives += f'# Virtual headroom: 4 x host RAM ({host_gb}G), minimum 256G aggregate over 4 slots.\n'
     command = runtime(config, nv=True) + ['serve', '--models-dir', '/models', '--model', config.get('serve_model',config['model']),
                '--port', str(config['port']), '--state', str(state), '--context', str(config['context'])]
     return '#!/bin/bash\n'+directives+'set -euo pipefail\nexec '+shlex.join(command)+'\n'
@@ -385,10 +520,12 @@ def setup(args):
     install = Path(answer('install', 'Install folder', str(Path.home()/'.fungen'))).expanduser().resolve()
     if BUNDLE.is_dir() and not host_visible(install):
         raise ValueError(f'Install folder {install} has unknown or private mount identity. Create the folder on the host, then run: '+shlex.join([launch,'run','--home',f'{Path.home()}:{Path.home()}','--bind',f'{install}:{install}',image or 'fungen.sif','setup','--install',str(install)]))
+    if BUNDLE.is_dir():
+        return copy_host_installer(install, args, image, launch)
     detected = scheduler()
     # A missing scheduler client is unavailable detection, not an explicit local choice.
     if args.scheduler is None and detected=='local':
-        print('No scheduler client detected; '+('using saved scheduler '+previous['scheduler'] if previous.get('scheduler') else 'defaulting to local')+'. Select explicitly with --scheduler lsf/slurm/sge/local.')
+        print('No scheduler client detected; '+('using saved scheduler '+previous['scheduler'] if previous.get('scheduler') else 'no scheduler evidence; choose the scheduler at the prompt')+'. Select explicitly with --scheduler lsf/slurm/sge/local.')
     sched = answer('scheduler', 'Scheduler (lsf/slurm/sge/local)', detected if detected != 'local' else previous.get('scheduler', 'local'), ['lsf','slurm','sge','local'], saved=False)
     # The account/project belongs to its scheduler: LSF defaults to acc_LOAD, others to none.
     account = 'acc_LOAD' if sched == 'lsf' else ''
@@ -418,6 +555,22 @@ def setup(args):
                       context=int(answer('context', 'Context (32768; advanced 262144 needs extra GPU memory)', 32768, ['32768','262144'])),
                       port=int(args.port or previous.get('port',11434)))
         config['gpus'] = gpu_count(model, memory, config['context'])
+        if sched == 'sge':
+            for key in ('sge_gpu_memory_complex','sge_memory_complex'):
+                if previous.get('scheduler') == sched and key in previous: config[key] = previous[key]
+            configure_sge(config, interactive=interactive, gpu_complex=args.sge_gpu_memory_complex,
+                          memory_complex=args.sge_memory_complex, announce=True)
+        elif sched == 'slurm':
+            feature = answer('slurm_gpu_constraint', 'Slurm GPU capacity Feature (site advertised; none if unavailable)', 'none')
+            config['slurm_gpu_constraint'] = feature
+            if feature != 'none':
+                capacity = answer('slurm_gpu_memory_gb', 'Site-guaranteed VRAM per GPU for this Feature (GB)', '')
+                if capacity != '': config['slurm_gpu_memory_gb'] = int(capacity)
+            slurm_gpu_constraint(feature, serve_memory(config)[0], config.get('slurm_gpu_memory_gb'))
+            print('Slurm has no standard per-GPU VRAM request. --mem and --mem-per-gpu request host RAM. '
+                  'Use your site GPU type/feature policy to select GPUs with at least '+str(serve_memory(config)[0])+
+                  'G each; --slurm-gpu-constraint FEATURE uses a site-advertised capacity Feature. '
+                  'With none, the generated --gres=gpu count cannot enforce VRAM capacity.')
         if download == 'no' and not model_present(config['models'], model):
             # A staged advanced preset is usable without modifying its read-only store.
             raise ValueError('Model is incomplete or absent. Rerun with --download yes to resume, or select the exact installed tag.')
@@ -462,12 +615,15 @@ def setup(args):
         print('No GPU on this host: GPU offload remains unverified until fungen serve starts on the GPU job and fungen check passes. CPU-only model readiness is refused.')
 
 
-def download_model(config):
-    if BUNDLE.is_dir():
-        return inside_download(argparse.Namespace(models_dir=config['models'], model=config['model'], context=32768, skip_pull=False))
-    # Acquisition needs no GPU and resumes Ollama's partial blob files.
-    command = [config['runtime'], 'run', '--home', f'{Path.home()}:{Path.home()}',
-               '--bind', f"{config['models']}:/models", config['image'], 'download', '--models-dir', '/models', '--model', config['model']]
+def download_model(config, *, context=32768, skip_pull=False):
+    # Acquisition and context-variant creation run in the image, launched by
+    # host setup. Bind the source too: overlay blobs are absolute symlinks.
+    command = [config['runtime'], 'run', '--home', f'{Path.home()}:{Path.home()}']
+    if config.get('source_models'):
+        command += ['--bind', config['source_models']+':'+config['source_models']]
+    command += ['--bind', f"{config['models']}:/models", config['image'], 'download',
+                '--models-dir', '/models', '--model', config['model'], '--context', str(context)]
+    if skip_pull: command += ['--skip-pull']
     run(command)
 
 
@@ -493,8 +649,7 @@ def context_variant(config):
     overlay=Path(config['runtime_models'])
     config['serve_model']=config['model']+'-256k'
     if not model_present(overlay,config['serve_model']):
-        args=argparse.Namespace(models_dir=str(overlay),model=config['model'],context=262144,skip_pull=True)
-        inside_download(args)
+        download_model(dict(config, models=str(overlay)), context=262144, skip_pull=True)
 
 
 def available_port(port):
@@ -705,6 +860,10 @@ def serve(config):
     if observed.launch=='running':
         raise RuntimeError(observed.detail+' Inspect the current live launch before starting another server.')
     script=root/f"serve.{config['scheduler']}.sh";sched=config['scheduler']
+    if sched in ('sge','slurm'):
+        content = render_serve(config, announce=True)
+        if script.read_text() != content: script.write_text(content)
+        write_config(config)
     if sched=='lsf':
         with script.open() as f:r=run(['bsub'],stdin=f,capture_output=True,text=True)
         match=re.search(r'Job <(\d+)>',r.stdout)
@@ -1036,7 +1195,7 @@ def main(argv=None):
     sub=parser.add_subparsers(dest='command')
     p=sub.add_parser('setup',help='Install host tools and configure a backend')
     p.add_argument('--non-interactive',action='store_true')
-    for name,choices in [('install',None),('backend',['local','openai']),('scheduler',['lsf','slurm','sge','local']),('model',list(MODELS)),('models-dir',None),('download',['yes','no']),('context',['32768','262144']),('add-path',['yes','no']),('image',None),('runtime',None),('account',None),('gpu-queue',None),('port',None)]:
+    for name,choices in [('install',None),('backend',['local','openai']),('scheduler',['lsf','slurm','sge','local']),('model',list(MODELS)),('models-dir',None),('download',['yes','no']),('context',['32768','262144']),('add-path',['yes','no']),('image',None),('runtime',None),('account',None),('gpu-queue',None),('port',None),('sge-gpu-memory-complex',None),('sge-memory-complex',None),('slurm-gpu-constraint',None),('slurm-gpu-memory-gb',None)]:
         p.add_argument('--'+name,choices=choices,default=os.environ.get('FUNGEN_'+name.replace('-','_').upper()))
     p.add_argument('--offline-check',action='store_true',help='Report offline guidance without a network probe')
     for name in ('serve','download'):
@@ -1064,7 +1223,10 @@ def main(argv=None):
         if args.command=='xqtl':
             from .onboarding import main as onboard
             return onboard(args.args)
-        if args.command=='download': return inside_download(args)
+        if args.command=='download':
+            if not BUNDLE.is_dir():
+                raise ValueError('Model downloads run in the image. Use host fungen setup --download yes, or the image download command.')
+            return inside_download(args)
         if args.command=='serve' and BUNDLE.is_dir(): return inside_serve(args)
         config=read_config()
         if not config: raise ValueError('Run apptainer run fungen.sif to set up first.')

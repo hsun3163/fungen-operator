@@ -16,6 +16,7 @@ import pytest
 import yaml
 
 from fungen_operator import bootstrap as b, cluster, onboarding as o
+from native_scheduler import fake_sge_clients
 from fungen_operator.actions import CheckReadiness, Deployment, InitiateRun, PrepareConfig, render
 from fungen_operator.execution import Executor
 from fungen_operator.fixture import create_fixture
@@ -108,15 +109,25 @@ def test_executor_queries_configured_scheduler(tmp_path,monkeypatch,scheduler):
 
 @pytest.mark.parametrize('scheduler',['sge','slurm'])
 def test_serve_retains_receipt_and_does_not_duplicate_pending_launch(tmp_path,monkeypatch,scheduler):
-    config=dict(install=str(tmp_path),backend='local',scheduler=scheduler,model='laguna-xs-2.1:q4_K_M')
+    config=dict(install=str(tmp_path),backend='local',scheduler=scheduler,model='laguna-xs-2.1:q4_K_M',
+                gpus=1,context=32768,runtime='apptainer',models='/m',image='/i',port=11434)
+    if scheduler=='sge': fake_sge_clients(tmp_path/'clients',monkeypatch)
+    monkeypatch.setattr(b,'config_path',lambda:tmp_path/'config.toml')
     (tmp_path/f'serve.{scheduler}.sh').write_text('#!/bin/bash\n')
     calls=[]
-    monkeypatch.setattr(b,'run',lambda cmd,**kw:calls.append(cmd) or SimpleNamespace(stdout='42\n'))
+    native_run=b.run
+    def submit(cmd,**kw):
+        if cmd[0]=='qconf': return native_run(cmd,**kw)
+        calls.append(cmd)
+        return SimpleNamespace(stdout='42\n')
+    monkeypatch.setattr(b,'run',submit)
     monkeypatch.setattr(cluster,'job_status',lambda *a:'running')
     b.serve(config)
     assert json.loads((tmp_path/'server-request.json').read_text())==dict(scheduler=scheduler,job_id='42')
     b.serve(config)
     assert len(calls)==1 and calls[0][0]==('qsub' if scheduler=='sge' else 'sbatch')
+    if scheduler=='sge':
+        assert [json.loads(line)['client'] for line in (tmp_path/'clients/state/calls.jsonl').read_text().splitlines()]==['qconf']
 
 
 def test_failed_launch_status_prevents_duplicate_serve(tmp_path,monkeypatch):
