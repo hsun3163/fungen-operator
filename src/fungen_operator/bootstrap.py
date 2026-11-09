@@ -1,6 +1,7 @@
 """Install on the host; serve Laguna in Apptainer; run host Codex; switch backend local/openai."""
 from __future__ import annotations
 import argparse
+from . import __version__
 from dataclasses import dataclass
 import hashlib
 import errno
@@ -1192,6 +1193,7 @@ def main(argv=None):
             print('fungen: '+str(exc),file=sys.stderr)
             return 1
     parser=argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--version', action='version', version='fungen '+__version__)
     sub=parser.add_subparsers(dest='command')
     p=sub.add_parser('setup',help='Install host tools and configure a backend')
     p.add_argument('--non-interactive',action='store_true')

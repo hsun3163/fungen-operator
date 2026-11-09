@@ -18,6 +18,7 @@ def git(repo,*args):
 def repo(tmp_path,monkeypatch):
     root=tmp_path/'repo'
     for name,text in {'README.md':'# r\n','src/pkg/a.py':'A=1\n','container/build.py':'pass\n',
+                      'src/fungen_operator/__init__.py':'__version__ = "1.2.0"\n',
                       'container/VALIDATION.md':'private log\n','runs/private.json':'{}\n'}.items():
         (root/name).parent.mkdir(parents=True,exist_ok=True);(root/name).write_text(text)
     git(root,'init','-q');git(root,'add','README.md','src','container');git(root,'commit','-qm','init')
@@ -35,8 +36,9 @@ def test_context_records_the_commit_it_copies(repo,tmp_path):
     destination=tmp_path/'context'
     b.context(destination)
     identity=json.loads((destination/'container/source.json').read_text())
+    assert identity['version']=='1.2.0'
     assert identity['commit']==git(repo,'rev-parse','HEAD').strip()
-    assert set(identity['files'])=={'README.md','src/pkg/a.py','container/build.py'}
+    assert set(identity['files'])=={'README.md','src/pkg/a.py','src/fungen_operator/__init__.py','container/build.py'}
     assert identity['files']['src/pkg/a.py']==hashlib.sha256(b'A=1\n').hexdigest()
 
 
@@ -100,3 +102,11 @@ def test_context_transforms_committed_blobs_and_preserves_modes(repo,tmp_path):
     assert copied.read_text()=='PATH="/workspace/tools"\n' and copied.stat().st_mode&0o111
     identity=json.loads((destination/'container/source.json').read_text())
     assert identity['files']['src/pkg/a.py']==hashlib.sha256(copied.read_bytes()).hexdigest()
+
+
+def test_context_version_comes_from_captured_source(repo,tmp_path):
+    p=repo/'src/fungen_operator/__init__.py'
+    p.write_text('__version__ = "2.3.4"\n')
+    git(repo,'add',str(p));git(repo,'commit','-qm','next version')
+    destination=tmp_path/'context';b.context(destination)
+    assert json.loads((destination/'container/source.json').read_text())['version']=='2.3.4'

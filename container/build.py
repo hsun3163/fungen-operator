@@ -6,6 +6,7 @@ daemon nor subordinate UIDs.
 """
 
 import argparse
+import ast
 import hashlib
 import io
 import json
@@ -85,7 +86,12 @@ def context(destination,refresh=False):
         target=destination/name;target.parent.mkdir(parents=True,exist_ok=True)
         target.write_text(text);target.chmod(int(mode,8)&0o777)
         hashes[name]=hashlib.sha256(text.encode()).hexdigest()
-    identity={'commit':commit,'files':hashes,'source_blobs':{name:oid for name,(_,oid,_) in files.items()}}
+    version_tree=ast.parse(files['src/fungen_operator/__init__.py'][2].decode())
+    versions=[ast.literal_eval(node.value) for node in version_tree.body
+              if isinstance(node,ast.Assign) and any(isinstance(t,ast.Name) and t.id=='__version__' for t in node.targets)]
+    if len(versions)!=1 or not isinstance(versions[0],str) or not re.fullmatch(r'\d+\.\d+\.\d+',versions[0]):
+        raise ValueError('Source must declare one semantic __version__')
+    identity={'version':versions[0],'commit':commit,'files':hashes,'source_blobs':{name:oid for name,(_,oid,_) in files.items()}}
     (destination/'container/source.json').write_text(json.dumps(identity,indent=2)+'\n')
     print(f'Prepared {len(files)} allowlisted source files in {destination}')
 

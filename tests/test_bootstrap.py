@@ -671,3 +671,11 @@ def test_gpu_serve_honors_explicit_model_residency(tmp_path,monkeypatch,max_load
     assert captured[0]['OLLAMA_MAX_LOADED_MODELS']==('1' if max_loaded is None else max_loaded)
     assert json.loads((tmp_path/'server.json').read_text())['ready'] is True
     assert proc.terminate.called
+
+
+def test_cli_version_needs_no_configuration(monkeypatch,capsys):
+    from fungen_operator import __version__
+    monkeypatch.setattr(b,'read_config',lambda:pytest.fail('Version must not read account config'))
+    with pytest.raises(SystemExit) as result:b.main(['--version'])
+    assert result.value.code==0
+    assert capsys.readouterr().out=='fungen '+__version__+'\n'
