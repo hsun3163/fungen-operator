@@ -10,7 +10,7 @@ GHCR repository: `ghcr.io/hsun3163/fungen-operator`.
 
 ## [1.2.0] - 2026-11-09
 
-- Git tag: `v1.2.0`; release commit: [commit selected by v1.2.0](https://github.com/hsun3163/fungen-operator/commit/v1.2.0).
+- Git tag: `v1.2.0`; release commit: [ea91e76].
 - Image source commit: [a583993]. Later release commits contain validation and delivery documentation.
 - SIF SHA-256: `31cb32693ed3e0a7cd237bbb2d4e94d345b128bbe56e5a6ab25d7eee9d3c99cc`.
 - GHCR manifest digest: `sha256:577713f6ae3e6f8566a7fcc374646b15ae8d2acd9b9b00dddb56ffd99665bf7e`.
@@ -73,6 +73,8 @@ was installed with embedded package 0.1.0, then upgraded in place to distributio
 and CLI 1.2.0 successfully. All acceptance GPU services and PTYs were stopped.
 Anonymous pulls of both `1.2.0` and `latest` matched the built SIF SHA-256;
 all four tags resolve to the manifest above. Package visibility remains public.
+The single Drive SIF replacement passed download-based rclone check: one matching
+file, zero differences.
 Live SCC allocation remains the tester's site-native verification step.
 
 Pull the immutable release with Apptainer (or use `singularity`):
@@ -207,3 +209,5 @@ clients simulate SGE/Slurm; live site allocation remained unverified.
 
 [a44f8b3]: https://github.com/hsun3163/fungen-operator/commit/a44f8b3
 [a583993]: https://github.com/hsun3163/fungen-operator/commit/a583993
+
+[ea91e76]: https://github.com/hsun3163/fungen-operator/commit/ea91e76264e101d30b0c279c99b8a606ff0f12fd

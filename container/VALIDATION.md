@@ -222,7 +222,7 @@ Only **cosi_drive:fungen-operator/fungen-operator-ollama0.40.6-codex0.155.1.sif*
 
 ## Release 3 / operator 1.2.0 — round-six acceptance, 2026-11-09
 
-**PASS; GHCR verified, Drive replacement pending.** Pushed image source
+**RELEASED AND VERIFIED.** Pushed image source
 `a583993f9851faeb5fc3550be48323c32d470244`; embedded source.json and image/host
 `fungen --version` report **1.2.0**. Setuptools reads the package's single version
 source; the installed wheel metadata also reports 1.2.0. Bundled runtime versions
@@ -282,3 +282,20 @@ Both Docker/Singularity auth stores remained empty, and credential environment
 variables were excluded. Package visibility remains **public**.
 Historical `1.0.0` and `1.1.0` tags resolve to their original manifests without
 re-uploading old SIF layers. See [CHANGELOG.md](../CHANGELOG.md) for release identities.
+
+### Round-six release and Drive receipt
+
+Annotated **v1.2.0** identifies release record
+`ea91e76264e101d30b0c279c99b8a606ff0f12fd`; its image source remains a583993.
+GitHub releases v1.0.0, v1.1.0 and v1.2.0 use the corresponding changelog entries
+and contain no binary assets. Historical tags point to the exact original release
+commits 9848347 and 89f88c2. Validation/delivery commits preserve the built code.
+
+Only `cosi_drive:fungen-operator/fungen-operator-ollama0.40.6-codex0.155.1.sif`
+was replaced. Native rclone reports **Copied (replaced existing)**, one transfer.
+`rclone check --download --one-way --files-from` restricted to that exact filename
+verified **one matching file, zero differences**, exit 0. The downloaded remote
+bytes equal the built SIF and both anonymous GHCR pulls. The final receipt changes
+only this validation record and the changelog; the annotated release tag remains
+fixed. Full release evidence and the BU tester's updated 1.2.0 pull instructions
+are in the release report linked above.
