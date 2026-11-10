@@ -10,8 +10,10 @@ GHCR repository: `ghcr.io/hsun3163/fungen-operator`.
 
 ## [1.2.0] - 2026-11-09
 
-- Git tag: `v1.2.0`; release commit: pending final validation record.
-- Image source commit, SIF SHA-256 and GHCR manifest digest: pending build.
+- Git tag: `v1.2.0`; release commit: [commit selected by v1.2.0](https://github.com/hsun3163/fungen-operator/commit/v1.2.0).
+- Image source commit: [a583993]. Later release commits contain validation and delivery documentation.
+- SIF SHA-256: `31cb32693ed3e0a7cd237bbb2d4e94d345b128bbe56e5a6ab25d7eee9d3c99cc`.
+- GHCR manifest digest: pending publication.
 - Immutable GHCR tags: `1.2.0`, `1.2.0-ollama0.40.6-codex0.155.1`.
 - Moving GHCR tags at publication: `ollama0.40.6-codex0.155.1`, `latest`.
 
@@ -49,7 +51,7 @@ All four cause fixes and their regression tests are in [38d6f22].
 
 - One operator version source for package metadata, `fungen --version`, and the
   captured image `source.json`; semantic Git/GHCR tags and this release history.
-  The implementation commit is recorded in the final release metadata below.
+  Implemented in [a44f8b3]; the user guide and tag scheme are in [a583993].
 
 ### Notes
 
@@ -59,6 +61,23 @@ All four cause fixes and their regression tests are in [38d6f22].
 - The prior test-isolation incident affecting an account config is documented in
   the BU evidence report. The offending test now isolates config paths; this
   release's tests and image acceptance use isolated HOME/config paths.
+
+### Validation
+
+753 host tests passed with zero failures/skips on 244 frozen files, unchanged
+across 3,096 checks (job 281657746). Round-six native XS acceptance and real tmux
+S/XS acceptance passed: health, actual file-writing answer, actual XS child,
+backend round trip and SGE guide guards. Fake SGE tests verify SGE_ROOT discovery
+without qsub, qconf resource requests and skill-link repair. A real prior bundle
+was installed with embedded package 0.1.0, then upgraded in place to distribution
+and CLI 1.2.0 successfully. All acceptance GPU services and PTYs were stopped.
+Live SCC allocation remains the tester's site-native verification step.
+
+Pull the immutable release with Apptainer (or use `singularity`):
+
+```bash
+apptainer pull fungen-operator-1.2.0.sif oras://ghcr.io/hsun3163/fungen-operator:1.2.0
+```
 
 ## [1.1.0] - 2026-11-07
 
@@ -129,8 +148,11 @@ superseded claims remain in the audit evidence; they are not release acceptance.
 | Reported problem or audit finding | Cause and released change | Commit |
 | --- | --- | --- |
 | "Expose and detect SGE"; "SGE operator handoff still renders LSF controllers" | LSF assumptions crossed scheduler boundaries. Added explicit SGE detection/selection, native controller/rule/task submit and status/accounting, scheduler-aware handoff and project defaults. Account inheritance is scheduler-specific; explicit clearing and changed-root constraints are preserved. | [8f68729] |
+| "Scheduler-default fallback"; "Account/project defaults" | Saved answers could obscure fresh scheduler evidence or retain an account from another scheduler. Fresh detection and explicit choices take priority; unavailable discovery is announced, accounts inherit only within the same scheduler, and explicit clearing is preserved. | [8f68729] |
+| "Non-LSF SoS task boundary" | Rule-level allocation did not establish each task's declared resources. Native SGE/Slurm SoS task hosts submit task cores, memory and walltime independently through the native adapters; actual host SoS execution is regression-tested with explicit synthetic clients. | [8f68729] |
+| "Backend configuration versus readiness" | Configuration presence was presented as readiness. Local selection now validates complete models, exact catalog/client and matching serve script; backend status labels runtime and authentication unverified until checked. Persistent and one-session backend choices preserve local settings. | [8f68729] |
 | "Stop writes to detected private home/install"; H5 "Unknown mount means host-visible" | Filesystem type or failed mount inspection could pass a private destination. Deepest mount identity/source and positive storage evidence now guard all installation writes and print exact bind commands. | [8f68729] |
-| "PENDING becomes successful health"; "Infer failure from a log prefix"; "Empty/failed GPU observation accepted" | Missing observations and stale logs could count as readiness. Health follows the retained native launch, endpoint and selected model with positive VRAM; missing evidence is visibly unverified with nonzero exit. API/native failures remain failures. | [8f68729] |
+| "PENDING becomes successful health"; "Infer failure from a log prefix"; "Empty/failed GPU observation accepted" | Missing observations and stale logs could count as readiness. Health follows the retained native launch, endpoint and selected model with positive VRAM; missing evidence is visibly unverified with nonzero exit. API/native failures remain failures. Documentation bounds this to positive offload; partial offload can pass and exclusive GPU execution is not asserted. | [8f68729] |
 | H1 "Suite-wide fake host"; W2 "Required grader checks skipped" | An autouse fixture fabricated host execution and missing htslib skipped required cases. Removed that fixture/image test shipping; canonical host tests require tools and fail with actionable installation guidance. | [8f68729] |
 | H6 "last-record accounting" | Earlier failed SGE records/tasks were discarded. Parse and validate every job/task accounting record; incomplete, mismatched or unsupported successful arrays remain unverified. | [8f68729] |
 | H7 "a missing required model catalog silently restores fallback behavior" | Missing catalog data silently altered model instructions. Require the exact catalog and pinned host Codex 0.155.1; validate actual client schema and round trip. | [8f68729], [dfa1ce5] |
@@ -180,3 +202,6 @@ clients simulate SGE/Slurm; live site allocation remained unverified.
 [dfa1ce5]: https://github.com/hsun3163/fungen-operator/commit/dfa1ce5
 [cf8088d]: https://github.com/hsun3163/fungen-operator/commit/cf8088d
 [7b816f4]: https://github.com/hsun3163/fungen-operator/commit/7b816f4
+
+[a44f8b3]: https://github.com/hsun3163/fungen-operator/commit/a44f8b3
+[a583993]: https://github.com/hsun3163/fungen-operator/commit/a583993

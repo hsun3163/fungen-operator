@@ -218,3 +218,53 @@ GHCR and single-file Drive delivery verification for this exact SIF is recorded 
 Both GHCR tags **ollama0.40.6-codex0.155.1** and **latest** are published with manifest digest **sha256:d32217d97d6515307894209cdb51cdd3b59efd9d7e848d2a18bbf6851e26910f**. The native publisher verified authenticated manifests/tag listings and both cache-disabled pulled SIF hashes. An independent **anonymous latest pull**, with a fresh scratch HOME and empty Docker/Singularity auth configs, matched SHA-256 **3f6ff0ee3dbd5fb8b76c25c87e5006c752c759604c5e5ade96769ddf90d4117f**. Package visibility remains **public**.
 
 Only **cosi_drive:fungen-operator/fungen-operator-ollama0.40.6-codex0.155.1.sif** was replaced. `rclone check` confirms **1 matching file, 0 differences** (MD5 comparison). Drive reports **3,633,700,864 bytes**, MD5 **a892ee33a077352f747b48066d8b6564**, and the same SIF SHA-256 as the build and GHCR pulls. The report links publication, anonymous-pull and Drive raw evidence. The release changed no package visibility/repository settings and deleted no packages. All task jobs and terminals remain stopped. Live SGE/qrsh at BU remains unverified.
+
+
+## Release 3 / operator 1.2.0 — round-six acceptance, 2026-11-09
+
+**PASS; publication pending.** Pushed image source
+`a583993f9851faeb5fc3550be48323c32d470244`; embedded source.json and image/host
+`fungen --version` report **1.2.0**. Setuptools reads the package's single version
+source; the installed wheel metadata also reports 1.2.0. Bundled runtime versions
+were observed as Ollama **0.40.6** and Codex **0.155.1**.
+
+Image: [~/sunh14_project/OLLAMA/images/round6/fungen-operator-ollama0.40.6-codex0.155.1.sif](http://127.0.0.1:30548/lab/tree/sunh14_project/OLLAMA/images/round6/fungen-operator-ollama0.40.6-codex0.155.1.sif)
+
+Size **3,633,790,976 bytes**; SHA-256
+`31cb32693ed3e0a7cd237bbb2d4e94d345b128bbe56e5a6ab25d7eee9d3c99cc`.
+The new round6 build used container/build.lsf: pinned-base job **281657908 DONE**,
+install/archive/SIF job **281658423 DONE**. The 63-file context came from the pushed
+commit. Later validation/changelog commits are outside the admitted image inputs.
+
+| Required check | Native evidence / result |
+| --- | --- |
+| BU source gate | A-D cause fixes/tests, E not a defect; hiding audit APPROVE; original frozen suite 751 passed, job 281644741; all 243 files matched at this release's initial gate |
+| Versioning full host rerun | **281657746 DONE**; **753 passed in 6606.56 s**, zero failed/skipped; 244 files unchanged before/during/after, 3,096 monitor checks; peak 11,545 MB within 16,384 MB |
+| Native clean-home image XS | **281665503 DONE**, service **281667418**; actual host Codex answer FUNGEN_AGENT_CONNECTED, **13/13 health PASS / VERIFIED**; 20,543,805,849 VRAM bytes, context 32768 |
+| Real tmux S/XS | Service **281666152**, node lg06g28; S 97,185,924,378 and XS 20,543,805,849 VRAM bytes at context 32768; real host setup and before/after health checks |
+| Local composer and tools | No local sign-in or model-metadata warning; actual shell wrote/read the exact three-line README and the model answered; server recorded **13 successful Responses requests** |
+| Actual XS child | Parent listed both served Q4 choices; child **01a1c27c-b048-74c0-b49a-b80ed5276f58**, separate session model laguna-xs-2.1:q4_K_M, actual XS_CHILD_RELEASE3_OK answer, wait and close |
+| Backend round trip | Local clean exit 0; unsigned OpenAI sign-in menu and cancellation 0; return to local answered LOCAL_RETURN_RELEASE3_OK and exited 0; every config value preserved and auth files absent |
+| Fake-SGE image / links | **281663830 DONE**; no qsub on PATH plus SGE_ROOT auto-selects sge; real fake qconf -sc, gpu_memory=24G, mem_per_core=16G, no h_vmem; dangling/older links repaired; repeat setup passes |
+| Literal older-bundle upgrade | **281682783 DONE**; real round-five bundle/source 9910940 installed with embedded package 0.1.0, then new image copied over the same install; distribution and CLI upgraded to 1.2.0, resource/link checks and repeat setup passed |
+| Real-PTY SGE guide | Scheduler/project prompts rendered; missing predecessor and nonempty-root refusals preserved with exact visible errors |
+| Cleanup | Own GPU services 281664243, 281667418 and 281666152 stopped, awaited and verified EXIT 130; all four tmux panes/server exited; all batch drivers awaited in process; no watcher |
+
+Retained failed attempts: the first SGE extension **281663247** failed before
+setup because neighboring pty.py shadowed the stdlib module; the helper import
+was corrected. First native XS driver **281663040** used the two-model interactive
+store rather than release 2's dedicated XS store and correctly refused unloaded
+S with absent effective-context evidence (`num_ctx`); service 281664243 was stopped.
+The rerun used the original dedicated XS input, with all source guards unchanged.
+Manual short PTY waits expired during copying/installation, one answer sequence
+omitted the Install folder prompt, and first local input arrived at project trust.
+The full prompt sequence and explicit trust acceptance passed. The reused PTY
+helper now accepts --after markers so stale history cannot satisfy later checks.
+All failures and corrections are retained in the release packet.
+
+Operator, Codex and tests ran on the host; the image copied assets and served models.
+SGE clients in these checks are explicit fakes; live SCC/qrsh and Slurm allocation
+remain site-native checks. The prior account-config incident is documented in the
+BU report; this release uses isolated HOME/XDG paths and performs no account recovery.
+
+Evidence: [~/sunh14_project/fungen-operator/temp_reference/codex_release3_20261109/report.md](http://127.0.0.1:30548/lab/tree/sunh14_project/fungen-operator/temp_reference/codex_release3_20261109/report.md)
