@@ -299,3 +299,12 @@ bytes equal the built SIF and both anonymous GHCR pulls. The final receipt chang
 only this validation record and the changelog; the annotated release tag remains
 fixed. Full release evidence and the BU tester's updated 1.2.0 pull instructions
 are in the release report linked above.
+
+## 2026-11-09 — GitHub Actions publication removed
+
+Removed the tag-triggered `publish-sif.yml` workflow. Its publication runs failed
+with `DENIED: permission_denied: write_package`; granting the suggested Actions
+access would allow a GitHub-rebuilt, unaccepted SIF to replace the accepted
+Minerva image aliases. Releases are built, GPU/interactive accepted and published
+only from Minerva. No GitHub Actions publishes images. Earlier publication and
+owner-action entries above remain historical records.

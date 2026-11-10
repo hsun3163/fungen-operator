@@ -57,8 +57,8 @@ GHCR replaces the retired Sylabs Cloud Library distribution path. Models and
 runtime state stay outside the image. The released package is public and supports anonymous pulls. Authentication is
 needed only when publishing or accessing a private package.
 
-For a Minerva-built SIF from reviewed, committed source, run the publisher outside
-the sandbox on a network-capable host. Provide `GHCR_TOKEN` with `write:packages`
+For an accepted Minerva-built SIF from reviewed, committed source, run the
+publisher on Minerva outside the sandbox. Provide `GHCR_TOKEN` with `write:packages`
 and `read:packages`, or use a `gh` login with those scopes:
 
 ```bash
@@ -70,14 +70,9 @@ The publisher checks authenticated manifests and tag listings, then pulls each t
 with caching disabled and requires its SIF SHA-256 to match the built image.
 The evidence records the SIF hash and registry manifest digests.
 
-Alternatively, dispatch **Publish operator SIF** with tag
-`ollama0.40.6-codex0.155.1`. The workflow builds committed source through the
-repository Dockerfile and Apptainer definition and publishes that tag plus
-`latest` using `GITHUB_TOKEN`. A test tag publishes only that tag. Its job summary
-and publication artifact record source commit, SIF hash and verified registry
-digests. Publishing to the existing package requires the owner to grant the
-repository **Write** under the package's **Manage Actions access**, in addition
-to the workflow's `packages: write` permission.
+Releases are built on Minerva, accepted with GPU and interactive checks, and
+published from Minerva using the accepted SIF bytes. No GitHub Actions workflow
+publishes images. Moving aliases are updated only to an accepted release.
 
 Private pulls require `read:packages` and package access:
 

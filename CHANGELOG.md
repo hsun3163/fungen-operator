@@ -8,6 +8,17 @@ image source commit with validation-only documentation. SHA-256 below identifies
 the SIF bytes; the registry manifest digest identifies its ORAS descriptor.
 GHCR repository: `ghcr.io/hsun3163/fungen-operator`.
 
+## [Unreleased]
+
+### Removed
+
+- Removed the tag-triggered GitHub Actions SIF publication workflow introduced
+  in [cf8088d](https://github.com/hsun3163/fungen-operator/commit/cf8088d).
+  Its runs failed with `DENIED: permission_denied: write_package`; the suggested
+  Actions write-access remedy would let an unaccepted GitHub rebuild replace
+  accepted Minerva image aliases. Removed the Actions-specific publisher remedy;
+  releases are built, GPU/interactive accepted and published only from Minerva.
+
 ## [1.2.0] - 2026-11-09
 
 - Git tag: `v1.2.0`; release commit: [ea91e76].
