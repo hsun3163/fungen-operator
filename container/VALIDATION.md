@@ -222,7 +222,7 @@ Only **cosi_drive:fungen-operator/fungen-operator-ollama0.40.6-codex0.155.1.sif*
 
 ## Release 3 / operator 1.2.0 — round-six acceptance, 2026-11-09
 
-**PASS; publication pending.** Pushed image source
+**PASS; GHCR verified, Drive replacement pending.** Pushed image source
 `a583993f9851faeb5fc3550be48323c32d470244`; embedded source.json and image/host
 `fungen --version` report **1.2.0**. Setuptools reads the package's single version
 source; the installed wheel metadata also reports 1.2.0. Bundled runtime versions
@@ -268,3 +268,17 @@ remain site-native checks. The prior account-config incident is documented in th
 BU report; this release uses isolated HOME/XDG paths and performs no account recovery.
 
 Evidence: [~/sunh14_project/fungen-operator/temp_reference/codex_release3_20261109/report.md](http://127.0.0.1:30548/lab/tree/sunh14_project/fungen-operator/temp_reference/codex_release3_20261109/report.md)
+
+### Round-six GHCR verification
+
+Published through native Singularity push and ORAS manifest tagging. Tags
+`1.2.0`, `1.2.0-ollama0.40.6-codex0.155.1`,
+`ollama0.40.6-codex0.155.1` and `latest` all resolve to
+`sha256:577713f6ae3e6f8566a7fcc374646b15ae8d2acd9b9b00dddb56ffd99665bf7e`.
+Its single SIF layer has the exact built-image SHA-256 and size above.
+Anonymous cache-disabled Singularity pulls of **1.2.0 and latest** each matched
+`31cb32693ed3e0a7cd237bbb2d4e94d345b128bbe56e5a6ab25d7eee9d3c99cc`.
+Both Docker/Singularity auth stores remained empty, and credential environment
+variables were excluded. Package visibility remains **public**.
+Historical `1.0.0` and `1.1.0` tags resolve to their original manifests without
+re-uploading old SIF layers. See [CHANGELOG.md](../CHANGELOG.md) for release identities.

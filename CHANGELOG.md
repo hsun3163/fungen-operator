@@ -13,7 +13,7 @@ GHCR repository: `ghcr.io/hsun3163/fungen-operator`.
 - Git tag: `v1.2.0`; release commit: [commit selected by v1.2.0](https://github.com/hsun3163/fungen-operator/commit/v1.2.0).
 - Image source commit: [a583993]. Later release commits contain validation and delivery documentation.
 - SIF SHA-256: `31cb32693ed3e0a7cd237bbb2d4e94d345b128bbe56e5a6ab25d7eee9d3c99cc`.
-- GHCR manifest digest: pending publication.
+- GHCR manifest digest: `sha256:577713f6ae3e6f8566a7fcc374646b15ae8d2acd9b9b00dddb56ffd99665bf7e`.
 - Immutable GHCR tags: `1.2.0`, `1.2.0-ollama0.40.6-codex0.155.1`.
 - Moving GHCR tags at publication: `ollama0.40.6-codex0.155.1`, `latest`.
 
@@ -71,6 +71,8 @@ backend round trip and SGE guide guards. Fake SGE tests verify SGE_ROOT discover
 without qsub, qconf resource requests and skill-link repair. A real prior bundle
 was installed with embedded package 0.1.0, then upgraded in place to distribution
 and CLI 1.2.0 successfully. All acceptance GPU services and PTYs were stopped.
+Anonymous pulls of both `1.2.0` and `latest` matched the built SIF SHA-256;
+all four tags resolve to the manifest above. Package visibility remains public.
 Live SCC allocation remains the tester's site-native verification step.
 
 Pull the immutable release with Apptainer (or use `singularity`):
