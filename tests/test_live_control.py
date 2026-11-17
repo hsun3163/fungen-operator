@@ -49,6 +49,35 @@ def proof(proposal):
     return {"fingerprint": proposal["fingerprint"], "channel": "mcp_human_elicitation"}
 
 
+@pytest.mark.parametrize('operation,state,binary', [
+    ('suspend_pending', 'PEND', 'bstop'), ('resume_pending', 'PSUSP', 'bresume')])
+def test_pending_worker_pause_resume_retains_native_command(control, operation, state, binary):
+    h, executor, original, snapshot = control
+    snapshot['jobs']['456']['status'] = state
+    request = ControlRun(notebook=original.notebook, operation=operation, job_ids=['456'])
+    proposal = h.propose_control(request)
+    assert proposal['command'] == [binary, '456']
+    result = h.control_run(proposal, proof(proposal))
+    assert result['status'] == 'controlled'
+    assert executor.executed == ['%%bash\nset -eo pipefail\n' + binary + ' 456\n']
+    verify(Notebook(request.notebook).read())
+
+
+@pytest.mark.parametrize('operation,state', [('suspend_pending', 'PEND'), ('resume_pending', 'PSUSP')])
+@pytest.mark.parametrize('change', [{'status': 'RUN'}, {'queue': 'premium'},
+                                   {'kind': 'controller'}, {'membership': False}])
+def test_pending_worker_pause_resume_rechecks_frozen_state(control, operation, state, change):
+    h, executor, original, snapshot = control
+    snapshot['jobs']['456']['status'] = state
+    request = ControlRun(notebook=original.notebook, operation=operation, job_ids=['456'])
+    proposal = h.propose_control(request)
+    snapshot['jobs']['456'].update(change)
+    result = h.control_run(proposal, proof(proposal))
+    assert result['status'] == 'refused'
+    assert executor.executed == []
+    assert not Path(request.notebook).exists()
+
+
 @pytest.mark.parametrize("operation,queue,literal", [("kill", None, "bkill 123"),
     ("switch_queue", "premium", "bswitch premium 123"), ("switch_queue", "express", "bswitch express 123")])
 def test_exact_command_receipt_and_rerender(control, operation, queue, literal):

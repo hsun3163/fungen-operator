@@ -20,21 +20,21 @@ from .live_control import ControlRun, render_control
 VERSION = "1"
 
 
-from .slots import (Model, PathSlot, Target, Identifier, ExecutableSlot, path_slot, target_slot)
+from .slots import (Model, PathSlot, ArtifactPathSlot, Target, Identifier, ExecutableSlot, path_slot, target_slot)
 
 
 class PrepareConfig(Model):
-    notebook: PathSlot
-    configfile: PathSlot
-    workdir: PathSlot
+    notebook: ArtifactPathSlot
+    configfile: ArtifactPathSlot
+    workdir: ArtifactPathSlot
     parameters: dict[str, JsonValue] = Field(default_factory=dict)
 
 
 class RunSlots(Model):
-    notebook: PathSlot
-    configfile: PathSlot
-    workdir: PathSlot
-    log_dir: PathSlot
+    notebook: ArtifactPathSlot
+    configfile: ArtifactPathSlot
+    workdir: ArtifactPathSlot
+    log_dir: ArtifactPathSlot
     targets: Annotated[list[Target], Field(min_length=1, max_length=1000)]
     job_name: Identifier = "fungen"
     queue: Literal["premium", "express"] = "premium"
@@ -43,9 +43,11 @@ class RunSlots(Model):
     runtime: Literal["canonical"] = "canonical"
     controller_cores: Annotated[int, Field(ge=1, le=72)] = 1
     workflow_cores: Annotated[int, Field(ge=1, le=512)] = 72
-    memory_gb: Annotated[int, Field(ge=32, le=1000)] = 40
+    memory_gb: Annotated[int, Field(ge=1, le=1000)] = 40
     jobs: Annotated[int, Field(ge=1, le=10000)] = 2000
     latency_wait: Annotated[int, Field(ge=1, le=3600)] = 120
+    allowed_rules: Annotated[list[Identifier], Field(min_length=1, max_length=100)] | None = None
+    keep_incomplete: bool = False
     # Execution policy only; scientific inputs and targets remain in the recipe.
     rerun_triggers: Annotated[
         list[Literal["mtime", "params", "input", "software-env", "code"]],
@@ -75,7 +77,7 @@ class InitiateRun(RunSlots):
 
 
 class InspectRun(Model):
-    notebook: PathSlot
+    notebook: ArtifactPathSlot
     paths: list[PathSlot] = Field(default_factory=list)
     max_bytes: Annotated[int, Field(ge=1, le=100000)] = 10000
     dead_child_grace_minutes: Annotated[int, Field(ge=0, le=10080)] = 10
@@ -133,6 +135,7 @@ class Deployment(Model):
     # Native workflows may keep generated work alongside their source. Each
     # writable file/directory is explicitly registered by the deployment.
     native_run_paths: list[PathSlot] = Field(default_factory=list)
+    artifact_path_aliases: dict[ArtifactPathSlot, PathSlot] = Field(default_factory=dict)
     canonical_source_paths: list[PathSlot] = Field(default_factory=list)
 
     def source_paths(self):
@@ -145,6 +148,11 @@ class Deployment(Model):
             raise ValueError("write path must belong to run_root or declared native run paths outside canonical source")
 
     def validate_layout(self):
+        for original, relocated in self.artifact_path_aliases.items():
+            if not inside(relocated, self.run_root):
+                raise ValueError("artifact alias destination must belong to run_root")
+            if any(inside(original, source) or inside(source, original) for source in self.source_paths()):
+                raise ValueError("artifact alias must be disjoint from canonical source")
         if inside(self.run_root, self.repository) or inside(self.repository, self.run_root):
             raise ValueError("run_root and canonical repository must be disjoint")
         for root in self.native_run_paths:
@@ -252,6 +260,13 @@ class Deployment(Model):
             for key in sorted(before.keys() | after.keys()):
                 path = f"{prefix}.{key}" if prefix else key
                 changes.update(self.scientific_diff(before.get(key), after.get(key), path))
+        elif (isinstance(before, list) and isinstance(after, list)
+              and len(before) == len(after)
+              and any(p.startswith(prefix + ".") for p in self.operational_parameters)):
+            # An explicitly registered execution selector can live in a theme
+            # list. Other list fields and list membership remain scientific.
+            for index, (old, new) in enumerate(zip(before, after)):
+                changes.update(self.scientific_diff(old, new, f"{prefix}.{index}"))
         elif before != after:
             changes[prefix] = {"before": before, "after": after}
         return changes
@@ -394,6 +409,10 @@ def render(action: str, slots: dict) -> str:
     tail = " --dry-run" if action == "check_readiness" else ""
     execution_options = ("  --rerun-triggers " + " ".join(args.rerun_triggers) + " \\\n"
                          if args.rerun_triggers is not None else "")
+    if args.keep_incomplete:
+        execution_options += "  --keep-incomplete \\\n"
+    if args.allowed_rules is not None:
+        execution_options += "  --allowed-rules " + " ".join(args.allowed_rules) + " \\\n"
     dependency = ("\n#BSUB -w \"" + " && ".join(f"done({job})" for job in args.depends_on) + "\""
                   if isinstance(args, InitiateRun) and args.depends_on else "")
     workflow_command = f'''python -m snakemake \\

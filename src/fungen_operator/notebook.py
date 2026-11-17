@@ -89,6 +89,31 @@ class Notebook:
                 nbformat.write(nb, stream)
                 stream.flush()
                 os.fsync(stream.fileno())
+            # Prepared actions and read-only observations are history too.
+            # Never erase a published action or reset its observed execution
+            # when saving an older, otherwise valid recipe snapshot.
+            if self.path.exists():
+                latest = nbformat.read(self.path, as_version=4)
+                proposed = {c.id: c for c in nb.cells}
+                for previous in latest.cells:
+                    meta = previous.metadata.get("fungen", {})
+                    if not meta.get("action"):
+                        continue
+                    job = meta.get("result", {}).get("job_id")
+                    candidate = proposed.get(previous.id)
+                    changed = candidate is None
+                    if candidate is not None:
+                        new = candidate.metadata.get("fungen", {})
+                        changed = (previous.source != candidate.source
+                                   or any(meta.get(k) != new.get(k) for k in ("slots", "identity"))
+                                   or (job and str(new.get("result", {}).get("job_id")) != str(job))
+                                   or (meta.get("result") and not new.get("result"))
+                                   or (meta.get("status") not in {"prepared", "host_approval_required"}
+                                       and new.get("status") in
+                                       {"prepared", "host_approval_required"}))
+                    if changed:
+                        raise ValueError("executed cell changed or disappeared; stale notebook publication "
+                                         f"(cell {previous.id})")
             os.replace(tmp, self.path)
         finally:
             if os.path.exists(tmp):

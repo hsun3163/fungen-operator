@@ -12,8 +12,14 @@ import subprocess
 import sys
 
 
+class SchedulerJobExpired(RuntimeError):
+    """Both live LSF and terminal accounting explicitly lack this job."""
+
+
 def profile_logs(profile,scheduler):
     doc=yaml.safe_load((Path(profile)/'config.yaml').read_text())
+    if isinstance(doc,dict) and 'cluster' not in doc and doc.get('executor'):
+        raise ValueError('Executor profile '+str(doc['executor'])+' has no tracked submission journal; native descendant coverage is unavailable')
     cmd=shlex.split(doc['cluster'])
     if len(cmd)<3 or Path(cmd[0]).resolve()!=Path(sys.executable).resolve() or Path(cmd[1]).resolve()!=Path(__file__).resolve() or cmd[2]!='submit':
         raise ValueError('Native profile must use the canonical tracked cluster adapter; regenerate scheduler setup')
@@ -172,13 +178,15 @@ def job_status(scheduler,job_id,*,runner=None):
     job_id=str(job_id)
     if not job_id.isdecimal():raise ValueError('job ID must be numeric; arrays are unsupported')
     if scheduler=='lsf':
-        r=runner(['bjobs','-noheader','-o','stat',job_id],capture_output=True,text=True,timeout=60)
+        r=runner(['bjobs','-a','-noheader','-o','stat',job_id],capture_output=True,text=True,timeout=60)
         state=r.stdout.strip()
         if not state and 'not found' in r.stderr:
             r=runner(['bacct','-l',job_id],capture_output=True,text=True,timeout=60)
             m=re.search(r'Status <(DONE|EXIT)>',r.stdout);state=m.group(1) if m else ''
+            if not state and re.search(r'No (?:matching job|job) found|No job was found satisfying your specification|Job <'+re.escape(job_id)+r'> is not found',r.stdout+'\n'+r.stderr,re.I):
+                raise SchedulerJobExpired('LSF live and accounting history unavailable for job '+job_id)
         if state not in ('DONE','EXIT','ZOMBI','RUN','PEND','PSUSP','USUSP','SSUSP','WAIT','PROV') or r.returncode!=0:
-            raise RuntimeError('Scheduler status retrieval failed or unknown; inspect bjobs/bacct before resuming.')
+            raise RuntimeError('Scheduler status retrieval failed or unknown; inspect bjobs/bacct before resuming. '+f'command={r.args!r}; returncode={r.returncode}; state={state!r}; stderr={r.stderr[:1000]!r}')
         return 'success' if state=='DONE' else 'failed' if state in ('EXIT','ZOMBI') else 'running'
     if scheduler=='sge':
         live=runner(['qstat','-j',job_id],capture_output=True,text=True,timeout=60)

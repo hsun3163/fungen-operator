@@ -2,6 +2,7 @@
 import copy
 from pathlib import Path
 
+import nbformat
 import pytest
 import yaml
 
@@ -183,7 +184,11 @@ def test_saved_actual_proposal_cannot_hide_mixed_diff(setup, extra):
     set_parameter(cfg, extra, 123)
     cell.metadata.fungen.slots.bindings.config_text = yaml.safe_dump(cfg, sort_keys=True)
     cell.source = render('prepare_config', cell.metadata.fungen.slots)
-    book.save(nb)
+    with pytest.raises(ValueError, match='stale notebook publication'):
+        book.save(nb)
+    # Deliberate external corruption: exercise the independent host boundary
+    # after proving ordinary notebook publication rejects the same mutation.
+    nbformat.write(nb, book.path)
     with pytest.raises(ValueError, match='saved configuration differs'):
         host(d, 'RUN').execute_pending(args['notebook'], r['cell_id'])
 
@@ -204,7 +209,7 @@ def test_historical_identity_shape_keeps_current_proposal_identity_gate(setup):
     accepted = next(c for c in nb.cells if c.metadata.get('fungen', {}).get('action') == 'prepare_config')
     # Older accepted history predates this optional identity catalog field.
     accepted.metadata.fungen.identity.pop('mapping_parameters')
-    book.save(nb)
+    nbformat.write(nb, book.path)  # synthetic history from an older operator version
     stage = Harness(d)
     result = stage.prepare_config(stage.propose_config(PrepareConfig(**args, parameters=RESOURCES)))
     assert host(d, 'RUN').execute_pending(args['notebook'], result['cell_id'])['status'] == 'materialized'

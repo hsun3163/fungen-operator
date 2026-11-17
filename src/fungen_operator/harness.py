@@ -9,6 +9,7 @@ import sys
 import uuid
 from pathlib import Path
 
+import nbformat
 import yaml
 
 from .actions import Deployment, PrepareConfig, RunSlots, digest, inside
@@ -51,8 +52,15 @@ class Harness:
         current = {recipe_key(c.metadata.fungen): c for c in active(nb)}
         if current:
             first = next(iter(current.values())).metadata.fungen.slots.arguments
+            def artifact_path(value):
+                for original, relocated in getattr(self.deployment, "artifact_path_aliases", {}).items():
+                    try:
+                        return str((Path(relocated) / Path(value).relative_to(original)).resolve())
+                    except ValueError:
+                        continue
+                return str(Path(value).resolve())
             for key in ("notebook", "configfile", "workdir"):
-                if first[key] != getattr(args, key):
+                if artifact_path(first[key]) != artifact_path(getattr(args, key)):
                     raise ValueError("one notebook owns one config/output graph; create another notebook")
         return book, nb, current
 
@@ -67,22 +75,33 @@ class Harness:
             if meta.get("action") not in self.registry.specs or not self.registry.spec(meta["action"]).controller:
                 continue
             result = meta.get("result", {})
+            if (not result.get('job_id') and meta.get('action') == 'initiate_run'
+                    and meta.get('status') == 'prepared'
+                    and hasattr(self.executor, 'recover_submission')):
+                # A displaced acknowledgement can leave a live native launch
+                # looking unexecuted. Inspect its exact log stem before dispatch.
+                result = self.executor.recover_submission(cell) or result
             if result.get("job_id"):
                 if result.get("scheduler", {}).get("status") in {"DONE", "EXIT"}:
                     continue
-                state = self.executor.scheduler(result["job_id"])
+                if (result.get('inactive_observed') and result.get('scheduler',{}).get('inactive') is True):
+                    continue
+                state = (self.executor.controller_scheduler(meta["slots"]["bindings"]["log_stem"], result["job_id"])
+                         if hasattr(self.executor, "controller_scheduler") else self.executor.scheduler(result["job_id"]))
                 if resource_edit and state["status"] in {"RUN", "PEND"}:
                     continue
-                if state["status"] not in {"DONE", "EXIT"}:
+                inactive=(state['status']=='UNKNOWN' and state.get('inactive') is True
+                          and state.get('diagnostic','').startswith('Job absent from bjobs'))
+                if state["status"] not in {"DONE", "EXIT"} and not inactive:
                     raise ValueError(f"controller {result['job_id']} is {state['status']}; inspect before changing the run")
                 result["scheduler"] = state
-                result["terminal_observed"] = now()
+                result['inactive_observed' if inactive else 'terminal_observed'] = now()
                 logs = self.executor.logs(meta["slots"]["bindings"]["log_stem"], result["job_id"])
                 result["logs"] = logs
                 import nbformat
                 for stream, text in logs.items():
                     cell.outputs.append(nbformat.v4.new_output("stream", name="stdout",
-                        text=f"\n--- terminal scheduler {stream}: job {result['job_id']} ---\n{text}"))
+                        text=f"\n--- {'inactive controller' if inactive else 'terminal scheduler'} {stream}: job {result['job_id']} ---\n{text}"))
             elif meta.get("status") in {"executing", "unknown"}:
                 raise ValueError("unresolved submission outcome; reconcile before changing the run")
 
@@ -161,9 +180,11 @@ class Harness:
     def _run_fingerprint(self, args, identity, config_text):
         values = args.model_dump()
         # Keep pre-option recipes/fingerprints stable when the option is absent.
-        for option in ("rerun_triggers",):
+        for option in ("rerun_triggers", "allowed_rules"):
             if values.get(option) is None:
                 values.pop(option, None)
+        if not values.get("keep_incomplete"):
+            values.pop("keep_incomplete", None)
         for key in ("job_name", "walltime_minutes", "phase", "log_dir", "depends_on", "defer_readiness"):
             values.pop(key, None)
         return digest({"arguments": values, "identity": identity, "config": config_text})
@@ -215,36 +236,104 @@ class Harness:
             cell_id = uuid.uuid4().hex
             slots = {"arguments": args.model_dump(), "bindings":
                      spec.bindings(self.deployment, args, cell_id) if spec.bindings else {}}
-            cell = book.append(nb, spec.name, slots, identity, cell_id)
-            cell.metadata.fungen["run_fingerprint"] = self._run_fingerprint(args, identity, config)
-            book.save(nb)
+            fingerprint = self._run_fingerprint(args, identity, config)
+            for attempt in range(4):
+                _, nb, _ = self._context(args)
+                self._idle(nb)
+                if spec.reuse_running and spec.reuse_running(args):
+                    # A caller can disappear while its notebook kernel keeps
+                    # observing. Adopt the latest identical request instead of
+                    # launching a second observer after its outer lock releases.
+                    latest = max((c for c in nb.cells
+                        if c.metadata.get("fungen", {}).get("action") == spec.name
+                        and spec.model.model_validate(
+                            c.metadata.fungen.slots.arguments).model_dump() == args.model_dump()),
+                        key=lambda c: c.metadata.fungen.sequence, default=None)
+                    if latest is not None and latest.metadata.fungen.status == "executing":
+                        return {"cell_id": latest.id, "notebook": str(book.path),
+                                "status": "executing", "reused": True,
+                                "instruction": "Adopt the existing native observation; its outcome is pending."}
+                try:
+                    cell = book.append(nb, spec.name, slots, identity, cell_id)
+                except ValueError as exc:
+                    # A concurrent native observation can finish between this
+                    # read and proposal publication. No executor has run yet;
+                    # rebuild the same proposal against fresh verified history.
+                    if "stale notebook publication" not in str(exc) or attempt == 3:
+                        raise
+                else:
+                    break
+            # append publishes the proposal. Preserve observations published
+            # since that save when attaching its execution fingerprint.
+            nb = self._publish_execution_record(book, cell,
+                {"run_fingerprint": fingerprint}, require_pending=True)
             return self._execute(book, nb, cell)
 
     def _execute(self, book, nb, cell):
+        # Appending/validating a cell can outlive another native observation.
+        # Start from the current history just as result publication does.
+        nb, _ = self._execution_record(book, cell)
+        cell = next(c for c in nb.cells if c.id == cell.id)
         meta = cell.metadata.fungen
+        if meta.status not in {"prepared", "host_approval_required"}:
+            raise ValueError("cell is already executing or executed; inspect its native outcome")
         if not self.executor.can_schedule:
-            meta.status = "host_approval_required"
-            book.save(nb)
+            nb = self._publish_execution_record(book, cell,
+                {"status": "host_approval_required"}, require_pending=True)
+            meta = next(c for c in nb.cells if c.id == cell.id).metadata.fungen
             return {"cell_id": cell.id, "notebook": str(book.path), "status": meta.status,
                     "host_command": [sys.executable, "-m", "fungen_operator", "execute",
                                      "--deployment", self.deployment_file or "DEPLOYMENT.json",
                                      "--notebook", str(book.path), "--cell", cell.id],
                     "instruction": "Run this exact entrypoint through require_escalated; do not run it in the sandbox."}
-        meta.status = "executing"
-        meta["started"] = now()
-        book.save(nb)
+        nb = self._publish_execution_record(book, cell,
+            {"status": "executing", "started": now()}, require_pending=True)
+        cell = next(c for c in nb.cells if c.id == cell.id)
         try:
             result = self.executor.execute(cell, Path(book.path).resolve().parent)
         except Exception as exc:
-            meta.status = "unknown"
-            meta["error"] = f"{type(exc).__name__}: {exc}"
-            book.save(nb)
+            self._publish_execution_record(book, cell,
+                {"status": "unknown", "error": f"{type(exc).__name__}: {exc}"})
             raise
-        meta["result"] = result
-        meta.status = result["status"]
-        meta["finished"] = now()
-        book.save(nb)
+        self._publish_execution_record(book, cell,
+            {"result": result, "status": result["status"], "finished": now()})
         return {"cell_id": cell.id, "notebook": str(book.path), **result}
+
+    def _publish_execution_record(self, book, cell, changes, *, require_pending=False):
+        # A native observation may publish between our fresh read and save.
+        # Rebase only this cell's metadata/outputs on current history. Never
+        # retry executor dispatch, change its identity, or reset a started cell.
+        for attempt in range(4):
+            nb, meta = self._execution_record(book, cell)
+            if require_pending and meta.status not in {"prepared", "host_approval_required"}:
+                raise ValueError("cell is already executing or executed; inspect its native outcome")
+            meta.update(copy.deepcopy(changes))
+            try:
+                book.save(nb)
+            except ValueError as exc:
+                if "stale notebook publication" not in str(exc) or attempt == 3:
+                    raise
+            else:
+                return nb
+
+    @staticmethod
+    def _execution_record(book, executed):
+        # Execution can outlive another native observation/publication. Preserve
+        # the latest history and supersession tags rather than saving the old
+        # whole-notebook snapshot over it.
+        nb = book.read()
+        stored = next((c for c in nb.cells if c.id == executed.id), None)
+        changed = (["missing"] if stored is None else [name for name, before, after in (
+            ("source", executed.source, stored.source),
+            ("slots", executed.metadata.fungen.slots, stored.metadata.fungen.slots),
+            ("identity", executed.metadata.fungen.identity, stored.metadata.fungen.identity),
+        ) if before != after])
+        if changed:
+            raise ValueError("executed cell changed or disappeared; reconcile native receipts before continuing"
+                             f" (cell {executed.id}: {','.join(changed)})")
+        stored.outputs = copy.deepcopy(executed.outputs)
+        stored.execution_count = executed.execution_count
+        return nb, stored.metadata.fungen
 
     def execute_pending(self, notebook, cell_id):
         self.deployment.validate_write_path(notebook)
@@ -330,7 +419,8 @@ class Harness:
                     # The local executor already waited for this bash cell and
                     # checked its exit status. Continue the recipe synchronously.
                     continue
-                state = self.executor.scheduler(result["job_id"])["status"]
+                state = (self.executor.controller_scheduler(meta["slots"]["bindings"]["log_stem"], result["job_id"])
+                         if hasattr(self.executor, "controller_scheduler") else self.executor.scheduler(result["job_id"]))["status"]
                 if state not in {"DONE", "EXIT"}:
                     # Keep the unexecuted suffix active and resume it on the next
                     # replay call, rather than submitting another controller.
@@ -432,6 +522,12 @@ class Harness:
                 reason = job.get("membership_reason", "job is outside this run's receipts, wrappers and task directories")
             elif job.get("status", job.get("state")) not in {"PEND", "RUN", "PSUSP", "USUSP", "SSUSP", "WAIT"}:
                 reason = "job has no live controllable LSF state"
+            elif request.operation in {"suspend_pending", "resume_pending"}:
+                expected = "PEND" if request.operation == "suspend_pending" else "PSUSP"
+                if job.get("status", job.get("state")) != expected or job.get("queue") != "express":
+                    reason = f"pending-worker control requires express {expected} jobs"
+                elif job.get("kind") == "controller":
+                    reason = "pending-worker control excludes controllers"
             if reason:
                 refusals.append({"job_id": job_id, "reason": reason})
         return refusals
@@ -492,7 +588,32 @@ class Harness:
         self._control_resources(meta.slots.bindings, snapshot)
 
     def inspect(self, request):
-        nb = Notebook(request.notebook, self.registry).read()
+        book = Notebook(request.notebook, self.registry)
+        nb = book.read()
+        recovery = {'check_readiness': 'recover_readiness', 'initiate_run': 'recover_submission'}
+        interrupted = lambda cell: (cell.metadata.get('fungen', {}).get('action') in recovery
+                                    and (cell.metadata.fungen.get('status') in {'executing', 'unknown'}
+                                         or (cell.metadata.fungen.action == 'initiate_run'
+                                             and cell.metadata.fungen.get('status') == 'prepared'))
+                                    and hasattr(self.executor, recovery[cell.metadata.fungen.action]))
+        if any(interrupted(c) for c in nb.cells):
+            with book.locked():
+                nb = book.read()
+                changed = False
+                for cell in nb.cells:
+                    if not interrupted(cell):
+                        continue
+                    result = getattr(self.executor, recovery[cell.metadata.fungen.action])(cell)
+                    if result:
+                        meta = cell.metadata.fungen
+                        meta['result'] = result
+                        meta['status'] = result['status']
+                        meta['reconciled'] = now()
+                        cell.outputs.append(nbformat.v4.new_output(
+                            'stream', name='stdout', text='Recovered native ' + meta.action + ': ' + json.dumps(result) + '\n'))
+                        changed = True
+                if changed:
+                    book.save(nb)
         if self.deployment.backend in ('lsf','sge','slurm'):
             snapshot=self._job_snapshot(nb,request.dead_child_grace_minutes,require_coverage=True)
         elif self.deployment.backend=='local':
@@ -512,7 +633,9 @@ class Harness:
             if job:
                 entry["scheduler"] = (snapshot["jobs"].get(str(job), {"status": "UNKNOWN"})
                                       if self.deployment.backend in ("lsf","sge","slurm") else self.executor.scheduler(job))
-                entry["logs"] = self.executor.logs(meta.slots.bindings.log_stem, job)
+                entry["logs"] = (self.executor.live_logs(meta.slots.bindings.log_stem, job)
+                                 if hasattr(self.executor, "live_logs") else
+                                 self.executor.logs(meta.slots.bindings.log_stem, job))
             cells.append(entry)
         observations = {}
         for name in request.paths:

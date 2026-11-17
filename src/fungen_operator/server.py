@@ -3,6 +3,7 @@
 import asyncio
 import json
 import socket
+import sys
 from typing import Annotated, Any
 
 from mcp.server import MCPServer
@@ -136,6 +137,20 @@ def create_server(harness: Harness):
     @server.tool(annotations={"readOnlyHint": True, "destructiveHint": False})
     async def inspect_run(request: InspectRun) -> dict[str, Any]:
         """Read action history, scheduler states, logs, and requested file observations."""
+        if harness.deployment.backend in {"lsf", "sge", "slurm"}:
+            # Native history discovery can outlast the MCP transport timeout.
+            # Keep it on the same reviewed host entrypoint as long-running actions.
+            if not harness.deployment_file:
+                raise ToolError("Cluster inspection requires a recorded deployment file")
+            command = [sys.executable, "-m", "fungen_operator", "inspect",
+                       "--deployment", str(harness.deployment_file),
+                       "--notebook", request.notebook,
+                       "--max-bytes", str(request.max_bytes),
+                       "--dead-child-grace-minutes", str(request.dead_child_grace_minutes)]
+            for path in request.paths:
+                command.extend(["--path", path])
+            return {"status": "host_approval_required", "host_command": command,
+                    "instruction": "Run this exact entrypoint through require_escalated; do not run it in the sandbox."}
         return await invoke(harness.inspect, request)
 
     for name, spec in harness.registry.specs.items():

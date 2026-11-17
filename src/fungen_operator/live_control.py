@@ -9,6 +9,7 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from .sweep import SweepSpec
+from .slots import artifact_path_slot
 
 JobID = Annotated[str, Field(pattern=r"^[1-9][0-9]{0,15}$")]
 MemoryGB = Annotated[int, Field(ge=1, le=1000)]
@@ -43,7 +44,7 @@ class Selector(BaseModel):
 class ControlRun(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     notebook: Annotated[str, Field(pattern=r"^/[A-Za-z0-9_./:+-]+$")]
-    operation: Literal["kill", "switch_queue", "modify", "sweep"]
+    operation: Literal["kill", "switch_queue", "modify", "sweep", "suspend_pending", "resume_pending"]
     job_ids: Annotated[list[JobID], Field(min_length=1, max_length=20000)] | None = None
     selector: Selector | None = None
     queue: Literal["premium", "express"] | None = None
@@ -57,7 +58,7 @@ class ControlRun(BaseModel):
     @field_validator("notebook")
     @classmethod
     def resolve_notebook(cls, value):
-        return str(Path(value).resolve())
+        return artifact_path_slot(value)
 
     @model_validator(mode="after")
     def selection(self):
@@ -161,7 +162,9 @@ def commands(request: ControlRun, job_ids: list[str],
     if resource_requirements is not None:
         raise ValueError("resource requirements are bound only for memory reservation changes")
     resolved = _resolved(request, job_ids)
-    return [(["bkill"] if resolved.operation == "kill" else ["bswitch", resolved.queue]) + resolved.job_ids]
+    native = {"kill": ["bkill"], "switch_queue": ["bswitch", resolved.queue],
+              "suspend_pending": ["bstop"], "resume_pending": ["bresume"]}
+    return [native[resolved.operation] + resolved.job_ids]
 
 
 def command(request: ControlRun, job_ids: list[str]) -> list[str]:

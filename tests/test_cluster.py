@@ -220,3 +220,14 @@ def test_native_group_submission_retains_group_and_internal_identity(tmp_path,mo
     records=cluster.journal_records(logs/'submissions.jsonl',{'100'})
     assert records[0]['rule']=='native_group' and records[0]['snakemake_job_id']=='group-uuid'
     assert records[1]['job_id']=='101'
+
+
+@pytest.mark.parametrize('message',['No matching job found','No job was found satisfying your specification.','Network is unreachable'])
+def test_lsf_expired_history_is_typed_and_network_failure_remains_error(message):
+    expired=message!='Network is unreachable'
+    def runner(cmd,**kw):
+        if cmd[0]=='bjobs':return subprocess.CompletedProcess(cmd,255,'','Job <123> is not found')
+        return subprocess.CompletedProcess(cmd,0 if message.startswith('No job was found') else 255,'',message)
+    expected=cluster.SchedulerJobExpired if expired else RuntimeError
+    with pytest.raises(expected) as error:cluster.job_status('lsf','123',runner=runner)
+    assert isinstance(error.value,cluster.SchedulerJobExpired)==expired

@@ -384,6 +384,23 @@ def _submission_graph(records,controllers):
     return begins,ends,wrappers,children
 
 
+def retained_readiness_state(meta, job_id):
+    """A synchronous dry-run's verified DONE receipt remains terminal after purge."""
+    result = meta.get('result', {})
+    state = result.get('scheduler', {})
+    if (meta.get('action') != 'check_readiness' or meta.get('status') not in {'ready', 'nothing_to_do'}
+            or result.get('status') not in {'ready', 'nothing_to_do'}
+            or str(result.get('job_id')) != str(job_id) or str(state.get('job_id')) != str(job_id)
+            or state.get('status') != 'DONE' or state.get('exit_code') not in (None, '', 0, '0')):
+        return None
+    logs = '\n'.join(str(v) for v in result.get('logs', {}).values())
+    if not re.search(r'(?m)^(?:This was a dry-run(?:\s|$)|Job stats:\s*$|Nothing to be done(?:\.|\s|$))', logs):
+        return None
+    return dict(kind='controller', job_id=str(job_id), status='DONE', membership=True,
+                membership_reason='retained verified synchronous readiness receipt',
+                source='retained_readiness_receipt')
+
+
 def inspect_native_jobs(deployment,nb,*,grace_minutes=10,runner=None,now=None,requested_ids=None):
     """Verify the current native submission set and query every identified job.
 
@@ -392,7 +409,7 @@ def inspect_native_jobs(deployment,nb,*,grace_minutes=10,runner=None,now=None,re
     streams must agree with this independent set. A stable journal snapshot and
     complete records are required for verified coverage, including child-free jobs.
     """
-    from .cluster import job_status,profile_logs,journal_records,task_submit_command
+    from .cluster import job_status,profile_logs,journal_records,task_submit_command,SchedulerJobExpired
     runner=subprocess.run if runner is None else runner
     current=datetime.now().timestamp() if now is None else float(now)
     scheduler=deployment.backend;jobs={};dead=[];processed=set()
@@ -403,6 +420,10 @@ def inspect_native_jobs(deployment,nb,*,grace_minutes=10,runner=None,now=None,re
                 incomplete('Ambiguous native job lineage for '+job)
             return jobs[job]
         try:status=job_status(scheduler,job,runner=runner)
+        except SchedulerJobExpired as exc:
+            jobs[job]=dict(evidence,job_id=job,status='UNKNOWN',scheduler=scheduler,membership=True,
+                           membership_reason='retained native receipt; terminal history expired',diagnostic=str(exc))
+            return jobs[job]
         except (OSError,ValueError,RuntimeError,subprocess.SubprocessError) as exc:
             raise RuntimeError(scheduler+' inspection failed for job '+job+': '+str(exc)) from exc
         if status not in ('running','success','failed'):raise RuntimeError('Unknown native status for '+job)
@@ -418,7 +439,12 @@ def inspect_native_jobs(deployment,nb,*,grace_minutes=10,runner=None,now=None,re
         if not job.isdecimal():incomplete('Unsupported controller identity: '+job)
         slots=meta['slots'];args=slots['arguments'];stem=slots['bindings']['log_stem']
         if not _inside(stem,deployment.run_root) or not _inside(args['workdir'],deployment.run_root):incomplete('Controller evidence outside run root')
-        observe(job,kind='controller');controllers.append((job,args,stem))
+        retained=retained_readiness_state(meta,job)
+        if retained:
+            jobs[job]={**retained,'scheduler':scheduler}
+        else:
+            observe(job,kind='controller')
+        controllers.append((job,args,stem))
     if not controllers:incomplete('No retained controller receipts')
     controller_ids={job for job,_,_ in controllers}
     try:
@@ -472,6 +498,8 @@ def inspect_native_jobs(deployment,nb,*,grace_minutes=10,runner=None,now=None,re
         if journal_records(journal,controller_ids)!=records:incomplete('Submission set changed during inspection')
     except NativeDiscoveryIncomplete:raise
     except (OSError,ValueError,KeyError,TypeError,yaml.YAMLError) as exc:incomplete(str(exc))
+    if any(row['status']=='UNKNOWN' for row in jobs.values()):
+        incomplete('Terminal scheduler history expired for retained native jobs')
     if requested_ids:
         for job in requested_ids:
             if str(job) not in jobs:jobs[str(job)]={'job_id':str(job),'membership':False,'membership_reason':'absent from verified native submission lineage'}

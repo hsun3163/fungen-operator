@@ -1,5 +1,6 @@
 import asyncio
 import copy
+from dataclasses import replace
 import json
 import sys
 from pathlib import Path
@@ -64,6 +65,415 @@ class LocalExecution:
         return {}
 
 
+@pytest.mark.parametrize('state,native,expected', [
+    ('DONE', 'Job stats:\n', 'ready'),
+    ('DONE', 'Nothing to be done.\n', 'nothing_to_do'),
+    ('EXIT', 'Job stats:\n', 'failed'),
+    ('RUN', 'Job stats:\n', 'executing'),
+    ('UNKNOWN', 'Job stats:\n', 'unknown'),
+    ('DONE', 'incomplete native log\n', 'unknown'),
+])
+def test_interrupted_readiness_recovers_native_job_without_submission(setup, monkeypatch, state, native, expected):
+    deployment, kwargs = setup
+    deployment.backend = 'lsf'
+    execution = Executor(deployment, host_approved=True)
+    stem = Path(kwargs['notebook']).parent / 'interrupted'
+    stem.parent.mkdir(parents=True, exist_ok=True)
+    Path(str(stem) + '.123.out').write_text(native)
+    monkeypatch.setattr(execution, 'controller_scheduler', lambda s,j: {'status': state, 'job_id': j})
+    cell = nbformat.v4.new_code_cell(metadata={'fungen': {'slots': {'bindings': {'log_stem': str(stem)}}}})
+    result = execution.recover_readiness(cell)
+    assert result['status'] == expected
+    assert result['job_id'] == '123'
+    assert 'synchronous_exit_code' not in result
+    Path(str(stem) + '.456.out').write_text(native)
+    assert execution.recover_readiness(cell) is None
+
+
+@pytest.mark.parametrize('action,method,status', [
+    ('check_readiness', 'recover_readiness', 'ready'),
+    ('initiate_run', 'recover_submission', 'submitted'),
+])
+def test_inspect_reconciles_interrupted_readiness_in_its_native_cell(setup, monkeypatch, action, method, status):
+    harness, execution, kwargs = unit_harness(setup)
+    harness.run('check_readiness', CheckReadiness(**kwargs))
+    if action == 'initiate_run':
+        harness.run(action, InitiateRun(**kwargs))
+    book = Notebook(kwargs['notebook'])
+    nb = book.read()
+    cell = next(c for c in nb.cells if c.metadata.get('fungen', {}).get('action') == action)
+    cell.metadata.fungen.status = 'executing'
+    cell.metadata.fungen.pop('result', None)
+    saved_identity = copy.deepcopy(cell.metadata.fungen.identity)
+    # Simulate the historical external/stale writer, bypassing the native
+    # publication guard only in this deliberately damaged synthetic fixture.
+    nbformat.write(nb, book.path)
+    monkeypatch.setattr(execution, method, lambda c: {
+        'status': status, 'job_id': '123', 'scheduler': {'status': 'DONE'}, 'logs': {}}, raising=False)
+    monkeypatch.setattr(harness, '_job_snapshot', lambda *a, **k: {
+        'jobs': {}, 'count': 0, 'dead_children': [], 'scheduler_ok': True, 'coverage': {'verified': True}})
+    monkeypatch.setattr(execution, 'scheduler', lambda j: {'status': 'DONE'})
+    harness.inspect(InspectRun(notebook=kwargs['notebook']))
+    recovered = next(c for c in book.read().cells if c.id == cell.id)
+    assert recovered.metadata.fungen.status == status
+    assert recovered.metadata.fungen.result.job_id == '123'
+    assert recovered.metadata.fungen.identity == saved_identity
+    assert len(execution.cells) == (3 if action == 'initiate_run' else 2)
+
+
+@pytest.mark.parametrize('state,expected', [('RUN','submitted'), ('PEND','submitted'),
+                                         ('DONE','submitted'), ('EXIT','failed'), ('UNKWN','unknown')])
+def test_interrupted_production_recovers_exact_buffered_receipt_without_resubmission(setup, monkeypatch, state, expected):
+    deployment, kwargs = setup
+    deployment.backend = 'lsf'
+    execution = Executor(deployment, host_approved=True)
+    stem = str(Path(kwargs['notebook']).parent / 'buffered-production')
+    cell = nbformat.v4.new_code_cell(metadata={'fungen': {'action': 'initiate_run',
+                                           'slots': {'bindings': {'log_stem': stem}}}})
+    records = [{'JOBID': '123', 'OUTPUT_FILE': stem + '.%J.out'},
+               {'JOBID': '456', 'OUTPUT_FILE': stem + '-different.456.out'}]
+    def query(command, **kwargs):
+        assert command == ['bjobs', '-a', '-json', '-o', 'jobid stat output_file']
+        return SimpleNamespace(returncode=0, stdout=json.dumps({'RECORDS': records}))
+    monkeypatch.setattr('fungen_operator.execution.subprocess.run', query)
+    monkeypatch.setattr(execution, 'controller_scheduler', lambda s,j: {'status': state, 'job_id': j})
+    monkeypatch.setattr(execution, 'logs', lambda s,j: {})
+    result = execution.recover_submission(cell)
+    assert result['job_id'] == '123' and result['status'] == expected
+    assert 'synchronous_exit_code' not in result
+    records.append({'JOBID': '789', 'OUTPUT_FILE': stem + '.789.out'})
+    assert execution.recover_submission(cell) is None
+
+
+@pytest.mark.parametrize('has_native_receipt', [False, True])
+def test_inspect_recovers_displaced_prepared_submission_without_dispatch(setup, monkeypatch, has_native_receipt):
+    harness, execution, kwargs = unit_harness(setup)
+    harness.run('check_readiness', CheckReadiness(**kwargs))
+    harness.run('initiate_run', InitiateRun(**kwargs))
+    book = Notebook(kwargs['notebook'])
+    nb = book.read()
+    cell = next(c for c in active(nb) if c.metadata.fungen.action == 'initiate_run')
+    cell.metadata.fungen.status = 'prepared'
+    cell.metadata.fungen.pop('result', None)
+    original = copy.deepcopy(cell.metadata.fungen)
+    nbformat.write(nb, book.path)  # historical displacement fixture
+    calls = len(execution.cells)
+    monkeypatch.setattr(execution, 'recover_submission', lambda c: ({
+        'status': 'submitted', 'job_id': '123', 'scheduler': {'status': 'RUN'},
+        'logs': {}, 'recovered_from': 'native_log_stem'} if has_native_receipt else None), raising=False)
+    monkeypatch.setattr(harness, '_job_snapshot', lambda *a, **k: {
+        'jobs': {}, 'count': 0, 'dead_children': [], 'scheduler_ok': True, 'coverage': {'verified': True}})
+    harness.inspect(InspectRun(notebook=kwargs['notebook']))
+    recovered = next(c for c in book.read().cells if c.id == cell.id)
+    assert len(execution.cells) == calls
+    assert recovered.source == cell.source
+    assert recovered.metadata.fungen.identity == original.identity
+    assert recovered.metadata.fungen.slots == original.slots
+    assert recovered.metadata.fungen.status == ('submitted' if has_native_receipt else 'prepared')
+    if has_native_receipt:
+        assert recovered.metadata.fungen.result.job_id == '123'
+    else:
+        assert 'result' not in recovered.metadata.fungen
+
+
+@pytest.mark.parametrize('has_native_receipt', [False, True])
+def test_new_submission_checks_displaced_prepared_receipt_before_dispatch(setup, monkeypatch, has_native_receipt):
+    harness, execution, kwargs = unit_harness(setup)
+    harness.run('check_readiness', CheckReadiness(**kwargs))
+    harness.run('initiate_run', InitiateRun(**kwargs))
+    book = Notebook(kwargs['notebook'])
+    nb = book.read()
+    cell = next(c for c in active(nb) if c.metadata.fungen.action == 'initiate_run')
+    cell.metadata.fungen.status = 'prepared'
+    cell.metadata.fungen.pop('result', None)
+    nbformat.write(nb, book.path)  # historical displacement fixture
+    calls = len(execution.cells)
+    monkeypatch.setattr(execution, 'recover_submission', lambda c: ({
+        'status': 'submitted', 'job_id': '123', 'scheduler': {'status': 'RUN'},
+        'logs': {}} if has_native_receipt else None), raising=False)
+    monkeypatch.setattr(execution, 'scheduler', lambda j: {'status': 'RUN'})
+    if has_native_receipt:
+        with pytest.raises(ValueError, match='controller 123 is RUN'):
+            harness.run('initiate_run', InitiateRun(**kwargs))
+        assert len(execution.cells) == calls
+    else:
+        assert harness.run('initiate_run', InitiateRun(**kwargs))['status'] == 'submitted'
+        assert len(execution.cells) == calls + 1
+
+
+@pytest.mark.parametrize('damage', ['missing', 'receipt', 'identity'])
+def test_notebook_publication_preserves_submitted_receipts(setup, damage):
+    harness, execution, kwargs = unit_harness(setup)
+    harness.run('check_readiness', CheckReadiness(**kwargs))
+    book = Notebook(kwargs['notebook'])
+    stale = book.read()
+    harness.run('initiate_run', InitiateRun(**kwargs))
+    published = book.path.read_bytes()
+    if damage != 'missing':
+        stale = book.read()
+        cell = next(c for c in active(stale) if c.metadata.fungen.action == 'initiate_run')
+        if damage == 'receipt':
+            cell.metadata.fungen.status = 'prepared'
+            cell.metadata.fungen.pop('result', None)
+        else:
+            cell.metadata.fungen.identity['stale_writer'] = True
+    with pytest.raises(ValueError, match='stale notebook publication'):
+        book.save(stale)
+    assert book.path.read_bytes() == published
+
+
+def test_execution_start_preserves_newer_native_receipt(setup):
+    harness, execution, kwargs = unit_harness(setup)
+    execution.can_schedule = False
+    staged = harness.run('check_readiness', CheckReadiness(**kwargs))
+    book = Notebook(kwargs['notebook'])
+    stale = book.read()
+    cell = next(c for c in stale.cells if c.id == staged['cell_id'])
+    newer = book.read()
+    args = InitiateRun(**kwargs)
+    receipt = book.append(newer, 'initiate_run', {
+        'arguments': args.model_dump(),
+        'bindings': harness.deployment.runtime_bindings(str(Path(kwargs['log_dir'])/'retained')),
+    }, harness.deployment.identity(), 'retained-native-receipt')
+    receipt.metadata.setdefault('tags', []).append('superseded')
+    receipt.metadata.fungen.status = 'submitted'
+    receipt.metadata.fungen['result'] = {'job_id': '777', 'scheduler': {'status': 'DONE'}}
+    book.save(newer)
+    execution.can_schedule = True
+    assert harness._execute(book, stale, cell)['status'] == 'ready'
+    saved = next(c for c in book.read().cells if c.id == receipt.id)
+    assert saved.metadata.fungen.result.job_id == '777'
+    assert saved.metadata.fungen.status == 'submitted'
+
+
+@pytest.mark.parametrize('publication', [
+    'fingerprint', 'append', 'proposal_save', 'fingerprint_save',
+    'execution_start', 'execution_finish',
+])
+def test_provider_fingerprint_publication_keeps_intervening_receipt(setup, monkeypatch, publication):
+    harness, execution, kwargs = unit_harness(setup)
+    append = Notebook.append
+    save = Notebook.save
+    inserted = False
+
+    def publish_native_observation(book):
+        nonlocal inserted
+        if inserted:
+            return
+        inserted = True
+        current = book.read()
+        request = InitiateRun(**kwargs)
+        receipt = append(book, current, 'initiate_run', {
+            'arguments': request.model_dump(),
+            'bindings': harness.deployment.runtime_bindings(
+                str(Path(kwargs['log_dir']) / 'intervening')),
+        }, harness.deployment.identity(), 'intervening-native-receipt')
+        receipt.metadata.fungen.update(
+            status='submitted', result={'job_id': '777', 'scheduler': {'status': 'DONE'}})
+        book.save(current)
+
+    def append_with_native_observation(book, nb, action, *args, **options):
+        cell = append(book, nb, action, *args, **options)
+        if action == 'check_readiness' and publication == 'append':
+            publish_native_observation(book)
+        return cell
+
+    monkeypatch.setattr(Notebook, 'append', append_with_native_observation)
+
+    def save_with_native_observation(book, nb):
+        target = next((c for c in nb.cells if c.metadata.get('fungen', {}).get('action')
+                       == 'check_readiness'), None)
+        if target is not None:
+            meta = target.metadata.fungen
+            stage = ('fingerprint_save' if meta.status == 'prepared'
+                     and meta.get('run_fingerprint') else
+                     'proposal_save' if meta.status == 'prepared' else
+                     'execution_start' if meta.status == 'executing' else
+                     'execution_finish' if meta.status == 'ready' else None)
+            if publication == stage:
+                publish_native_observation(book)
+        return save(book, nb)
+
+    monkeypatch.setattr(Notebook, 'save', save_with_native_observation)
+    fingerprint = harness._run_fingerprint
+
+    def fingerprint_with_native_observation(*args):
+        value = fingerprint(*args)
+        if publication == 'fingerprint':
+            publish_native_observation(Notebook(kwargs['notebook']))
+        return value
+
+    monkeypatch.setattr(harness, '_run_fingerprint', fingerprint_with_native_observation)
+    spec = replace(harness.registry.spec('check_readiness'), bindings=lambda d, a, c:
+                   d.runtime_bindings(str(Path(a.log_dir) / c)))
+    result = harness._provider_run(spec, CheckReadiness(**kwargs))
+    assert result['status'] == 'ready'
+    saved = Notebook(kwargs['notebook']).read()
+    receipt = next(c for c in saved.cells if c.id == 'intervening-native-receipt')
+    assert receipt.metadata.fungen.result.job_id == '777'
+    assert receipt.metadata.fungen.status == 'submitted'
+    observed = next(c for c in saved.cells if c.id == result['cell_id'])
+    assert observed.metadata.fungen.run_fingerprint
+    assert observed.metadata.fungen.status == 'ready'
+    assert len(execution.cells) == 2
+
+
+def test_provider_fingerprint_does_not_reset_an_already_executed_proposal(setup, monkeypatch):
+    harness, execution, kwargs = unit_harness(setup)
+    append = Notebook.append
+
+    def append_with_native_result(book, nb, action, *args, **options):
+        cell = append(book, nb, action, *args, **options)
+        current = book.read()
+        accepted = next(c for c in current.cells if c.id == cell.id)
+        accepted.metadata.fungen.update(status='ready', result={'status': 'ready'})
+        accepted.outputs = [nbformat.v4.new_output('stream', name='stdout', text='native result retained')]
+        book.save(current)
+        return cell
+
+    monkeypatch.setattr(Notebook, 'append', append_with_native_result)
+    spec = replace(harness.registry.spec('check_readiness'), bindings=lambda d, a, c:
+                   d.runtime_bindings(str(Path(a.log_dir) / c)))
+    with pytest.raises(ValueError, match='already executing or executed'):
+        harness._provider_run(spec, CheckReadiness(**kwargs))
+    saved = next(c for c in Notebook(kwargs['notebook']).read().cells
+                 if c.metadata.get('fungen', {}).get('action') == 'check_readiness')
+    assert saved.metadata.fungen.status == 'ready'
+    assert saved.outputs[0].text == 'native result retained'
+    assert len(execution.cells) == 1
+
+
+@pytest.mark.parametrize('reuse,changed', [(True, False), (False, False), (True, True)])
+def test_provider_adopts_only_opted_in_identical_running_observation(setup, reuse, changed):
+    harness, execution, kwargs = unit_harness(setup)
+    book = Notebook(kwargs['notebook'], harness.registry)
+    nb = book.read()
+    request = CheckReadiness(**kwargs)
+    cell = book.append(nb, 'check_readiness', {
+        'arguments': request.model_dump(),
+        'bindings': harness.deployment.runtime_bindings(str(Path(request.log_dir) / 'ongoing')),
+    }, harness.deployment.identity(), 'ongoing-observation')
+    cell.metadata.fungen.status = 'executing'
+    book.save(nb)
+    if changed:
+        request = CheckReadiness(**{**kwargs, 'phase': 'conclusion'})
+    spec = replace(harness.registry.spec('check_readiness'),
+        reuse_running=(lambda args: True) if reuse else None,
+        bindings=lambda d, a, c: d.runtime_bindings(str(Path(a.log_dir) / c)))
+    calls = len(execution.cells)
+    result = harness._provider_run(spec, request)
+    if reuse and not changed:
+        assert result['cell_id'] == cell.id
+        assert result['status'] == 'executing' and result['reused'] is True
+        assert len(execution.cells) == calls
+    else:
+        assert result['cell_id'] != cell.id and result['status'] == 'ready'
+        assert len(execution.cells) == calls + 1
+
+
+def test_completed_newer_observation_does_not_reuse_orphaned_history(setup):
+    harness, execution, kwargs = unit_harness(setup)
+    book = Notebook(kwargs['notebook'], harness.registry)
+    request = CheckReadiness(**kwargs)
+    for cid, status in [('orphaned-old', 'executing'), ('newer-finished', 'ready')]:
+        nb = book.read()
+        cell = book.append(nb, 'check_readiness', {
+            'arguments': request.model_dump(),
+            'bindings': harness.deployment.runtime_bindings(str(Path(request.log_dir) / cid)),
+        }, harness.deployment.identity(), cid)
+        cell.metadata.fungen.status = status
+        book.save(nb)
+    spec = replace(harness.registry.spec('check_readiness'), reuse_running=lambda args: True,
+        bindings=lambda d, a, c: d.runtime_bindings(str(Path(a.log_dir) / c)))
+    result = harness._provider_run(spec, request)
+    assert result['status'] == 'ready'
+    assert result['cell_id'] not in {'orphaned-old', 'newer-finished'}
+
+
+def test_notebook_publication_preserves_executing_action(setup, monkeypatch):
+    harness, execution, kwargs = unit_harness(setup)
+    book = Notebook(kwargs['notebook'])
+    def execute(cell, folder):
+        stale = book.read()
+        next(c for c in stale.cells if c.id == cell.id).metadata.fungen.status = 'prepared'
+        with pytest.raises(ValueError, match='stale notebook publication'):
+            book.save(stale)
+        return {'status': 'ready', 'backend': 'test-double'}
+    monkeypatch.setattr(execution, 'execute', execute)
+    assert harness.run('check_readiness', CheckReadiness(**kwargs))['status'] == 'ready'
+
+
+def test_interrupted_readiness_recovers_buffered_lsf_output_only_by_exact_stem(setup, monkeypatch):
+    deployment, kwargs = setup
+    deployment.backend = 'lsf'
+    execution = Executor(deployment, host_approved=True)
+    stem = str(Path(kwargs['notebook']).parent / 'buffered')
+    cell = nbformat.v4.new_code_cell(metadata={'fungen': {'slots': {'bindings': {'log_stem': stem}}}})
+    records = [{'JOBID': '123', 'STAT': 'RUN', 'OUTPUT_FILE': stem + '.%J.out'},
+               {'JOBID': '456', 'STAT': 'RUN', 'OUTPUT_FILE': stem + '-other.456.out'}]
+    monkeypatch.setattr('fungen_operator.execution.subprocess.run', lambda *a, **k:
+                        SimpleNamespace(returncode=0, stdout=json.dumps({'RECORDS': records})))
+    monkeypatch.setattr(execution, 'controller_scheduler', lambda s,j: {'status': 'RUN', 'job_id': j})
+    result = execution.recover_readiness(cell)
+    assert result['job_id'] == '123' and result['status'] == 'executing'
+    records.append({'JOBID': '789', 'STAT': 'RUN', 'OUTPUT_FILE': stem + '.789.out'})
+    assert execution.recover_readiness(cell) is None
+    cell.metadata.fungen['result'] = {'job_id': '123', 'status': 'executing'}
+    monkeypatch.setattr(execution, 'controller_scheduler', lambda s,j: {'status': 'DONE', 'job_id': j})
+    monkeypatch.setattr(execution, 'logs', lambda s,j: {'stdout': 'This was a dry-run\n'})
+    assert execution.recover_readiness(cell)['status'] == 'ready'
+
+
+@pytest.mark.parametrize('failed', [False, True])
+def test_execution_publication_preserves_intervening_notebook_history(setup, monkeypatch, failed):
+    harness, execution, kwargs = unit_harness(setup)
+    book = Notebook(kwargs['notebook'])
+
+    def execute(cell, folder):
+        newer = book.read()
+        newer.metadata['retained_observation'] = 'written during execution'
+        newer.cells.append(nbformat.v4.new_markdown_cell('Retained native observation'))
+        book.save(newer)
+        cell.outputs = [nbformat.v4.new_output('stream', name='stdout', text='native result\n')]
+        cell.execution_count = 1
+        if failed:
+            raise RuntimeError('bounded native execution failure')
+        return {'status': 'ready', 'backend': 'test-double'}
+
+    monkeypatch.setattr(execution, 'execute', execute)
+    if failed:
+        with pytest.raises(RuntimeError, match='bounded native execution failure'):
+            harness.run('check_readiness', CheckReadiness(**kwargs))
+    else:
+        harness.run('check_readiness', CheckReadiness(**kwargs))
+    saved = book.read()
+    assert saved.metadata.get('retained_observation') == 'written during execution'
+    assert any(c.source == 'Retained native observation' for c in saved.cells)
+    cell = next(c for c in active(saved) if c.metadata.fungen.action == 'check_readiness')
+    assert cell.metadata.fungen.status == ('unknown' if failed else 'ready')
+    assert cell.outputs[0].text == 'native result\n'
+
+
+@pytest.mark.parametrize('change', ['missing', 'identity'])
+def test_execution_publication_refuses_changed_execution_record(setup, monkeypatch, change):
+    harness, execution, kwargs = unit_harness(setup)
+    book = Notebook(kwargs['notebook'])
+
+    def execute(cell, folder):
+        newer = book.read()
+        if change == 'missing':
+            newer.cells = [c for c in newer.cells if c.id != cell.id]
+        else:
+            recorded = next(c for c in newer.cells if c.id == cell.id)
+            recorded.metadata.fungen.identity['changed_during_execution'] = True
+        book.save(newer)
+        return {'status': 'ready', 'backend': 'test-double'}
+
+    monkeypatch.setattr(execution, 'execute', execute)
+    with pytest.raises(ValueError, match='executed cell changed or disappeared'):
+        harness.run('check_readiness', CheckReadiness(**kwargs))
+
+
 def run_args(deployment, args):
     return {**args, "log_dir": str(Path(deployment.run_root, "logs")), "targets": ["all"]}
 
@@ -107,7 +517,7 @@ def test_native_job_dependency_keeps_readiness_gate(setup):
 
 @pytest.mark.parametrize("field,value", [("targets", ["--forceall"]), ("targets", ["x --forceall"]),
     ("targets", ["x; touch /tmp/bad"]), ("targets", ["$(id)"]), ("targets", ["../escape"]),
-    ("targets", ["x\n--forceall"]), ("jobs", 0), ("jobs", True), ("memory_gb", 16),
+    ("targets", ["x\n--forceall"]), ("jobs", 0), ("jobs", True), ("memory_gb", 0),
     ("queue", "premium\n#BSUB -w done(1)"), ("walltime_minutes", "144h"),
     ("workdir", "/tmp/a;id"), ("extra_args", "--forceall")])
 def test_invalid_slots_rejected(setup, field, value):
@@ -468,7 +878,8 @@ def test_stdio_tools_and_scientific_approval(setup, tmp_path, mode):
             assert "execute" in accepted.structured_content["host_command"]
             inspected = await client.call_tool("inspect_run", {"request": {"notebook": args["notebook"]}})
             assert not inspected.is_error, inspected
-            assert inspected.structured_content["cells"][0]["status"] == "host_approval_required"
+            assert inspected.structured_content["status"] == "host_approval_required"
+            assert "inspect" in inspected.structured_content["host_command"]
             invalid = await client.call_tool("initiate_run", {
                 "request": {**run_args(deployment, args), "targets": ["--forceall"]}})
             assert invalid.is_error
@@ -517,7 +928,7 @@ def test_rerun_triggers_require_matching_readiness_and_preserve_legacy_fingerpri
     harness, executor, kwargs = unit_harness(setup)
     args = InitiateRun(**kwargs)
     legacy = args.model_dump()
-    for option in ("rerun_triggers",):
+    for option in ("rerun_triggers", "allowed_rules", "keep_incomplete"):
         legacy.pop(option, None)
     for key in ("job_name", "walltime_minutes", "phase", "log_dir", "depends_on", "defer_readiness"):
         legacy.pop(key, None)

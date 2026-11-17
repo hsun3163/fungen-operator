@@ -20,6 +20,10 @@ def main():
             p.add_argument("--notebook", required=True)
         if name == "execute":
             p.add_argument("--cell", required=True)
+        if name == "inspect":
+            p.add_argument("--path", action="append", default=[])
+            p.add_argument("--max-bytes", type=int, default=10000)
+            p.add_argument("--dead-child-grace-minutes", type=int, default=10)
     action = subs.add_parser("action", help="Stage a typed action through the shared harness")
     action.add_argument("--deployment", required=True)
     action.add_argument("--action", required=True)
@@ -69,7 +73,9 @@ def main():
     elif args.command == "replay":
         print(json.dumps(harness.replay(args.notebook), indent=2))
     else:
-        result=harness.inspect(InspectRun(notebook=args.notebook))
+        result=harness.inspect(InspectRun(notebook=args.notebook, paths=args.path,
+                                        max_bytes=args.max_bytes,
+                                        dead_child_grace_minutes=args.dead_child_grace_minutes))
         print(json.dumps(result, indent=2))
         if result.get('inspection_status')=='not_verified':raise SystemExit(1)
 

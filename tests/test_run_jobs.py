@@ -1,4 +1,5 @@
 """Native SoS startup failure and exact run-membership regression fixtures."""
+from contextlib import nullcontext
 from datetime import datetime
 import json
 from pathlib import Path
@@ -456,7 +457,7 @@ def test_harness_inspection_surfaces_native_child_failure(native_scheduler_run,m
     run=native_scheduler_run
     obj=h.Harness.__new__(h.Harness);obj.deployment=run.deployment;obj.registry=run.deployment.registry
     obj.executor=SimpleNamespace(can_schedule=True,can_inspect=True,logs=lambda *a:{})
-    monkeypatch.setattr(h,'Notebook',lambda *a:SimpleNamespace(read=lambda:run.nb))
+    monkeypatch.setattr(h,'Notebook',lambda *a:SimpleNamespace(read=lambda:run.nb,locked=nullcontext))
     monkeypatch.setattr('fungen_operator.run_jobs.subprocess.run',run.runner)
     request=SimpleNamespace(notebook='/unused',dead_child_grace_minutes=0,paths=[])
     result=obj.inspect(request)
@@ -503,7 +504,7 @@ def test_public_empty_lsf_inspection_is_not_verified(tmp_path,monkeypatch):
     d=create_fixture(tmp_path/'layout');obj.deployment=d.model_copy(update={'backend':'lsf'})
     obj.registry=obj.deployment.registry
     obj.executor=SimpleNamespace(can_schedule=True,can_inspect=True,logs=lambda *a:{})
-    monkeypatch.setattr(h,'Notebook',lambda *a:SimpleNamespace(read=nbformat.v4.new_notebook))
+    monkeypatch.setattr(h,'Notebook',lambda *a:SimpleNamespace(read=nbformat.v4.new_notebook,locked=nullcontext))
     result=obj.inspect(SimpleNamespace(notebook='/unused',dead_child_grace_minutes=0,paths=[]))
     assert result['inspection_status']=='not_verified'
     assert result['scheduler_ok'] is False and result['dead_child_count'] is None
@@ -536,7 +537,7 @@ def test_public_lsf_missing_journal_retains_observed_controller(native_run,monke
     (Path(run.deployment.profile_path)/'config.yaml').write_text(yaml.safe_dump({'cluster':command}))
     obj=h.Harness.__new__(h.Harness);obj.deployment=run.deployment;obj.registry=run.deployment.registry
     obj.executor=SimpleNamespace(can_schedule=True,can_inspect=True,logs=lambda *a:{})
-    monkeypatch.setattr(h,'Notebook',lambda *a:SimpleNamespace(read=lambda:run.nb))
+    monkeypatch.setattr(h,'Notebook',lambda *a:SimpleNamespace(read=lambda:run.nb,locked=nullcontext))
     monkeypatch.setattr('fungen_operator.cluster.job_status',lambda scheduler,job,**kw:'running')
     result=obj.inspect(SimpleNamespace(notebook='/unused',dead_child_grace_minutes=0,paths=[]))
     assert result['scheduler_ok'] is False and result['dead_child_count'] is None
@@ -693,3 +694,26 @@ def test_lsf_canonical_adapter_receipts_link_exact_native_children(native_run):
     report=inspect_jobs(run.deployment,run.nb,runner=run.runner,now=run.now)
     assert all(report['jobs'][job]['membership'] for job in ('100','101','102'))
     assert report['count']==1 and report['dead_children'][0]['wrapper_job_id']=='101'
+
+
+def test_expired_old_controller_keeps_current_native_logs_visible(native_run,monkeypatch):
+    import copy
+    from fungen_operator import harness as h,cluster
+    run=native_run
+    current=copy.deepcopy(run.nb.cells[0]);current.id='current'
+    current.metadata.fungen.result.job_id='200'
+    current.metadata.fungen.status='submitted'
+    run.nb.cells[0].metadata.fungen.status='submitted'
+    run.nb.cells.append(current)
+    def status(scheduler,job,**kwargs):
+        if job=='100':raise cluster.SchedulerJobExpired('explicit LSF no history')
+        return 'running'
+    monkeypatch.setattr(cluster,'job_status',status)
+    obj=h.Harness.__new__(h.Harness);obj.deployment=run.deployment;obj.registry=run.deployment.registry
+    obj.executor=SimpleNamespace(can_schedule=True,can_inspect=True,live_logs=lambda stem,job:{'out':'native '+str(job)})
+    monkeypatch.setattr(h,'Notebook',lambda *a:SimpleNamespace(read=lambda:run.nb,locked=nullcontext))
+    result=obj.inspect(SimpleNamespace(notebook='/unused',dead_child_grace_minutes=0,paths=[]))
+    assert result['jobs']['100']['status']=='UNKNOWN'
+    assert result['jobs']['200']['status']=='RUN'
+    assert result['inspection_status']=='not_verified' and result['scheduler_ok'] is False
+    assert result['cells'][-1]['logs']=={'out':'native 200'}

@@ -25,9 +25,11 @@ class ActionSpec:
     reconcile: Callable | None = None
     output_fields: tuple[str, ...] = ()
     controller: bool = False
+    synchronous: bool = False
     refusal: dict | None = None
     order: float = 2.5
     description: str = ""
+    reuse_running: Callable | None = None
 
 
 @dataclass(frozen=True)
