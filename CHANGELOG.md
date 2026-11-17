@@ -8,7 +8,28 @@ image source commit with validation-only documentation. SHA-256 below identifies
 the SIF bytes; the registry manifest digest identifies its ORAS descriptor.
 GHCR repository: `ghcr.io/hsun3163/fungen-operator`.
 
-## [Unreleased]
+## [1.2.1] - 2026-11-17
+
+### Fixed
+
+- Select one Ollama CUDA backend on the allocated host. NVIDIA driver 580 or
+  newer uses `cuda_v13`. Older drivers and an unavailable version probe use
+  `cuda_v12`. Preserve launch and setup overrides, and forward the selection
+  for both Apptainer and Singularity.
+- Lock the host bundle to CPython 3.12 wheels compatible with x86-64 glibc 2.28.
+  Pin debugpy 1.8.16 and verify the offline dependency closure, including
+  cryptography 50.0.2. Retain superseded wheels outside the active wheelhouse.
+- Use shared model storage for cluster setup and check model visibility on the
+  GPU host. Use `omp` and 8 GB per slot by default on BU SCC, scaling slots to
+  preserve required host RAM.
+- Retain concurrent notebook action history and recover interrupted LSF
+  readiness and submission receipts. Inspect cluster state via a reviewed host
+  command and report expired native history explicitly.
+
+### Added
+
+- Record exact source hashes for scratch image candidates and verify selected
+  CUDA library, offloaded layers and generation in the native GPU smoke.
 
 ### Removed
 
@@ -203,6 +224,7 @@ selected-model GPU offload and final health verification passed. Publication and
 Drive hashes match the SIF above. [7b816f4] records acceptance. Host regression
 clients simulate SGE/Slurm; live site allocation remained unverified.
 
+[1.2.1]: https://github.com/hsun3163/fungen-operator/releases/tag/v1.2.1
 [1.2.0]: https://github.com/hsun3163/fungen-operator/releases/tag/v1.2.0
 [1.1.0]: https://github.com/hsun3163/fungen-operator/releases/tag/v1.1.0
 [1.0.0]: https://github.com/hsun3163/fungen-operator/releases/tag/v1.0.0

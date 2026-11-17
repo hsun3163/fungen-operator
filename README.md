@@ -1,6 +1,6 @@
 # Fungen Operator
 
-Operator **1.2.0** uses semantic versions independently of bundled components.
+Operator **1.2.1** uses semantic versions independently of bundled components.
 See [CHANGELOG.md](CHANGELOG.md) for release identities and the cause of each fix.
 Run `fungen --version` to identify the installed operator.
 
@@ -12,7 +12,7 @@ The current build targets Linux x86-64 with Apptainer/Singularity. The local
 backend needs an NVIDIA GPU; the OpenAI backend runs host Codex without one.
 
 The GitHub Container Registry image is public; pulling it requires no login.
-Immutable release tags are `1.2.0` and `1.2.0-ollama0.40.6-codex0.155.1`;
+Immutable release tags are `1.2.1` and `1.2.1-ollama0.40.6-codex0.155.1`;
 `ollama0.40.6-codex0.155.1` and `latest` track the accepted release. Publication and
 acceptance of each build are recorded in [container/VALIDATION.md](container/VALIDATION.md).
 

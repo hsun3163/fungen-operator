@@ -48,7 +48,12 @@ model loaded without VRAM, the serve job fails with the GPU-job/`--nv` fix.
 `acceptance.py` drives clean-home setup with a real PTY and records transcripts
 under the stranger scratch root. `acceptance.lsf` starts the GPU-backed staged or
 XS scenario. `onboarding.lsf` installs the fresh pinned mamba environment. The
-full operator suite runs on the host through `.venv/bin/python -m pytest -q tests`, with htslib (`bgzip`, `tabix`), SoS/sos-pbs and bundled host Codex 0.155.1. See the root README's host test environment. Missing required tools fail loudly. Tests are excluded from the image context; image validation covers installer copying and model serving/downloads. Native logs,
+exclusive-process serve scenario uses `FUNGEN_SCENARIO=gpu-serve`,
+`FUNGEN_EXPECTED_COMPUTE_MODE=Exclusive_Process`, and
+`bsub -gpu "num=1:mode=exclusive_process" < container/acceptance.lsf` with a
+fresh evidence root and the shared staged XS model. The driver records the GPU
+mode, NVIDIA driver, selected CUDA library, offloaded layers and generation.
+The full operator suite runs on the host through `.venv/bin/python -m pytest -q tests`, with htslib (`bgzip`, `tabix`), SoS/sos-pbs and bundled host Codex 0.155.1. See the root README's host test environment. Missing required tools fail loudly. Tests are excluded from the image context; image validation covers installer copying and model serving/downloads. Native logs,
 job IDs, exact scenario outcomes, image hash and remaining limitations belong in [VALIDATION.md](VALIDATION.md).
 
 ## Publish and pull through GHCR
@@ -90,10 +95,10 @@ image acceptance separately in [VALIDATION.md](VALIDATION.md).
 ## Operator release tags
 
 Operator semantic versions are independent of the Ollama/Codex component pins.
-Annotated Git tags `v1.0.0`, `v1.1.0`, and `v1.2.0` identify release commits;
+Annotated Git tags `v1.0.0`, `v1.1.0`, `v1.2.0`, and `v1.2.1` identify release commits;
 GitHub releases contain the corresponding [CHANGELOG](../CHANGELOG.md) entry.
-The immutable GHCR tags for this release are `1.2.0` and
-`1.2.0-ollama0.40.6-codex0.155.1`. The component-only
+The immutable GHCR tags for this release are `1.2.1` and
+`1.2.1-ollama0.40.6-codex0.155.1`. The component-only
 `ollama0.40.6-codex0.155.1` and `latest` tags move to the accepted release.
 Existing version tags must never be repointed to different bytes. Historical
 `1.0.0` and `1.1.0` tags refer to their original registry manifests; if an original
@@ -105,13 +110,13 @@ that value and the build context records the value from the captured source blob
 in `source.json` beside the image source commit. The changelog and validation
 record distinguish image source commits from later release documentation commits.
 
-For release 1.2.0, publish all four tags through the native publisher:
+For release 1.2.1, publish all four tags through the native publisher:
 
 ```bash
-python3 container/publish.py "$SIF_PATH" 1.2.0 \
-  1.2.0-ollama0.40.6-codex0.155.1 ollama0.40.6-codex0.155.1 latest \
+python3 container/publish.py "$SIF_PATH" 1.2.1 \
+  1.2.1-ollama0.40.6-codex0.155.1 ollama0.40.6-codex0.155.1 latest \
   --output "$EVIDENCE_DIR/publish.json"
-singularity pull fungen.sif oras://ghcr.io/hsun3163/fungen-operator:1.2.0
+singularity pull fungen.sif oras://ghcr.io/hsun3163/fungen-operator:1.2.1
 ```
 
 Keep package visibility and repository settings unchanged.
@@ -130,7 +135,7 @@ For an uncommitted scratch test build, use `build.py context DEST --candidate`.
 Its provenance records `candidate: true`, `base_commit` and exact file hashes.
 The ordinary release-context command continues to reject uncommitted inputs.
 
-Model storage must be shared across login and compute nodes. Setup suggests a
+On a cluster, model storage must be shared across login and compute nodes. Setup suggests a
 folder only when its filesystem is verified shared. Local block filesystems,
 tmpfs, unknown mounts, and temporary/scratch paths require the typed attestation
 `SHARED` (or `--models-shared-confirmation SHARED` for an explicit noninteractive
