@@ -26,7 +26,7 @@ def test_serve_scripts(tmp_path,scheduler,monkeypatch):
         assert 'num=2' in text
         assert 'mode=shared:j_exclusive=yes' in text
         assert 'mode=exclusive_process' not in text
-    if scheduler=='sge': assert 'gpu=2' in text and '#$ -pe smp 4' in text and 'serve.$JOB_ID.log' in text
+    if scheduler=='sge': assert 'gpu=2' in text and '#$ -pe omp ' in text and 'serve.$JOB_ID.log' in text
 
 @pytest.mark.parametrize('tools,env,expected',[({'bsub','sbatch','qsub'},{},'lsf'),({'sbatch'},{},'slurm'),
     ({'qsub'},{'SGE_ROOT':'/opt/sge'},'sge'),({'qsub','qconf'},{},'sge'),({'qsub'},{},'local')])
@@ -406,6 +406,7 @@ def test_setup_stops_when_home_is_container_only(tmp_path,monkeypatch,capsys):
 
 def local_setup(tmp_path,monkeypatch,detected,previous=None,answers=None,args=()):
     fake_sge_clients(tmp_path/'clients',monkeypatch)
+    monkeypatch.setattr(b,'mount_info',lambda p:dict(fstype='nfs',source='server:/project'))
     (tmp_path/'home/.fungen').mkdir(parents=True,exist_ok=True);home=tmp_path/'home';models=tmp_path/'models';models.mkdir(exist_ok=True)
     monkeypatch.setattr(b.Path,'home',lambda:home)
     monkeypatch.setattr(b,'config_path',lambda:home/'.config/fungen/config.toml')
@@ -417,7 +418,7 @@ def local_setup(tmp_path,monkeypatch,detected,previous=None,answers=None,args=()
     prompts=[];answers=dict(answers or {})
     monkeypatch.setattr('builtins.input',lambda p:prompts.append(p) or answers.get(p.split(' [')[0],''))
     b.main(['setup','--install',str(home/'.fungen'),'--backend','local','--model','laguna-xs-2.1:q4_K_M','--download','no',
-            '--models-dir',str(models),'--context','32768','--add-path','no','--image','/img.sif','--runtime','apptainer',*args])
+            '--models-dir',str(models),'--models-shared-confirmation','SHARED','--context','32768','--add-path','no','--image','/img.sif','--runtime','apptainer',*args])
     return prompts,b.read_config()
 
 
@@ -454,7 +455,11 @@ def test_sge_project_directive(tmp_path,account,directive,monkeypatch):
 
 
 def serving(monkeypatch,ps):
-    proc=Mock();proc.poll.return_value=None;proc.pid=7
+    import io
+    from fungen_operator import gpu_diagnostics
+    monkeypatch.setattr(gpu_diagnostics,'probe',lambda c:None)
+    monkeypatch.setattr(b,'ollama_library',lambda override:override or 'cuda_v12')
+    proc=Mock();proc.stdout=io.StringIO("discovery fixture\n");proc.poll.return_value=None;proc.pid=7
     monkeypatch.setattr(b,'gpu_memory',lambda:[80]);monkeypatch.setattr(b,'available_port',lambda p:p)
     monkeypatch.setattr(b.subprocess,'Popen',lambda *a,**k:proc)
     monkeypatch.setattr(b,'api',lambda url,path='/api/tags',data=None,timeout=5:{'response':'READY'} if path=='/api/generate' else {'models':ps} if path=='/api/ps' else {'models':[]})
@@ -620,7 +625,7 @@ def test_host_setup_reuses_the_copied_bundle(tmp_path, monkeypatch):
         (install/name).mkdir(parents=True, exist_ok=True)
     (install/'python/bin/python3').symlink_to(sys.executable)
     (install/'venv/bin/python').symlink_to(sys.executable)
-    (install/'wheels/operator.whl').write_bytes(b'retained offline wheel')
+    (install/'wheels/operator-1-py3-none-any.whl').write_bytes(b'retained offline wheel')
     (install/'skills/fungen-operator/SKILL.md').write_text('host skill')
     (install/'bin/uv').write_text('retained uv')
     client=install/'bin/codex'

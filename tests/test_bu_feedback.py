@@ -28,7 +28,7 @@ def test_shared_gpu_requirement_all_schedulers(tmp_path,monkeypatch,model,contex
     sge=b.render_serve(c)
     assert f'gpu_memory={expected}G' in sge
     assert 'mem_per_core=' in sge and 'h_vmem=' not in sge
-    assert '#$ -pe smp 4' in sge and '#$ -P science' in sge
+    assert f"#$ -pe omp {b.sge_serve_slots(c)}" in sge and '#$ -P science' in sge
     c['scheduler']='lsf';lsf=b.render_serve(c)
     assert f'gmem={expected}G:mode=shared:j_exclusive=yes' in lsf
     assert 'rusage[mem=32000] span[hosts=1]' in lsf and '#BSUB -M 64000' in lsf
@@ -42,9 +42,9 @@ def test_shared_gpu_requirement_all_schedulers(tmp_path,monkeypatch,model,contex
 def test_scc_memory_budget_and_larger_model_scale(tmp_path,monkeypatch):
     fake_sge_clients(tmp_path/'clients',monkeypatch)
     c=config(tmp_path)
-    assert 'mem_per_core=16G,gpu=1,gpu_memory=24G' in b.render_serve(c)
+    assert 'mem_per_core=8G,gpu=1,gpu_memory=24G' in b.render_serve(c)
     c.update(model='laguna-s-2.1:q8_0',context=262144,gpus=2)
-    assert 'mem_per_core=42G,gpu=2,gpu_memory=76G' in b.render_serve(c)
+    assert 'mem_per_core=8G,gpu=2,gpu_memory=76G' in b.render_serve(c)
     c['scheduler']='slurm'
     assert '--mem=168G' in b.render_serve(c)
 
@@ -62,7 +62,7 @@ def test_site_without_gpu_complex_requires_explicit_answer(tmp_path,monkeypatch,
     assert c['sge_gpu_memory_complex']=='none'
     b.write_config(c);assert b.read_config()['sge_gpu_memory_complex']=='none'
     script=b.render_serve(c)
-    assert 'gpu_memory=' not in script and 'mem_per_core=16G' in script
+    assert 'gpu_memory=' not in script and 'mem_per_core=8G' in script
     assert 'explicitly disabled (none)' in capsys.readouterr().out
 
 
@@ -71,7 +71,7 @@ def test_custom_complex_name_is_validated_and_saved(tmp_path,monkeypatch):
                      'accelerator_capacity ac MEMORY <= YES NO 0 0\nram_slot rs MEMORY <= YES YES 0 0\n')
     c=config(tmp_path)
     b.configure_sge(c,gpu_complex='accelerator_capacity',memory_complex='ram_slot')
-    assert 'ram_slot=16G,gpu=1,accelerator_capacity=24G' in b.render_serve(c)
+    assert 'ram_slot=8G,gpu=1,accelerator_capacity=24G' in b.render_serve(c)
     c['sge_gpu_memory_complex']='invented'
     with pytest.raises(ValueError,match='not a requestable MEMORY complex'):b.render_serve(c)
 
@@ -87,7 +87,8 @@ def test_virtual_only_site_has_explained_cuda_headroom(tmp_path,monkeypatch,caps
     assert 'h_vmem=64G' in b.render_serve(config(tmp_path),announce=True)
     assert 'minimum 256G aggregate' in capsys.readouterr().out
     c=config(tmp_path);c.update(model='laguna-s-2.1:q8_0',context=262144)
-    assert 'h_vmem=168G' in b.render_serve(c)
+    script=b.render_serve(c)
+    assert 'h_vmem=64G' in script and '#$ -pe omp 11' in script
 
 
 @pytest.mark.parametrize('listing',[
@@ -121,7 +122,7 @@ def test_serve_rediscovers_and_submits_updated_script_on_host(tmp_path,monkeypat
     monkeypatch.setattr(b,'config_path',lambda:tmp_path/'config.toml')
     b.serve(c)
     script=(tmp_path/'submitted.sh').read_text()
-    assert 'gpu_memory=24G' in script and 'mem_per_core=16G' in script and 'h_vmem=' not in script
+    assert 'gpu_memory=24G' in script and 'mem_per_core=8G' in script and 'h_vmem=' not in script
     assert b.read_config()['sge_gpu_memory_complex']=='gpu_memory'
     assert json.loads((tmp_path/'server-request.json').read_text())==dict(scheduler='sge',job_id='42')
     calls=[json.loads(x) for x in (clients/'state/calls.jsonl').read_text().splitlines()]
@@ -151,7 +152,7 @@ def test_host_sge_detection_with_real_fake_clients(tmp_path,monkeypatch):
 def offline_bundle(root):
     for name in ('python/bin','venv/bin','wheels','skills/fungen-operator','bin'):(root/name).mkdir(parents=True,exist_ok=True)
     for name in ('python/bin/python3','venv/bin/python'):(root/name).symlink_to(sys.executable)
-    (root/'wheels/operator.whl').write_bytes(b'wheel')
+    (root/'wheels/operator-1-py3-none-any.whl').write_bytes(b'wheel')
     (root/'skills/fungen-operator/SKILL.md').write_text('skill')
     (root/'bundle.sha256').write_text(hashlib.sha256(b'wheelskill').hexdigest())
     for name in ('fungen','fungen-operator'):(root/'venv/bin'/name).write_text('host entrypoint')
@@ -194,7 +195,7 @@ def test_image_copies_only_then_host_detects(tmp_path,monkeypatch,capsys):
     for name in ('scheduler','install_host','check','gpu_memory'):
         monkeypatch.setattr(b,name,lambda *a,**k:pytest.fail('host work attempted inside image'))
     assert b.main(['setup','--install',str(install),'--image','/project/image with spaces.sif','--runtime','apptainer','--non-interactive','--scheduler','sge']) is None
-    assert (install/'wheels/operator.whl').read_bytes()==b'wheel'
+    assert (install/'wheels/operator-1-py3-none-any.whl').read_bytes()==b'wheel'
     assert not (home/'config.toml').exists()
     command=shlex.split(capsys.readouterr().out.split('host:\n  ')[1].strip())
     assert command[:4]==[str(install/'python/bin/python3'),'-m','fungen_operator.bootstrap','setup']

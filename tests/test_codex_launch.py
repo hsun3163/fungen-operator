@@ -167,7 +167,7 @@ def test_local_setup_installs_model_catalog(tmp_path,monkeypatch):
                        ('model_present',lambda *a:True),('prepare_runtime_store',lambda c:None)]:
         monkeypatch.setattr(b,name,value)
     args=['setup','--non-interactive','--install',str(install),'--backend','local','--model','laguna-xs-2.1:q4_K_M','--download','no',
-          '--models-dir',str(models),'--context','32768','--add-path','no','--image','/img.sif','--runtime','apptainer']
+          '--models-dir',str(models),'--models-shared-confirmation','SHARED','--context','32768','--add-path','no','--image','/img.sif','--runtime','apptainer']
     b.main(args)
     installed=install/'codex/models.json'
     assert installed.read_bytes()==(Path(b.__file__).with_name('resources')/'codex-models.json').read_bytes()

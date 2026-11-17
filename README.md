@@ -55,7 +55,7 @@ Models (download):
   laguna-s-2.1:q8_0: 128 GB
 Model tag [largest choice fitting visible GPU memory; XS Q4 when unknown]:
 Download model? (yes/no) [no]:
-Model folder to download into or reuse [scratch/project on clusters; ~/.fungen/models locally]:
+Model folder to download into or reuse [verified shared install/models; otherwise enter shared project storage]:
 Context (32768; advanced 262144 needs extra GPU memory) [32768]:
 Add the install bin folder to your shell PATH? (yes/no) [no]:
 ```
@@ -75,11 +75,31 @@ a local Modelfile variant in a writable overlay, reusing the base blobs. Host se
 refreshes blob timestamps during variant creation, so this advanced option needs
 a writable base model store; use the default 32768 context for read-only reuse.
 
+On a cluster, choose a model folder shared by login and compute nodes. Set it
+with `fungen setup --models-dir /shared/project/USER/fungen/models` or
+`FUNGEN_MODELS_DIR`. An explicit flag takes precedence over the environment.
+Setup suggests the install's `models` directory when it can verify shared
+storage. BU SCC's `/scratch` is node-local. Serve checks access to the selected
+model and its source store on the allocated host.
+
+Serve selects one CUDA library on the allocated GPU node to avoid competing
+Ollama runner probes in NVIDIA Exclusive_Process mode. NVIDIA driver 580 or
+newer selects `cuda_v13`. Older drivers and an unavailable version probe use
+`cuda_v12`. Use `fungen serve --ollama-llm-library cuda_v12` or set
+`OLLAMA_LLM_LIBRARY` (also accepted as `FUNGEN_OLLAMA_LLM_LIBRARY`) for a launch
+override, for example on a P100. `fungen setup --ollama-llm-library` saves an
+override for subsequent launches. A serve flag takes precedence over the
+environment and saved setup value. Generated scripts forward the selection as
+both `APPTAINERENV_OLLAMA_LLM_LIBRARY` and `SINGULARITYENV_OLLAMA_LLM_LIBRARY`.
+For a direct image invocation, use the serve flag or the matching runtime
+environment prefix. Startup logs show the selected backend and warn when Ollama
+reports CPU compute despite a visible GPU.
+
 GPU capacity is derived once from the model plus context allowance (4 GB normally; 24 GB at 262144 tokens), divided across the requested GPUs and rounded up. LSF's GPU directive and RAM request remain unchanged. SGE setup/render and submission read the host's `qconf -sc`. Setup records the requestable GPU-memory capacity complex; when discovery is ambiguous or finds none, supply its name or explicitly `none` with `--sge-gpu-memory-complex`. Explicit `none` prints and records the capacity limitation. Failed discovery or a disappeared configured complex stops setup/submission.
 
-SGE host RAM starts at 64 GB and scales to the model/context GPU budget plus 16 GB when larger. Four slots reserve one quarter each, rounded up. Discovery prefers the physical per-slot `mem_per_core` mechanism, then `h_rss`, then `h_vmem` if those are unavailable. `--sge-memory-complex NAME` selects a site's per-slot memory mechanism. For a virtual-only site, `h_vmem` requests four times the RAM budget, at least 256 GB aggregate over four slots, and explains this CUDA address-space headroom. This is a virtual limit, not a measurement of resident demand. Check the site's accounting for larger reservations.
+SGE host RAM starts at 64 GB and scales to the model/context GPU budget plus 16 GB when larger. The serve template uses `-pe omp N` and 8 GB per slot, increasing N to preserve that total budget (XS Q4 at 32768 context: eight slots, 64 GB). Set `--sge-parallel-environment NAME` / `FUNGEN_SGE_PARALLEL_ENVIRONMENT` and `--sge-memory-per-slot-gb GB` / `FUNGEN_SGE_MEMORY_PER_SLOT_GB` at setup; saved config keys are `sge_parallel_environment` and `sge_memory_per_slot_gb`. To update an existing 16 GB per-slot setting, pass `--sge-memory-per-slot-gb 8`. Discovery prefers `mem_per_core`, then `h_rss`, then `h_vmem`; `--sge-memory-complex NAME` selects a site's mechanism. A virtual-only `h_vmem` site retains 4 x the RAM budget, at least 256 GB aggregate, with 64 GB per slot by default.
 
-On BU SCC, the public [GPU guide](https://www.bu.edu/tech/support/research/software-and-programming/programming/multiprocessor/gpu-computing/) defines `gpu_memory` as minimum RAM per GPU. The [resource policy](https://www.bu.edu/tech/support/research/system-usage/running-jobs/resources-jobs/) and [RAM allocation guide](https://www.bu.edu/tech/support/research/system-usage/running-jobs/allocating-memory-for-your-job/) describe `mem_per_core` with the slot count for host RAM. An XS Q4 service at 32768 context therefore requests `gpu=1,gpu_memory=24G,mem_per_core=16G` over four slots, using the complexes actually discovered on that host. Site names are discovered, not assumed from the hostname.
+On BU SCC, the [GPU guide](https://www.bu.edu/tech/support/research/software-and-programming/programming/multiprocessor/gpu-computing/) defines `gpu_memory` as minimum RAM per GPU; the [RAM allocation guide](https://www.bu.edu/tech/support/research/system-usage/running-jobs/allocating-memory-for-your-job/) describes `mem_per_core` with the slot count for host RAM. The XS Q4 template requests `-pe omp 8` and `-l h_rt=12:00:00,mem_per_core=8G,gpu=1,gpu_memory=24G`. Larger models gain slots while retaining their existing GPU capacity and walltime requests. Confirm placement with SCC's queue policy.
 
 Slurm has [no standard direct VRAM request](https://slurm.schedmd.com/sbatch.html): `--mem-per-gpu` requests host RAM. Setup and the script state the per-GPU requirement and this limitation. If a site advertises a GPU capacity node Feature, choose it with `--slurm-gpu-constraint FEATURE`; host `sinfo --format=%f` validates that name, and the script uses standard `--constraint=FEATURE`. Record the site-guaranteed VRAM per GPU with `--slurm-gpu-memory-gb GB`; rendering refuses a missing or insufficient guarantee against the same computed requirement. The site must document that Feature's GPU capacity. With `none`, the GPU count alone cannot enforce VRAM size. Slurm host RAM uses the same model-scaled budget as SGE.
 
@@ -169,9 +189,10 @@ default when detection finds none, with a visible explanation. Explicit `--sched
 
 SGE: `fungen serve` submits `~/.fungen/serve.sge.sh` with `qsub`. The script
 requests `-N fungen-serve`, `-S /bin/bash`, `-P <project>` when a project is
-set, `-pe smp 4`, `-l h_rt=12:00:00,h_vmem=16G,gpu=<GPU count>` and `-j y`, and logs to
-`serve.$JOB_ID.log` in the install folder. `smp` and `gpu` are common SGE
-defaults; adjust the parallel environment and GPU resource names to the site's.
+set, `-pe omp N`, `-l h_rt=12:00:00,mem_per_core=8G,gpu=<GPU count>,gpu_memory=<per-GPU GB>`
+and `-j y`, and logs to `serve.$JOB_ID.log` in the install folder. N preserves the
+model-scaled host RAM budget; the site's discovered memory complex and the saved
+parallel environment / memory-per-slot parameters control rendering.
 Setup rewrites the script when its rendered content changes, so site-specific changes must be reflected in the serve renderer/configuration before local setup; `fungen check` rejects a script that differs from its configuration. xQTL rule jobs use `profiles/sge` through the
 operator's cluster adapter: `qsub -terse -S /bin/bash -N <rule>`, `-P <project>`
 when a project is set, `-pe smp <threads>` when threads exceed 1, and

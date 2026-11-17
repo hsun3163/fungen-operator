@@ -1,6 +1,7 @@
 """Install on the host; serve Laguna in Apptainer; run host Codex; switch backend local/openai."""
 from __future__ import annotations
 import argparse
+from contextlib import redirect_stdout
 from . import __version__
 from dataclasses import dataclass
 import hashlib
@@ -18,6 +19,8 @@ import sys
 import tempfile
 import time
 import tomllib
+from .bundle import LOCK, host_preflight, audit_wheels
+from .gpu_diagnostics import host_diagnostics, runtime_requirements, DiscoveryLog, ollama_library
 import urllib.request
 
 MODELS = {"laguna-xs-2.1:q4_K_M": 20, "laguna-xs-2.1:q8_0": 36,
@@ -28,7 +31,7 @@ FITS = {'laguna-xs-2.1:q4_K_M':'one 24–48 GB GPU','laguna-xs-2.1:q8_0':'one 48
 MIN_CODEX = (0, 155, 1)
 BUNDLE = Path('/opt/fungen')
 # Written by the local branch of setup; the first five are required to serve.
-LOCAL_KEYS = ('model', 'models', 'gpus', 'context', 'port', 'source_models', 'runtime_models', 'serve_model', 'local_codex', 'sge_gpu_memory_complex', 'sge_memory_complex', 'sge_memory_per_slot_gb', 'slurm_gpu_constraint', 'slurm_gpu_memory_gb')
+LOCAL_KEYS = ('model', 'models', 'gpus', 'context', 'port', 'source_models', 'runtime_models', 'serve_model', 'local_codex', 'sge_gpu_memory_complex', 'sge_memory_complex', 'sge_memory_per_slot_gb', 'sge_parallel_environment', 'slurm_gpu_constraint', 'slurm_gpu_memory_gb', 'models_shared_confirmed', 'ollama_llm_library')
 OFFLINE = 'No network: download on a login node or another machine, then rerun setup --download no --models-dir FOLDER.'
 
 
@@ -174,18 +177,45 @@ def gpu_count(model, memory, context=32768):
     return 2 if model.startswith('laguna-s-') or context==262144 else 1
 
 
+SHARED_FILESYSTEMS = {'nfs','nfs4','gpfs','lustre','beegfs','ceph','cephfs','panfs','wekafs'}
+
+
+def model_storage(path):
+    path = Path(path).expanduser().resolve()
+    info = mount_info(path)
+    if not info:
+        return path, 'unknown filesystem (mount probe unavailable)', False
+    fs, source = info['fstype'], info['source']
+    risky = any(path == Path(root) or Path(root) in path.parents for root in ('/scratch','/tmp','/var/tmp','/dev/shm'))
+    shared = fs in SHARED_FILESYSTEMS and not risky
+    reason = f'filesystem={fs} source={source}'
+    if risky: reason += '; temporary/scratch path may be node-local or automatically cleaned'
+    elif fs in ('tmpfs','ramfs'): reason += '; node-local memory filesystem'
+    elif fs in ('ext4','xfs','btrfs') and source.startswith('/dev/'): reason += '; local block device'
+    elif not shared: reason += '; sharing across nodes is unknown'
+    return path, reason, shared
+
+
 def model_folder(install, sched):
-    if sched == 'local':
-        return install/'models'
-    print('Cluster home directories have quotas: prefer scratch or project space for 20–128 GB models.')
-    for key in ('SCRATCH', 'PROJECT', 'WORK'):
-        if os.environ.get(key):
-            return Path(os.environ[key])/'fungen/models'
-    user = os.environ.get('USER', Path.home().name)
-    for p in (Path('/scratch')/user, Path('/sc/arion/scratch')/user):
-        if p.is_dir() and os.access(p, os.W_OK):
-            return p/'fungen/models'
-    return install/'models'
+    candidate = install/'models'
+    return str(candidate) if sched == 'local' or model_storage(candidate)[2] else ''
+
+
+def validate_model_storage(folder, *, interactive, confirmation=None):
+    if not str(folder).strip():
+        raise ValueError('Model folder is required. Choose shared project storage visible on login and compute nodes.')
+    path, reason, shared = model_storage(folder)
+    print(f'Model storage: {path}; {reason}', flush=True)
+    confirmed = False
+    if not shared:
+        message = (f'Model folder {path}: {reason}. Choose a shared project location '
+                   '(for example /shared/project/USER/fungen/models). '
+                   'To attest that this exact path is shared across nodes, type SHARED: ')
+        reply = confirmation if confirmation is not None else (input(message).strip() if interactive else '')
+        if reply != 'SHARED':
+            raise ValueError(message+'Refusing unverified model storage; noninteractive setup requires --models-shared-confirmation SHARED.')
+        confirmed = True
+    return str(path), confirmed
 
 
 def manifest(folder, model):
@@ -212,7 +242,7 @@ def check_folder(folder, download, size):
         required = int((size*1.1+2)*1E9)
         print(f'Download budget {required/1E9:.1f} GB; free {shutil.disk_usage(folder).free/1E9:.1f} GB. Site quota must also allow this budget.')
         if shutil.disk_usage(folder).free < required:
-            raise ValueError('Insufficient free space. Choose --models-dir on scratch/project storage.')
+            raise ValueError('Insufficient free space. Choose --models-dir on shared project storage.')
         try:
             with tempfile.TemporaryFile(dir=folder) as probe:
                 if hasattr(os,'posix_fallocate'):
@@ -273,6 +303,8 @@ def install_host(install):
     bundle = BUNDLE if BUNDLE.is_dir() else install
     if not all((bundle/name).exists() for name in ('python/bin/python3', 'wheels', 'skills/fungen-operator', 'bin/uv')):
         raise ValueError('Host installer bundle is incomplete. Copy it first: apptainer run fungen.sif')
+    host_preflight()
+    audit_wheels(bundle/'wheels')
     identity = hashlib.sha256()
     for source in sorted((bundle/'wheels').glob('*')):
         identity.update(source.read_bytes())
@@ -296,7 +328,8 @@ def install_host(install):
         run([install/'bin/uv', 'venv', '--relocatable', '--python', python, venv])
     if changed:
         run([install/'bin/uv', 'pip', 'install', '--python', venv/'bin/python', '--no-index',
-             '--find-links', install/'wheels', '--reinstall-package', 'fungen-operator', 'fungen-operator'])
+             '--find-links', install/'wheels', '--constraint', LOCK,
+             '--reinstall-package', 'fungen-operator', 'fungen-operator'])
         stamp.write_text(version)
     install_kernel(install)
     codex = host_codex()
@@ -411,17 +444,29 @@ def configure_sge(config, *, interactive=False, gpu_complex=None, memory_complex
     if gpu_name != 'none' and complexes[gpu_name]['consumable'] != 'NO':
         raise ValueError('SGE GPU-memory complex must describe per-device capacity (non-consumable); '
                          'a consumable memory pool cannot express the per-GPU requirement. Choose a capacity complex or explicit none.')
+    pe = config.setdefault('sge_parallel_environment', 'omp')
+    if not isinstance(pe, str) or not re.fullmatch(r'[A-Za-z0-9_.-]+', pe):
+        raise ValueError('SGE parallel environment must be one site PE name')
+    # Keep the model-scaled RAM budget; request more slots instead of scarce
+    # high-memory cores. A virtual-only site retains its CUDA address-space limit.
+    default = 64 if config['sge_memory_complex'] == 'h_vmem' else 8
+    per_slot = config.setdefault('sge_memory_per_slot_gb', default)
+    if type(per_slot) is not int or per_slot < 1:
+        raise ValueError('SGE memory per slot must be a positive integer GB')
+    slots = sge_serve_slots(config)
     gpu, host = serve_memory(config)
-    per_slot = (host + 3)//4
-    if config['sge_memory_complex'] == 'h_vmem':
-        # CUDA maps address space well beyond resident RAM. Reserve at least
-        # 256 GiB aggregate and four times the model RAM budget, over four slots.
-        per_slot = max(256, host*4)//4
-        if announce: print(f'SGE h_vmem virtual headroom: {per_slot}G per slot x 4; '
-              f'4 x host RAM ({host}G), minimum 256G aggregate. Physical RAM demand remains {host}G.')
-    config['sge_memory_per_slot_gb'] = per_slot
-    if announce: print(f'SGE serve resources: {gpu}G per GPU; host RAM {host}G across 4 slots; '
-          f"{config['sge_memory_complex']}={per_slot}G per slot.")
+    if announce:
+        print(f'SGE serve resources: {gpu}G per GPU; host RAM {host}G; '
+              f"-pe {pe} {slots}; {config['sge_memory_complex']}={per_slot}G per slot.")
+        if config['sge_memory_complex'] == 'h_vmem':
+            print('SGE h_vmem virtual headroom: 4 x host RAM, minimum 256G aggregate.')
+
+
+def sge_serve_slots(config):
+    host = serve_memory(config)[1]
+    budget = max(256, host*4) if config['sge_memory_complex'] == 'h_vmem' else host
+    per_slot = config['sge_memory_per_slot_gb']
+    return max(4, (budget + per_slot - 1)//per_slot)
 
 
 def slurm_gpu_constraint(feature, required_gb, capacity_gb=None):
@@ -449,6 +494,14 @@ def copy_host_installer(install, args, image, launch):
     if not all((BUNDLE/name).exists() for name in ('python/bin/python3','wheels','skills/fungen-operator','bin/uv')):
         raise ValueError('Image host installer bundle is incomplete.')
     install.mkdir(parents=True, exist_ok=True)
+    # Older bundles can leave incompatible wheels in a merged wheelhouse.
+    source_wheels = BUNDLE/'wheels'
+    retired = [wheel for wheel in (install/'wheels').glob('*.whl')
+               if not (source_wheels/wheel.name).is_file()]
+    if retired:
+        archive = Path(tempfile.mkdtemp(prefix='previous-wheels-', dir=install))
+        for wheel in retired:
+            wheel.rename(archive/wheel.name)
     for name in ('python','wheels','skills','bin','docs'):
         if (BUNDLE/name).is_dir():
             shutil.copytree(BUNDLE/name, install/name, dirs_exist_ok=True, copy_function=atomic_copy)
@@ -466,6 +519,9 @@ def copy_host_installer(install, args, image, launch):
 
 def render_serve(config, *, announce=False):
     root = Path(config['install'])
+    library = config.get('ollama_llm_library', '')
+    if library:
+        ollama_library(library)
     state = root/'server.json'
     sched = config['scheduler']
     directives = ''
@@ -483,16 +539,33 @@ def render_serve(config, *, announce=False):
     elif sched == 'sge':
         configure_sge(config, announce=announce)
         gpu_request = '' if config['sge_gpu_memory_complex']=='none' else f",{config['sge_gpu_memory_complex']}={gpu_gb}G"
-        directives = (f"#$ -N fungen-serve\n#$ -S /bin/bash\n"+(f"#$ -P {config['account']}\n" if config.get('account') else '')+"#$ -pe smp 4\n"
+        directives = (f"#$ -N fungen-serve\n#$ -S /bin/bash\n"+(f"#$ -P {config['account']}\n" if config.get('account') else '')+f"#$ -pe {config['sge_parallel_environment']} {sge_serve_slots(config)}\n"
                       f"#$ -l h_rt=12:00:00,{config['sge_memory_complex']}={config['sge_memory_per_slot_gb']}G,gpu={config['gpus']}{gpu_request}\n#$ -j y\n"
                       f"#$ -o {shlex.quote(str(root))}/serve.$JOB_ID.log\n")
     if sched == 'sge' and config['sge_gpu_memory_complex'] == 'none':
         directives += '# GPU-memory complex: explicit none; site cannot constrain per-GPU VRAM.\n'
     if sched == 'sge' and config['sge_memory_complex'] == 'h_vmem':
-        directives += f'# Virtual headroom: 4 x host RAM ({host_gb}G), minimum 256G aggregate over 4 slots.\n'
+        directives += f'# Virtual headroom: 4 x host RAM ({host_gb}G), minimum 256G aggregate over {sge_serve_slots(config)} slots.\n'
     command = runtime(config, nv=True) + ['serve', '--models-dir', '/models', '--model', config.get('serve_model',config['model']),
                '--port', str(config['port']), '--state', str(state), '--context', str(config['context'])]
-    return '#!/bin/bash\n'+directives+'set -euo pipefail\nexec '+shlex.join(command)+'\n'
+    preflight = [str(root/'venv/bin/python'), '-m', 'fungen_operator.bootstrap', 'serve-preflight',
+                 '--models-dir', config['models'], '--runtime-models', config.get('runtime_models', config['models']),
+                 '--model', config.get('serve_model',config['model']), '--source-model', config['model']]
+    return '#!/bin/bash\n'+directives+'set -euo pipefail\n'+(
+        'library=$('+shlex.join(preflight)
+        +' --ollama-llm-library "${OLLAMA_LLM_LIBRARY:-${FUNGEN_OLLAMA_LLM_LIBRARY:-'+library+'}}")\n'
+        'export OLLAMA_LLM_LIBRARY="$library"\n'
+        'export APPTAINERENV_OLLAMA_LLM_LIBRARY="$library"\n'
+        'export SINGULARITYENV_OLLAMA_LLM_LIBRARY="$library"\n'
+    )+'exec '+shlex.join(command)+'\n'
+
+
+def serve_preflight(args):
+    host_diagnostics()
+    for folder,model in ((args.models_dir,getattr(args,'source_model',None) or args.model), (args.runtime_models,args.model)):
+        path = Path(folder)
+        if not path.is_dir() or not model_present(path, model):
+            raise ValueError(f'Model folder or selected model missing/incomplete on host {socket.gethostname()}: folder={path} model={model} manifest={manifest(path,model)}. Use shared storage visible on every compute node.')
 
 
 def gpu_driver():
@@ -551,14 +624,30 @@ def setup(args):
         print('Models (download):\n'+ '\n'.join(f'  {m}: {s} GB; {FITS[m]}' for m,s in MODELS.items()))
         model = answer('model', 'Model tag', model_default(memory), MODELS)
         download = answer('download', 'Download model? (yes/no)', 'no', ['yes','no'])
-        folder = answer('models_dir', 'Model folder to download into or reuse', previous.get('models', str(model_folder(install, sched))))
+        saved_folder = previous.get('models', '')
+        saved_attestation = previous.get('models_shared_confirmed')
+        can_reuse = saved_folder and (sched == 'local' or saved_attestation or model_storage(saved_folder)[2])
+        folder = answer('models_dir', 'Model folder to download into or reuse',
+                        saved_folder if can_reuse else model_folder(install, sched), saved=False)
+        if sched != 'local':
+            confirmation = args.models_shared_confirmation
+            if saved_attestation and Path(folder).expanduser().resolve() == Path(saved_folder):
+                confirmation = confirmation or 'SHARED'
+            folder, confirmed = validate_model_storage(folder, interactive=interactive, confirmation=confirmation)
+            config['models_shared_confirmed'] = confirmed
         config.update(model=model, models=check_folder(folder, download == 'yes' and not model_present(Path(folder).expanduser(),model), MODELS[model]),
                       context=int(answer('context', 'Context (32768; advanced 262144 needs extra GPU memory)', 32768, ['32768','262144'])),
                       port=int(args.port or previous.get('port',11434)))
         config['gpus'] = gpu_count(model, memory, config['context'])
+        library = library_override(args.ollama_llm_library) or previous.get('ollama_llm_library')
+        if library:
+            config['ollama_llm_library'] = ollama_library(library)
         if sched == 'sge':
-            for key in ('sge_gpu_memory_complex','sge_memory_complex'):
+            for key in ('sge_gpu_memory_complex','sge_memory_complex','sge_parallel_environment','sge_memory_per_slot_gb'):
                 if previous.get('scheduler') == sched and key in previous: config[key] = previous[key]
+            for key in ('sge_parallel_environment','sge_memory_per_slot_gb'):
+                value = getattr(args, key)
+                if value is not None: config[key] = int(value) if key.endswith('_gb') else value
             configure_sge(config, interactive=interactive, gpu_complex=args.sge_gpu_memory_complex,
                           memory_complex=args.sge_memory_complex, announce=True)
         elif sched == 'slurm':
@@ -664,6 +753,10 @@ def available_port(port):
     raise RuntimeError('No free port. Set setup --port to an unused port.')
 
 
+def library_override(flag=None):
+    return flag or os.environ.get('OLLAMA_LLM_LIBRARY') or os.environ.get('FUNGEN_OLLAMA_LLM_LIBRARY')
+
+
 def inside_serve(args):
     if not gpu_memory():
         raise ValueError('GPU unavailable: refusing CPU-only inference. Run fungen serve on the host to submit the GPU job; on a GPU node use apptainer run --nv fungen.sif serve.')
@@ -671,7 +764,13 @@ def inside_serve(args):
     env = dict(os.environ, OLLAMA_HOST=f'0.0.0.0:{port}', OLLAMA_MODELS=args.models_dir, OLLAMA_NO_CLOUD='1',
                OLLAMA_CONTEXT_LENGTH=str(args.context), OLLAMA_FLASH_ATTENTION='1', OLLAMA_KEEP_ALIVE='-1', OLLAMA_NOPRUNE='1',
                OLLAMA_KV_CACHE_TYPE='q8_0', OLLAMA_NUM_PARALLEL='1', OLLAMA_MAX_LOADED_MODELS=os.environ.get('OLLAMA_MAX_LOADED_MODELS','1'))
-    process = subprocess.Popen(['ollama', 'serve'], env=env)
+    # A single backend avoids concurrent CUDA 12/13 verification in Exclusive_Process.
+    env['OLLAMA_LLM_LIBRARY'] = ollama_library(library_override(getattr(args, 'ollama_llm_library', None)))
+    print('FUNGEN_GPU_LIBRARY '+env['OLLAMA_LLM_LIBRARY'], flush=True)
+    env['OLLAMA_DEBUG'] = '2'
+    runtime_requirements()
+    process = subprocess.Popen(['ollama', 'serve'], env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+    discovery = DiscoveryLog(process.stdout)
     url = f'http://127.0.0.1:{port}'
     try:
         for _ in range(120):
@@ -697,10 +796,14 @@ def inside_serve(args):
         Path(args.state).write_text(json.dumps(state,indent=2)+'\n')
         print('FUNGEN_READY '+json.dumps(state),flush=True)
         return process.wait()
+    except Exception:
+        discovery.failure()
+        raise
     finally:
         if process.poll() is None:
             process.terminate()
             process.wait(timeout=30)
+        discovery.thread.join(timeout=5)
 
 
 def repair_pull_progress(folder):
@@ -847,7 +950,7 @@ def runtime_status(config):
     return observed.ready,observed.info,observed.detail
 
 
-def serve(config):
+def serve(config, library=None):
     if config['backend']=='openai':
         print('OpenAI backend: run fungen codex. No local model server is needed. Switch with: fungen backend local')
         return
@@ -865,14 +968,22 @@ def serve(config):
         content = render_serve(config, announce=True)
         if script.read_text() != content: script.write_text(content)
         write_config(config)
+    override = library_override(library)
+    launch_env = {}
+    if override:
+        override = ollama_library(override)
+        launch_env['env'] = dict(os.environ, OLLAMA_LLM_LIBRARY=override)
     if sched=='lsf':
-        with script.open() as f:r=run(['bsub'],stdin=f,capture_output=True,text=True)
+        with script.open() as f:r=run(['bsub'],stdin=f,capture_output=True,text=True,**launch_env)
         match=re.search(r'Job <(\d+)>',r.stdout)
     elif sched in ('slurm','sge'):
-        r=run(['sbatch','--parsable',script] if sched=='slurm' else ['qsub','-terse',script],capture_output=True,text=True)
+        command = ['sbatch','--parsable'] if sched=='slurm' else ['qsub','-terse']
+        if sched=='sge' and override:
+            command += ['-v', 'OLLAMA_LLM_LIBRARY='+override]
+        r=run(command+[script],capture_output=True,text=True,**launch_env)
         match=re.fullmatch(r'(\d+)(?:;[^\s]+)?\s*',r.stdout) if sched=='slurm' else re.fullmatch(r'(\d+)\s*',r.stdout)
     else:
-        with (root/'serve.log').open('a') as f:p=subprocess.Popen(['bash',str(script)],stdout=f,stderr=f,start_new_session=True)
+        with (root/'serve.log').open('a') as f:p=subprocess.Popen(['bash',str(script)],stdout=f,stderr=f,start_new_session=True,**launch_env)
         saved={'scheduler':'local','pid':p.pid}
         # Retain the new PID immediately, including when identity inspection fails.
         # This prevents a launched process from becoming an untracked retry.
@@ -1197,11 +1308,20 @@ def main(argv=None):
     sub=parser.add_subparsers(dest='command')
     p=sub.add_parser('setup',help='Install host tools and configure a backend')
     p.add_argument('--non-interactive',action='store_true')
-    for name,choices in [('install',None),('backend',['local','openai']),('scheduler',['lsf','slurm','sge','local']),('model',list(MODELS)),('models-dir',None),('download',['yes','no']),('context',['32768','262144']),('add-path',['yes','no']),('image',None),('runtime',None),('account',None),('gpu-queue',None),('port',None),('sge-gpu-memory-complex',None),('sge-memory-complex',None),('slurm-gpu-constraint',None),('slurm-gpu-memory-gb',None)]:
+    for name,choices in [('install',None),('backend',['local','openai']),('scheduler',['lsf','slurm','sge','local']),('model',list(MODELS)),('models-dir',None),('models-shared-confirmation',['SHARED']),('download',['yes','no']),('context',['32768','262144']),('add-path',['yes','no']),('image',None),('runtime',None),('account',None),('gpu-queue',None),('port',None),('sge-gpu-memory-complex',None),('sge-memory-complex',None),('sge-parallel-environment',None),('sge-memory-per-slot-gb',None),('slurm-gpu-constraint',None),('slurm-gpu-memory-gb',None)]:
         p.add_argument('--'+name,choices=choices,default=os.environ.get('FUNGEN_'+name.replace('-','_').upper()))
+    p.add_argument('--ollama-llm-library', help='Save an Ollama backend directory override')
     p.add_argument('--offline-check',action='store_true',help='Report offline guidance without a network probe')
+    p=sub.add_parser('serve-preflight',help=argparse.SUPPRESS)
+    p.add_argument('--models-dir',required=True)
+    p.add_argument('--runtime-models',required=True)
+    p.add_argument('--source-model')
+    p.add_argument('--ollama-llm-library')
+    p.add_argument('--model',required=True)
     for name in ('serve','download'):
         p=sub.add_parser(name,help='Start the GPU server' if name=='serve' else 'Image only: acquire/resume model blobs')
+        if name=='serve':
+            p.add_argument('--ollama-llm-library', help='Use one Ollama backend directory for this launch')
         p.add_argument('--models-dir',default='/models')
         p.add_argument('--model',default=next(iter(MODELS)))
         p.add_argument('--skip-pull',action='store_true')
@@ -1221,6 +1341,11 @@ def main(argv=None):
     p.add_argument('args',nargs=argparse.REMAINDER)
     args=parser.parse_args(argv or ['--help'])
     try:
+        if args.command=='serve-preflight':
+            with redirect_stdout(sys.stderr):
+                serve_preflight(args)
+            print(ollama_library(args.ollama_llm_library))
+            return
         if args.command=='setup': return setup(args)
         if args.command=='xqtl':
             from .onboarding import main as onboard
@@ -1232,7 +1357,7 @@ def main(argv=None):
         if args.command=='serve' and BUNDLE.is_dir(): return inside_serve(args)
         config=read_config()
         if not config: raise ValueError('Run apptainer run fungen.sif to set up first.')
-        if args.command=='serve': return serve(config)
+        if args.command=='serve': return serve(config, args.ollama_llm_library)
         if args.command=='codex': return codex(config,args)
         if args.command=='backend': return backend(config,args.choice)
         if args.command=='check': return 0 if check(config,not args.offline) else 1
