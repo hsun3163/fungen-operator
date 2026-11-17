@@ -115,3 +115,32 @@ singularity pull fungen.sif oras://ghcr.io/hsun3163/fungen-operator:1.2.0
 ```
 
 Keep package visibility and repository settings unchanged.
+
+Host bundle portability: the single ABI policy is
+`src/fungen_operator/resources/host-platform.json`. The supported minimum is
+x86_64 glibc 2.28 (RHEL/AlmaLinux/Rocky Linux 8), rather than the untested RHEL 7
+2.17 baseline. All production dependencies are downloaded as binary wheels for
+that platform and lower compatible manylinux tags; the build rejects wheels
+without a compatible tag. The exact dependency pins live in `src/fungen_operator/resources/host-requirements.lock`, including debugpy 1.8.16 and cryptography 50.0.2. The platform policy selects the cryptography manylinux_2_28 wheel; build-host manylinux_2_34 wheels are rejected. Every pin must have a wheel, and the builder checks dependency closure with `pip install --dry-run --ignore-installed --no-index` for the target platform. Host setup checks glibc before creating the package environment.
+The bundled interpreter starts from the clean pinned standalone archive, avoiding
+build-host site-packages, then installs only the audited offline wheels so bootstrap
+reruns can inspect scheduler receipts. The update stage re-resolves the complete bundle.
+
+For an uncommitted scratch test build, use `build.py context DEST --candidate`.
+Its provenance records `candidate: true`, `base_commit` and exact file hashes.
+The ordinary release-context command continues to reject uncommitted inputs.
+
+Model storage must be shared across login and compute nodes. Setup suggests a
+folder only when its filesystem is verified shared. Local block filesystems,
+tmpfs, unknown mounts, and temporary/scratch paths require the typed attestation
+`SHARED` (or `--models-shared-confirmation SHARED` for an explicit noninteractive
+attestation); the config records `models_shared_confirmed`. This does not move
+models or make local storage shared. The generated serve script checks the source
+and runtime model stores on the allocated host before starting the image.
+
+GPU startup logs contain `FUNGEN_GPU_HOST`, `FUNGEN_GPU_ENV`,
+`FUNGEN_GPU_DEVICES`, and `FUNGEN_GPU_COMMAND` / `FUNGEN_GPU_RESULT` blocks from
+the host, followed by `FUNGEN_GPU_RUNTIME` and Ollama trace discovery logs from
+the image. Scheduler visibility is preserved. A failed model load prints a
+`FUNGEN_GPU_FAILURE_BEGIN` through `FUNGEN_GPU_FAILURE_END` block containing the
+driver and the actual discovery/error lines. CPU-only readiness remains refused.

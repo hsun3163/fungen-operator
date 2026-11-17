@@ -67,10 +67,22 @@ def committed_files(commit):
     return files
 
 
-def context(destination,refresh=False):
+def context(destination,refresh=False, candidate=False):
     if destination.exists() and not refresh:raise ValueError('Use a new context directory to avoid stale/private files.')
     commit=git('rev-parse','HEAD').strip()
-    files=committed_files(commit)
+    if candidate:
+        # Explicit scratch-build mode. Release context still requires committed bytes.
+        names=git('ls-files','-z','--cached','--others','--exclude-standard').split('\0')
+        files={}
+        for name in sorted(set(names)):
+            if not admitted(name):continue
+            source=ROOT/name
+            if source.is_symlink() or not source.is_file():raise ValueError('Candidate source is not a regular file: '+name)
+            data=source.read_bytes()
+            mode='100755' if source.stat().st_mode&0o111 else '100644'
+            files[name]=(mode,None,data)
+    else:
+        files=committed_files(commit)
     destination.mkdir(parents=True,exist_ok=refresh)
     if refresh:
         expected=set(files)|{'container/source.json'}
@@ -92,6 +104,10 @@ def context(destination,refresh=False):
     if len(versions)!=1 or not isinstance(versions[0],str) or not re.fullmatch(r'\d+\.\d+\.\d+',versions[0]):
         raise ValueError('Source must declare one semantic __version__')
     identity={'version':versions[0],'commit':commit,'files':hashes,'source_blobs':{name:oid for name,(_,oid,_) in files.items()}}
+    if candidate:
+        identity['base_commit']=identity.pop('commit')
+        identity['candidate']=True
+        identity.pop('source_blobs')
     (destination/'container/source.json').write_text(json.dumps(identity,indent=2)+'\n')
     print(f'Prepared {len(files)} allowlisted source files in {destination}')
 
@@ -146,13 +162,14 @@ def main():
     p = subs.add_parser("context")
     p.add_argument("destination", type=Path)
     p.add_argument("--refresh", action="store_true")
+    p.add_argument("--candidate", action="store_true", help="Explicit uncommitted scratch context; records base commit and exact content hashes")
     p = subs.add_parser("archive")
     p.add_argument("rootfs", type=Path)
     p.add_argument("output", type=Path)
     args = parser.parse_args()
     if args.command == "context":
         try:
-            context(args.destination.resolve(), args.refresh)
+            context(args.destination.resolve(), args.refresh, args.candidate)
         except ValueError as error:
             parser.exit(1, f"build.py context: {error}\n")
     else:

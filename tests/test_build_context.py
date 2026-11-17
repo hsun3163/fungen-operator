@@ -110,3 +110,14 @@ def test_context_version_comes_from_captured_source(repo,tmp_path):
     git(repo,'add',str(p));git(repo,'commit','-qm','next version')
     destination=tmp_path/'context';b.context(destination)
     assert json.loads((destination/'container/source.json').read_text())['version']=='2.3.4'
+
+
+def test_candidate_context_labels_uncommitted_bytes(repo,tmp_path):
+    (repo/'src/pkg/a.py').write_text('A=2\n')
+    destination=tmp_path/'candidate'
+    b.context(destination,candidate=True)
+    identity=json.loads((destination/'container/source.json').read_text())
+    assert identity['candidate'] is True and 'commit' not in identity
+    assert identity['base_commit']==git(repo,'rev-parse','HEAD').strip()
+    assert identity['files']['src/pkg/a.py']==hashlib.sha256(b'A=2\n').hexdigest()
+    assert (destination/'src/pkg/a.py').read_text()=='A=2\n'
