@@ -11,6 +11,9 @@ export PYTHONDONTWRITEBYTECODE=1
 options=()
 if [[ ${FUNGEN_BUSY_PORT:-0} == 1 ]]; then options+=(--busy-port); fi
 if [[ ${FUNGEN_H100:-0} == 1 ]]; then options+=(--h100); fi
+if [[ -n ${FUNGEN_EXPECTED_COMPUTE_MODE:-} ]]; then
+    options+=(--expected-compute-mode "$FUNGEN_EXPECTED_COMPUTE_MODE")
+fi
 python container/acceptance.py "${FUNGEN_SCENARIO:-staged}" \
   --root "${FUNGEN_TRIAL_ROOT:?}" --image "${FUNGEN_IMAGE:?}" \
   --staged "${FUNGEN_STAGED_MODELS:?}" "${options[@]}"

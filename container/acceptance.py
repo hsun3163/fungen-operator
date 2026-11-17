@@ -4,10 +4,13 @@ Run from a reviewed host/LSF allocation. State lives only under --root; model
 stores supplied via --staged are bound read-only. This driver never kills jobs.
 """
 import argparse
+import csv
 import errno
 import fcntl
 import json
 import os
+import re
+import signal
 from pathlib import Path
 import pty
 import select
@@ -93,6 +96,82 @@ def setup(root,image,staged,model,scenario='staged',host_codex=None,sched='lsf',
     drive(command,answers,root/f'{scenario}.pty.log',env,work)
     env['PATH']=str(home/'.fungen/bin')+':'+env['PATH']
     return home,work,env
+
+
+
+def gpu_serve_smoke(root, image, staged, expected_mode):
+    """Exercise the released image entrypoint with automatic CUDA selection."""
+    from fungen_operator.bootstrap import api, prepare_runtime_store
+
+    model = 'laguna-xs-2.1:q4_K_M'
+    home = root/'home'
+    env = clean_env(home)
+    for name in ('OLLAMA_LLM_LIBRARY', 'FUNGEN_OLLAMA_LLM_LIBRARY',
+                 'APPTAINERENV_OLLAMA_LLM_LIBRARY', 'SINGULARITYENV_OLLAMA_LLM_LIBRARY'):
+        env.pop(name, None)
+    config = {'install': str(root), 'models': str(staged.resolve())}
+    prepare_runtime_store(config)
+    command = ['nvidia-smi', '--query-gpu=driver_version,compute_mode,name,uuid',
+               '--format=csv,noheader']
+    if assigned := env.get('CUDA_VISIBLE_DEVICES'):
+        command += ['--id='+assigned]
+    rows = list(csv.reader(subprocess.check_output(command, text=True).splitlines(), skipinitialspace=True))
+    if len(rows) != 1:
+        raise ValueError('GPU smoke requires one allocated device')
+    driver, mode, name, uuid = rows[0]
+    if expected_mode and mode != expected_mode:
+        raise ValueError(f'Expected compute mode {expected_mode}, got {mode}')
+    library = 'cuda_v13' if int(driver.split('.')[0]) >= 580 else 'cuda_v12'
+    evidence = {'job_id': env.get('LSB_JOBID'), 'host': socket.gethostname(), 'driver': driver,
+                'compute_mode': mode, 'gpu': name, 'uuid': uuid, 'expected_library': library}
+    (root/'allocation.json').write_text(json.dumps(evidence, indent=2)+'\n')
+    with socket.socket() as sock:
+        sock.bind(('127.0.0.1', 0))
+        port = sock.getsockname()[1]
+    state = root/'server.json'
+    log = root/'gpu-serve.log'
+    command = [os.environ.get('FUNGEN_RUNTIME', 'singularity'), 'run', '--nv',
+               '--home', f'{home}:{home}', '--bind', f'{root}:/audit',
+               '--bind', f'{config["models"]}:{config["models"]}:ro',
+               '--bind', f'{config["runtime_models"]}:/models', str(image.resolve()),
+               'serve', '--models-dir', '/models', '--model', model, '--port', str(port),
+               '--state', '/audit/server.json']
+    with log.open('w') as transcript:
+        process = subprocess.Popen(command, env=env, stdout=transcript,
+                                   stderr=subprocess.STDOUT, start_new_session=True)
+        try:
+            deadline = time.monotonic()+420
+            while not state.is_file():
+                if process.poll() is not None or time.monotonic() >= deadline:
+                    raise RuntimeError(f'Image serve failed to record readiness. Inspect {log}')
+                time.sleep(1)
+            ready = json.loads(state.read_text())
+            if ready.get('ready') is not True or ready.get('model') != model:
+                raise ValueError('Image reported invalid GPU readiness')
+            url = f'http://127.0.0.1:{ready["port"]}'
+            answer = api(url, '/api/generate', {'model': model, 'prompt': 'Reply exactly: READY',
+                         'stream': False, 'think': False, 'options': {'num_predict': 24}}, timeout=120)
+            loaded = api(url, '/api/ps')['models']
+        finally:
+            if process.poll() is None:
+                os.killpg(process.pid, signal.SIGINT)
+                try:
+                    process.wait(timeout=30)
+                except subprocess.TimeoutExpired:
+                    os.killpg(process.pid, signal.SIGTERM)
+                    process.wait(timeout=30)
+    text = log.read_text(errors='replace')
+    compute = next((line for line in text.splitlines()
+                    if 'inference compute' in line and 'library=CUDA' in line), '')
+    offload = re.search(r'offloaded ([1-9]\d*/\d+) layers to GPU', text)
+    evidence.update(cuda_compute=compute, offloaded_layers=offload[1] if offload else '',
+                    generation=answer.get('response', '').strip(), models=loaded)
+    (root/'gpu-serve.json').write_text(json.dumps(evidence, indent=2)+'\n')
+    if (f'FUNGEN_GPU_LIBRARY {library}\n' not in text or library not in compute
+            or not offload or not evidence['generation']
+            or not any(row['name'] == model and row.get('size_vram', 0) > 0 for row in loaded)):
+        raise ValueError(f'Image CUDA selection, GPU offload or generation failed. Inspect {log}')
+    print('SMOKE_PASS: '+json.dumps(evidence, sort_keys=True), flush=True)
 
 
 def operator_smoke(root,scenario,home,work,env,software,operator_python=None):
@@ -184,12 +263,13 @@ def operator_smoke(root,scenario,home,work,env,software,operator_python=None):
 
 def main():
     p=argparse.ArgumentParser(description=__doc__)
-    p.add_argument('scenario',choices=['pixi','staged','xs','h100-xs','advanced','edges','onboarding','operator','kernel'])
+    p.add_argument('scenario',choices=['pixi','staged','xs','h100-xs','advanced','edges','onboarding','operator','kernel','gpu-serve'])
     p.add_argument('--root',type=Path,required=True)
     p.add_argument('--image',type=Path)
     p.add_argument('--staged',type=Path)
     p.add_argument('--software',type=Path)
     p.add_argument('--step',choices=['workflow','software','reference','scheduler','fixture','test','handoff'])
+    p.add_argument('--expected-compute-mode', help='Check the allocated GPU compute mode in gpu-serve')
     p.add_argument('--busy-port',action='store_true')
     p.add_argument('--h100',action='store_true',help='Constrain this Minerva acceptance allocation to H100 GPUs')
     p.add_argument('--operator-python',type=Path,help='Use a development operator interpreter for onboarding diagnostics')
@@ -199,7 +279,13 @@ def main():
     report=root/'scenarios.json'
     results=json.loads(report.read_text()) if report.exists() else {}
     try:
-        if a.scenario=='pixi':
+        if a.scenario=='gpu-serve':
+            if report.exists() or (root/'server.json').exists():
+                raise ValueError('Use a fresh --root for GPU smoke')
+            if a.image is None or a.staged is None:
+                p.error('gpu-serve requires --image and --staged')
+            gpu_serve_smoke(root, a.image, a.staged, a.expected_compute_mode)
+        elif a.scenario=='pixi':
             home=root/'pixi/home';work=root/'pixi/work';work.mkdir(parents=True,exist_ok=True)
             env=clean_env(home);env['INSTALL_TYPE']='full'
             repo=root.parent/'pixi-setup'
