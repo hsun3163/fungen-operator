@@ -10,6 +10,13 @@ GHCR repository: `ghcr.io/hsun3163/fungen-operator`.
 
 ## [1.2.1] - 2026-11-17
 
+- Git tag `v1.2.1` identifies the release record.
+- Image source commit `2add7d1c1a4ee93b681d0bb71d517ad4b6d545c3`.
+- SIF SHA-256 `d22eeb5fd3569ad8b9c828fa7928a18e8491d44bf2e42a2134f401f202f718b2`.
+- GHCR manifest digest `sha256:ba0900246f8a3a4ba138083108a933e33b6315c9c7e2001da7d623d498c83a0e`.
+- Immutable GHCR tags `1.2.1` and `1.2.1-ollama0.40.6-codex0.155.1`.
+- Moving aliases `ollama0.40.6-codex0.155.1` and `latest`.
+
 ### Fixed
 
 - Select one Ollama CUDA backend on the allocated host. NVIDIA driver 580 or
@@ -39,6 +46,26 @@ GHCR repository: `ghcr.io/hsun3163/fungen-operator`.
   Actions write-access remedy would let an unaccepted GitHub rebuild replace
   accepted Minerva image aliases. Removed the Actions-specific publisher remedy;
   releases are built, GPU/interactive accepted and published only from Minerva.
+
+
+### Validation
+
+The frozen committed-source host suite passed **882 tests**, with zero failures
+or skips, on Minerva job **282883271**. Native build jobs **282883044** and
+**282883185** produced a 3,658,600,448-byte SIF from 67 admitted source files.
+The complete offline host bundle passed its 61-wheel glibc 2.28 audit and
+target-platform dependency closure.
+
+Both L40S GPU smokes passed with driver 580.126.09, automatically selecting
+CUDA 13, offloading 41/41 layers, and generating `READY`. Job **282883222**
+used NVIDIA Exclusive_Process mode and job **282883223** used Default mode.
+Native clean-home XS acceptance **282883221** produced
+`FUNGEN_AGENT_CONNECTED` and passed all 13 health checks with positive GPU
+offload and context 32768. Live BU SCC allocation remains a site verification.
+
+All four GHCR tags resolve to the manifest above. A complete anonymous ORAS
+pull of 1.2.1 matched the SIF checksum and reported version 1.2.1. Drive delivery
+is awaiting renewed authorization for the documented remote.
 
 ## [1.2.0] - 2026-11-09
 

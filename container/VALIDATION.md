@@ -1,6 +1,9 @@
 # Container validation
 
-Status: **round-5 / Release 2 rebuilt-image acceptance PASS**, with **696 frozen host tests passed, 0 failed/skipped**. Source **9910940bbd0ffbcb0095bc9381a3284d7c7ed1d5**. Native XS acceptance and all requested local S/XS interactive checks passed; task services and test terminals are stopped. Both GHCR release tags, anonymous pull and the single Drive replacement have matching-byte verification; the package remains public. Current details are in the round-5 section at the end; earlier sections are historical.
+Status: **operator 1.2.1 acceptance PASS**. The frozen host suite passed
+**882 tests**. Native build, Exclusive_Process GPU smoke, normal GPU smoke and
+clean-home XS acceptance passed. Publication and delivery receipts are in the
+1.2.1 section below. Earlier sections retain their historical validation.
 
 ## Pinned payload and build
 
@@ -308,3 +311,64 @@ access would allow a GitHub-rebuilt, unaccepted SIF to replace the accepted
 Minerva image aliases. Releases are built, GPU/interactive accepted and published
 only from Minerva. No GitHub Actions publishes images. Earlier publication and
 owner-action entries above remain historical records.
+
+
+## Operator 1.2.1 acceptance - 2026-11-17
+
+Image source `2add7d1c1a4ee93b681d0bb71d517ad4b6d545c3` supplied
+67 admitted files through `container/build.py context`. Pinned-base job
+**282883044** completed on `lc06e45`. Native install, archive and SIF build
+job **282883185** completed on `lc07e15` in 354 seconds.
+
+Image
+[~/sunh14_project/OLLAMA/images/release-1.2.1/fungen-operator-ollama0.40.6-codex0.155.1.sif](http://127.0.0.1:30548/lab/tree/sunh14_project/OLLAMA/images/release-1.2.1/fungen-operator-ollama0.40.6-codex0.155.1.sif)
+
+Size **3,658,600,448 bytes**, SHA-256
+`d22eeb5fd3569ad8b9c828fa7928a18e8491d44bf2e42a2134f401f202f718b2`.
+Embedded provenance matches the committed context. The observed runtime
+versions are Fungen **1.2.1**, Ollama **0.40.6** and Codex **0.155.1**.
+The offline host bundle contains 61 compatible wheels and passes dependency
+closure for CPython 3.12, x86-64 glibc 2.28.
+
+| Check | Native evidence |
+| --- | --- |
+| Frozen full host suite | **282883271 DONE**, `lg07c06`, **882 passed in 3577.79 s**, zero failures or skips, peak 11,927 MB. Parent and child Python processes use committed source. |
+| Exclusive_Process GPU | **282883222 DONE**, `lg03e18`, NVIDIA L40S, driver 580.126.09, observed compute mode `Exclusive_Process`. Automatic `cuda_v13`, CUDA inference compute, 41/41 layers, generation `READY`. |
+| Normal GPU | **282883223 DONE**, `lg03e18`, NVIDIA L40S in Default mode. Automatic `cuda_v13`, CUDA inference compute, 41/41 layers, generation `READY`. |
+| Clean-home native XS | **282883221 DONE**, `lc06e14`. Host installer installed 61 packages. Service **282883318** on `lg03e18` returned `FUNGEN_AGENT_CONNECTED` through host Codex, with **13/13** health checks and `VERIFIED`. |
+| Loaded XS | All three checks recorded **20,543,805,849 VRAM bytes**. Clean-home effective context **32768**. |
+
+The direct GPU smoke services exited with their test jobs. Clean-home service
+**282883318** remained RUN at final acceptance inspection. Automatic approval
+review rejected its cleanup command pending exact-job termination authorization.
+Live BU SCC and Slurm allocation remain site verification.
+
+The accepted SIF supersedes the Nov 10 `round7-candidate` image for
+distribution. That candidate records version 1.2.0, baseline `68c088f` and
+`candidate: true`. Its retained files remain in their original directory.
+
+Full acceptance, publication and delivery evidence
+[~/sunh14_project/fungen-operator/temp_reference/release_121_20261117/report.md](http://127.0.0.1:30548/lab/tree/sunh14_project/fungen-operator/temp_reference/release_121_20261117/report.md)
+
+The documented single Drive SIF replacement is awaiting renewed authorization
+for `cosi_drive:`, whose native access returned `invalid_grant`.
+
+### 1.2.1 registry publication
+
+Native Singularity ORAS upload published the accepted SIF to `1.2.1`.
+ORAS 1.3.6 tagged the same manifest with `1.2.1-ollama0.40.6-codex0.155.1`,
+`ollama0.40.6-codex0.155.1` and `latest`, using Singularity's native
+registry authentication file. The initial ORAS default-auth tagging attempt
+returned access denied. Selecting the successful uploader's auth file completed
+all three aliases.
+
+Anonymous descriptor checks through an empty ORAS auth configuration confirmed
+that all four tags resolve to
+`sha256:ba0900246f8a3a4ba138083108a933e33b6315c9c7e2001da7d623d498c83a0e`.
+The manifest's single SIF layer has the accepted SHA-256 and byte size above.
+
+A full anonymous ORAS download of **1.2.1** using the empty authentication
+configuration returned **3,658,600,448 bytes**, SHA-256
+`d22eeb5fd3569ad8b9c828fa7928a18e8491d44bf2e42a2134f401f202f718b2`.
+The downloaded image's native entrypoint reports `fungen 1.2.1`.
+The moving `latest` tag resolves to the same verified manifest.
