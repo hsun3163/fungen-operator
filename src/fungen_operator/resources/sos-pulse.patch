@@ -1,0 +1,17 @@
+--- a/sos/monitor.py
++++ b/sos/monitor.py
+@@ -64,11 +64,12 @@
+ 
+         self.pulse_file = os.path.join(
+             os.path.expanduser("~"), ".sos", "tasks", task_id + ".pulse")
+-        # remove previous status file, which could be readonly if the job is killed
++        # TaskFile.status has already published the running-task pulse. Keep
++        # that path present: a concurrent check_task treats a missing pulse as
++        # an abort, and the monitor then kills this otherwise healthy task.
+         if os.path.isfile(self.pulse_file):
+             if not os.access(self.pulse_file, os.W_OK):
+                 os.chmod(self.pulse_file, stat.S_IREAD | stat.S_IWRITE)
+-            os.remove(self.pulse_file)
+         self.sos_dict = sos_dict
+         with open(self.pulse_file, "a") as pd:
+             pd.write(

@@ -1,0 +1,656 @@
+"""Action lifecycle and approval/readiness gates shared by MCP and replay."""
+
+from __future__ import annotations
+
+import copy
+import json
+import re
+import sys
+import uuid
+from pathlib import Path
+
+import nbformat
+import yaml
+
+from .actions import Deployment, PrepareConfig, RunSlots, digest, inside
+from .execution import Executor
+from .notebook import Notebook, active, now, recipe_key, verify
+from .live_control import ControlRun, command, commands, approval_fingerprint
+
+
+def changed_paths(before, after, prefix=()):
+    """Compare actual mappings, preserving added/deleted parent paths as changes."""
+    if isinstance(before, dict) and isinstance(after, dict):
+        paths = []
+        for key in before.keys() | after.keys():
+            path = (*prefix, key)
+            if key not in before or key not in after:
+                paths.append(path)
+            else:
+                paths.extend(changed_paths(before[key], after[key], path))
+        return paths
+    return [] if type(before) is type(after) and before == after else [prefix]
+
+
+class Harness:
+    def __init__(self, deployment: Deployment, executor=None, deployment_file=None):
+        deployment.validate_layout()
+        self.deployment = deployment
+        if deployment_file:
+            deployment._deployment_file = str(Path(deployment_file).resolve())
+        self.registry = deployment.registry
+        self.executor = executor or Executor(deployment)
+        self.deployment_file = deployment_file
+
+    def _context(self, args):
+        self.deployment.validate_arguments(args)
+        spec = next((s for s in self.registry.specs.values() if isinstance(args, s.model)), None)
+        if spec and spec.validate:
+            spec.validate(self.deployment, args)
+        book = Notebook(args.notebook, self.registry)
+        nb = book.read()
+        current = {recipe_key(c.metadata.fungen): c for c in active(nb)}
+        if current:
+            first = next(iter(current.values())).metadata.fungen.slots.arguments
+            def artifact_path(value):
+                for original, relocated in getattr(self.deployment, "artifact_path_aliases", {}).items():
+                    try:
+                        return str((Path(relocated) / Path(value).relative_to(original)).resolve())
+                    except ValueError:
+                        continue
+                return str(Path(value).resolve())
+            for key in ("notebook", "configfile", "workdir"):
+                if artifact_path(first[key]) != artifact_path(getattr(args, key)):
+                    raise ValueError("one notebook owns one config/output graph; create another notebook")
+        return book, nb, current
+
+    def _idle(self, nb, *, resource_edit=False):
+        # The live server only stages actions. Its approved host entrypoint repeats
+        # this check before executing any cell, including configuration writes.
+        if not self.executor.can_schedule:
+            return
+        # Include historical cells: a superseded receipt does not make a job disappear.
+        for cell in nb.cells:
+            meta = cell.metadata.get("fungen", {})
+            if meta.get("action") not in self.registry.specs or not self.registry.spec(meta["action"]).controller:
+                continue
+            result = meta.get("result", {})
+            if (not result.get('job_id') and meta.get('action') == 'initiate_run'
+                    and meta.get('status') == 'prepared'
+                    and hasattr(self.executor, 'recover_submission')):
+                # A displaced acknowledgement can leave a live native launch
+                # looking unexecuted. Inspect its exact log stem before dispatch.
+                result = self.executor.recover_submission(cell) or result
+            if result.get("job_id"):
+                if result.get("scheduler", {}).get("status") in {"DONE", "EXIT"}:
+                    continue
+                if (result.get('inactive_observed') and result.get('scheduler',{}).get('inactive') is True):
+                    continue
+                state = (self.executor.controller_scheduler(meta["slots"]["bindings"]["log_stem"], result["job_id"])
+                         if hasattr(self.executor, "controller_scheduler") else self.executor.scheduler(result["job_id"]))
+                if resource_edit and state["status"] in {"RUN", "PEND"}:
+                    continue
+                inactive=(state['status']=='UNKNOWN' and state.get('inactive') is True
+                          and state.get('diagnostic','').startswith('Job absent from bjobs'))
+                if state["status"] not in {"DONE", "EXIT"} and not inactive:
+                    raise ValueError(f"controller {result['job_id']} is {state['status']}; inspect before changing the run")
+                result["scheduler"] = state
+                result['inactive_observed' if inactive else 'terminal_observed'] = now()
+                logs = self.executor.logs(meta["slots"]["bindings"]["log_stem"], result["job_id"])
+                result["logs"] = logs
+                import nbformat
+                for stream, text in logs.items():
+                    cell.outputs.append(nbformat.v4.new_output("stream", name="stdout",
+                        text=f"\n--- {'inactive controller' if inactive else 'terminal scheduler'} {stream}: job {result['job_id']} ---\n{text}"))
+            elif meta.get("status") in {"executing", "unknown"}:
+                raise ValueError("unresolved submission outcome; reconcile before changing the run")
+
+    def _config_idle(self, nb, args, proposed):
+        # Pending cells supersede the accepted cell in recipe order. Recover the
+        # last materialized baseline by sequence, including retained history.
+        accepted = [c for c in nb.cells if c.metadata.get("fungen", {}).get("action") == "prepare_config"
+                    and c.metadata.fungen.get("status") == "materialized"]
+        baseline = max(accepted, key=lambda c: c.metadata.fungen.sequence) if accepted else None
+        actual = yaml.safe_load(Path(args.configfile).read_text()) if Path(args.configfile).exists() else None
+        before = yaml.safe_load(baseline.metadata.fungen.slots.bindings.config_text) if baseline else actual
+        paths = changed_paths(before, proposed)
+        resource_edit = bool(baseline and paths and all(self.deployment.is_operational(".".join(p), leaf_only=True) for p in paths)
+                             and all(self.deployment.is_operational(p, leaf_only=True) for p in args.parameters))
+        if resource_edit:
+            recorded = baseline.metadata.fungen.slots.arguments
+            if any(recorded[k] != getattr(args, k) for k in ("notebook", "configfile", "workdir")):
+                raise ValueError("resource edit must retain the accepted config/output graph")
+            if (actual != before or Path(args.configfile).read_text()
+                    != baseline.metadata.fungen.slots.bindings.config_text):
+                raise ValueError("external configuration drift; reconcile before resource edit")
+            self.deployment.validate_config(proposed)
+        self._idle(nb, resource_edit=resource_edit)
+
+    def propose_config(self, args: PrepareConfig):
+        book, nb, current = self._context(args)
+        previous_cell = current.get("prepare_config")
+        previous = yaml.safe_load(previous_cell.metadata.fungen.slots.bindings.config_text) if previous_cell else None
+        if previous is None and Path(args.configfile).exists():
+            # Adopting an existing run must not silently reset its science to defaults.
+            previous = yaml.safe_load(Path(args.configfile).read_text())
+            self.deployment.validate_config(previous)
+        config, changes = self.deployment.config(args, previous)
+        if previous_cell and Path(args.configfile).exists():
+            actual = yaml.safe_load(Path(args.configfile).read_text())
+            if not isinstance(actual, dict):
+                raise ValueError("existing configuration must be a YAML mapping")
+            # Restoring an externally changed scientific value is a change too.
+            changes.update(self.deployment.scientific_diff(actual, config))
+        identity = self.deployment.identity()
+        proposal = {"arguments": args.model_dump(), "config": config, "scientific_changes": changes,
+                    "identity": identity, "notebook_hash": digest(nb) if book.path.exists() else None}
+        proposal["fingerprint"] = digest(proposal)
+        return proposal
+
+    def prepare_config(self, proposal, approval=None):
+        args = PrepareConfig.model_validate(proposal["arguments"])
+        fresh = self.propose_config(args)
+        if proposal["fingerprint"] != fresh["fingerprint"]:
+            raise ValueError("proposal changed while awaiting approval; request approval again")
+        if proposal["scientific_changes"]:
+            if not approval or approval.get("fingerprint") != proposal["fingerprint"]:
+                raise ValueError("scientific approval required before materialization")
+        book = Notebook(args.notebook, self.registry)
+        with book.locked():
+            # Recheck after acquiring the lock, including competing writers.
+            if self.propose_config(args)["fingerprint"] != proposal["fingerprint"]:
+                raise ValueError("stale configuration approval")
+            _, nb, _ = self._context(args)
+            self._config_idle(nb, args, proposal["config"])
+            slots = {"arguments": args.model_dump(), "bindings": {
+                "config_text": yaml.safe_dump(proposal["config"], sort_keys=True)}}
+            cell = book.append(nb, "prepare_config", slots, proposal["identity"], uuid.uuid4().hex,
+                               approval=approval)
+            return self._execute(book, nb, cell)
+
+    def _matching_config(self, args, current):
+        cfg = current.get("prepare_config")
+        if cfg is None or cfg.metadata.fungen.status != "materialized":
+            raise ValueError("prepare_config must successfully materialize first")
+        text = cfg.metadata.fungen.slots.bindings.config_text
+        if not Path(args.configfile).exists() or Path(args.configfile).read_text() != text:
+            raise ValueError("configuration differs from notebook recipe; prepare_config again")
+        return text
+
+    def _run_fingerprint(self, args, identity, config_text):
+        values = args.model_dump()
+        # Keep pre-option recipes/fingerprints stable when the option is absent.
+        for option in ("rerun_triggers", "allowed_rules"):
+            if values.get(option) is None:
+                values.pop(option, None)
+        if not values.get("keep_incomplete"):
+            values.pop("keep_incomplete", None)
+        for key in ("job_name", "walltime_minutes", "phase", "log_dir", "depends_on", "defer_readiness"):
+            values.pop(key, None)
+        return digest({"arguments": values, "identity": identity, "config": config_text})
+
+    def run(self, action: str, args: RunSlots):
+        spec = self.registry.spec(action)
+        if spec.refusal is not None:
+            args = spec.model.model_validate(args.model_dump())
+            if spec.validate:
+                spec.validate(self.deployment, args)
+            return {**spec.refusal, "action": action, "executed": False}
+        if action not in {"prepare_config", "check_readiness", "initiate_run", "control_run"}:
+            return self._provider_run(spec, args)
+        if action not in {"check_readiness", "initiate_run"}:
+            raise ValueError("unsupported run action")
+        args = self.registry.models[action].model_validate(args.model_dump())
+        book = Notebook(args.notebook, self.registry)
+        # Validate before even creating a lock outside permitted paths.
+        self._context(args)
+        with book.locked():
+            _, nb, current = self._context(args)
+            self._idle(nb)
+            text = self._matching_config(args, current)
+            identity = self.deployment.identity()
+            fingerprint = self._run_fingerprint(args, identity, text)
+            if action == "initiate_run" and not args.defer_readiness:
+                ready = current.get("check_readiness:before_run")
+                if (ready is None or ready.metadata.fungen.status not in {"ready", "nothing_to_do"}
+                        or ready.metadata.fungen.get("run_fingerprint") != fingerprint):
+                    raise ValueError("a successful matching check_readiness is required")
+            cell_id = uuid.uuid4().hex
+            slots = {"arguments": args.model_dump(),
+                     "bindings": self.deployment.runtime_bindings(str(Path(args.log_dir, cell_id)))}
+            cell = book.append(nb, action, slots, identity, cell_id)
+            if action == "initiate_run" and args.defer_readiness:
+                cell.metadata.fungen["readiness_policy"] = "canonical_dry_run_at_controller_start"
+            cell.metadata.fungen["run_fingerprint"] = fingerprint
+            book.save(nb)
+            return self._execute(book, nb, cell)
+
+    def _provider_run(self, spec, args):
+        args = spec.model.model_validate(args.model_dump())
+        book, _, _ = self._context(args)
+        with book.locked():
+            _, nb, _ = self._context(args)
+            self._idle(nb)
+            config = spec.config_text(self.deployment, args) if spec.config_text else ""
+            identity = self.deployment.identity()
+            cell_id = uuid.uuid4().hex
+            slots = {"arguments": args.model_dump(), "bindings":
+                     spec.bindings(self.deployment, args, cell_id) if spec.bindings else {}}
+            fingerprint = self._run_fingerprint(args, identity, config)
+            for attempt in range(4):
+                _, nb, _ = self._context(args)
+                self._idle(nb)
+                if spec.reuse_running and spec.reuse_running(args):
+                    # A caller can disappear while its notebook kernel keeps
+                    # observing. Adopt the latest identical request instead of
+                    # launching a second observer after its outer lock releases.
+                    latest = max((c for c in nb.cells
+                        if c.metadata.get("fungen", {}).get("action") == spec.name
+                        and spec.model.model_validate(
+                            c.metadata.fungen.slots.arguments).model_dump() == args.model_dump()),
+                        key=lambda c: c.metadata.fungen.sequence, default=None)
+                    if latest is not None and latest.metadata.fungen.status == "executing":
+                        return {"cell_id": latest.id, "notebook": str(book.path),
+                                "status": "executing", "reused": True,
+                                "instruction": "Adopt the existing native observation; its outcome is pending."}
+                try:
+                    cell = book.append(nb, spec.name, slots, identity, cell_id)
+                except ValueError as exc:
+                    # A concurrent native observation can finish between this
+                    # read and proposal publication. No executor has run yet;
+                    # rebuild the same proposal against fresh verified history.
+                    if "stale notebook publication" not in str(exc) or attempt == 3:
+                        raise
+                else:
+                    break
+            # append publishes the proposal. Preserve observations published
+            # since that save when attaching its execution fingerprint.
+            nb = self._publish_execution_record(book, cell,
+                {"run_fingerprint": fingerprint}, require_pending=True)
+            return self._execute(book, nb, cell)
+
+    def _execute(self, book, nb, cell):
+        # Appending/validating a cell can outlive another native observation.
+        # Start from the current history just as result publication does.
+        nb, _ = self._execution_record(book, cell)
+        cell = next(c for c in nb.cells if c.id == cell.id)
+        meta = cell.metadata.fungen
+        if meta.status not in {"prepared", "host_approval_required"}:
+            raise ValueError("cell is already executing or executed; inspect its native outcome")
+        if not self.executor.can_schedule:
+            nb = self._publish_execution_record(book, cell,
+                {"status": "host_approval_required"}, require_pending=True)
+            meta = next(c for c in nb.cells if c.id == cell.id).metadata.fungen
+            return {"cell_id": cell.id, "notebook": str(book.path), "status": meta.status,
+                    "host_command": [sys.executable, "-m", "fungen_operator", "execute",
+                                     "--deployment", self.deployment_file or "DEPLOYMENT.json",
+                                     "--notebook", str(book.path), "--cell", cell.id],
+                    "instruction": "Run this exact entrypoint through require_escalated; do not run it in the sandbox."}
+        nb = self._publish_execution_record(book, cell,
+            {"status": "executing", "started": now()}, require_pending=True)
+        cell = next(c for c in nb.cells if c.id == cell.id)
+        try:
+            result = self.executor.execute(cell, Path(book.path).resolve().parent)
+        except Exception as exc:
+            self._publish_execution_record(book, cell,
+                {"status": "unknown", "error": f"{type(exc).__name__}: {exc}"})
+            raise
+        self._publish_execution_record(book, cell,
+            {"result": result, "status": result["status"], "finished": now()})
+        return {"cell_id": cell.id, "notebook": str(book.path), **result}
+
+    def _publish_execution_record(self, book, cell, changes, *, require_pending=False):
+        # A native observation may publish between our fresh read and save.
+        # Rebase only this cell's metadata/outputs on current history. Never
+        # retry executor dispatch, change its identity, or reset a started cell.
+        for attempt in range(4):
+            nb, meta = self._execution_record(book, cell)
+            if require_pending and meta.status not in {"prepared", "host_approval_required"}:
+                raise ValueError("cell is already executing or executed; inspect its native outcome")
+            meta.update(copy.deepcopy(changes))
+            try:
+                book.save(nb)
+            except ValueError as exc:
+                if "stale notebook publication" not in str(exc) or attempt == 3:
+                    raise
+            else:
+                return nb
+
+    @staticmethod
+    def _execution_record(book, executed):
+        # Execution can outlive another native observation/publication. Preserve
+        # the latest history and supersession tags rather than saving the old
+        # whole-notebook snapshot over it.
+        nb = book.read()
+        stored = next((c for c in nb.cells if c.id == executed.id), None)
+        changed = (["missing"] if stored is None else [name for name, before, after in (
+            ("source", executed.source, stored.source),
+            ("slots", executed.metadata.fungen.slots, stored.metadata.fungen.slots),
+            ("identity", executed.metadata.fungen.identity, stored.metadata.fungen.identity),
+        ) if before != after])
+        if changed:
+            raise ValueError("executed cell changed or disappeared; reconcile native receipts before continuing"
+                             f" (cell {executed.id}: {','.join(changed)})")
+        stored.outputs = copy.deepcopy(executed.outputs)
+        stored.execution_count = executed.execution_count
+        return nb, stored.metadata.fungen
+
+    def execute_pending(self, notebook, cell_id):
+        self.deployment.validate_write_path(notebook)
+        book = Notebook(notebook, self.registry)
+        with book.locked():
+            nb = book.read()
+            cell = next((c for c in active(nb) if c.id == cell_id), None)
+            if cell is None or cell.metadata.fungen.status not in {"prepared", "host_approval_required"}:
+                raise ValueError("only an unexecuted active cell can be executed here")
+            meta = cell.metadata.fungen
+            args = self.registry.models[meta.action].model_validate(meta.slots.arguments)
+            if meta.action == "control_run":
+                self.validate_control_cell(nb, cell)
+                return self._execute(book, nb, cell)
+            _, _, current = self._context(args)
+            identity = self.deployment.identity()
+            if identity != meta.identity:
+                raise ValueError("implementation or configuration changed; repeat readiness")
+            if meta.action == "prepare_config":
+                proposed = yaml.safe_load(meta.slots.bindings.config_text)
+                self.deployment.validate_config(proposed)
+                # Reconstruct the saved proposal through the typed catalog. This
+                # also checks shell values, selectors and unregistered fields.
+                accepted = [c for c in nb.cells if c.metadata.get("fungen", {}).get("action") == "prepare_config"
+                            and c.metadata.fungen.get("status") == "materialized"]
+                prior = max(accepted, key=lambda c: c.metadata.fungen.sequence) if accepted else None
+                before = (yaml.safe_load(prior.metadata.fungen.slots.bindings.config_text) if prior
+                          else yaml.safe_load(Path(args.configfile).read_text()) if Path(args.configfile).exists()
+                          else None)
+                expected, changes = self.deployment.config(args, before)
+                if proposed != expected:
+                    raise ValueError("saved configuration differs from typed proposal; prepare again")
+                if Path(args.configfile).exists():
+                    changes.update(self.deployment.scientific_diff(
+                        yaml.safe_load(Path(args.configfile).read_text()), proposed))
+                if changes and not (meta.get("approval") or {}).get("fingerprint"):
+                    raise ValueError("scientific approval required before materialization")
+                self._config_idle(nb, args, proposed)
+                return self._execute(book, nb, cell)
+            self._idle(nb)
+            spec = self.registry.spec(meta.action)
+            cfg = (spec.config_text(self.deployment, args) if spec.config_text
+                   else self._matching_config(args, current))
+            if self._run_fingerprint(args, identity, cfg) != meta.run_fingerprint:
+                raise ValueError("implementation or configuration changed; repeat readiness")
+            if meta.action == "initiate_run" and not args.defer_readiness:
+                ready = current.get("check_readiness:before_run")
+                if ready is None or ready.metadata.fungen.status not in {"ready", "nothing_to_do"} or ready.metadata.fungen.run_fingerprint != meta.run_fingerprint:
+                    raise ValueError("successful matching readiness required")
+            return self._execute(book, nb, cell)
+
+    def replay(self, notebook):
+        """Replay a snapshot of active intent through the same action gates."""
+        self.deployment.validate_write_path(notebook)
+        nb = Notebook(notebook, self.registry).read()
+        self._idle(nb)
+        remaining = nb.metadata.fungen.get("replay_remaining")
+        recipe = copy.deepcopy([c for c in active(nb) if c.id in remaining] if remaining else active(nb))
+        recipe = [c for c in recipe if c.metadata.fungen.action != "control_run"]
+        results = []
+        for index, old in enumerate(recipe):
+            meta = old.metadata.fungen
+            if meta.identity != self.deployment.identity():
+                raise ValueError("implementation identity changed; rebind the recipe")
+            action = meta.action
+            args = self.registry.models[action].model_validate(meta.slots.arguments)
+            if action == "prepare_config":
+                # Replay the complete recorded configuration, including approved science.
+                recorded = yaml.safe_load(meta.slots.bindings.config_text)
+                params = {key: value for key, value in recorded.items() if key != "cwd"}
+                args = args.model_copy(update={"parameters": params})
+                proposal = self.propose_config(args)
+                if proposal["scientific_changes"]:
+                    raise ValueError("replay would change scientific values; use prepare_config approval")
+                result = self.prepare_config(proposal, approval=meta.approval)
+            else:
+                result = self.run(action, args)
+            results.append(result)
+            if result["status"] not in {"materialized", "ready", "nothing_to_do", "submitted", "completed"}:
+                break
+            if action == "initiate_run":
+                if self.deployment.backend == "local" and result["status"] == "completed":
+                    # The local executor already waited for this bash cell and
+                    # checked its exit status. Continue the recipe synchronously.
+                    continue
+                state = (self.executor.controller_scheduler(meta["slots"]["bindings"]["log_stem"], result["job_id"])
+                         if hasattr(self.executor, "controller_scheduler") else self.executor.scheduler(result["job_id"]))["status"]
+                if state not in {"DONE", "EXIT"}:
+                    # Keep the unexecuted suffix active and resume it on the next
+                    # replay call, rather than submitting another controller.
+                    book = Notebook(notebook, self.registry)
+                    with book.locked():
+                        nb = book.read()
+                        pending = []
+                        for future in recipe[index + 1:]:
+                            m = future.metadata.fungen
+                            slots = copy.deepcopy(m.slots)
+                            new_id = uuid.uuid4().hex
+                            slots.bindings.log_stem = str(Path(slots.arguments.log_dir, new_id))
+                            cell = book.append(nb, m.action, slots, m.identity, new_id)
+                            cell.metadata.fungen.status = "awaiting_controller"
+                            pending.append(new_id)
+                        nb.metadata.fungen["replay_remaining"] = pending
+                        book.save(nb)
+                    return results
+        book = Notebook(notebook, self.registry)
+        with book.locked():
+            nb = book.read()
+            nb.metadata.fungen.pop("replay_remaining", None)
+            book.save(nb)
+        verify(Notebook(notebook, self.registry).read(), self.registry)
+        return results
+
+    def _control_notebook(self, notebook):
+        if not inside(notebook, self.deployment.run_root):
+            raise ValueError("notebook must belong to run_root")
+        if hasattr(self.deployment, "validate_write_path"):
+            self.deployment.validate_write_path(notebook)
+        return Notebook(notebook, self.registry)
+
+    def _job_snapshot(self, nb, grace_minutes=10, job_ids=None, *, require_coverage=False):
+        from .run_jobs import inspect_jobs
+        if not getattr(self.executor, "can_inspect", self.executor.can_schedule):
+            return {"count": None if require_coverage else 0, "dead_children": [], "jobs": {}, "scheduler_ok": False,
+                    "coverage":{"verified":False,"reason":"host_approval_required"},
+                    "observations": ["host_approval_required"]}
+        return inspect_jobs(self.deployment, nb, grace_minutes=grace_minutes, requested_ids=job_ids,require_coverage=require_coverage)
+
+    def propose_control(self, request: ControlRun):
+        if self.deployment.backend not in ("lsf","fixture"):
+            raise ValueError("Job control and sweeps require LSF; use the configured scheduler native tools for job control.")
+        book = self._control_notebook(request.notebook)
+        nb = book.read()
+        if request.operation == "sweep":
+            from .sweep_cell import sweep_bindings
+            bindings = sweep_bindings(self.deployment, request, nb)
+            slots = {"arguments": request.model_dump(), "bindings": bindings}
+            proposal = {"status": "approval_required", **slots, "job_ids": [],
+                        "command": ["bsub"], "sweep_spec": request.sweep.model_dump(),
+                        "source": self.registry.render("control_run", slots),
+                        "notebook_hash": digest(nb) if book.path.exists() else None}
+            proposal["fingerprint"] = approval_fingerprint(proposal["arguments"], bindings)
+            return proposal
+        snapshot = self._job_snapshot(nb, request.dead_child_grace_minutes, request.job_ids)
+        if not snapshot["scheduler_ok"]:
+            return {"status": "refused", "reason": "live run membership is unavailable",
+                    "observations": snapshot.get("observations", [])}
+        if request.job_ids is not None:
+            ids = request.job_ids
+        elif request.selector.kind == "dead_child_wrappers":
+            ids = sorted({child["wrapper_job_id"] for child in snapshot["dead_children"]
+                          if child.get("wrapper_job_id")}, key=int)
+        elif request.selector.kind == "step":
+            ids = sorted([job_id for job_id, job in snapshot["jobs"].items()
+                          if job.get("membership")
+                          and request.selector.step in {job.get("rule"), job.get("task_kind")}
+                          and job.get("memory_reservation_gb") == request.selector.memory_reservation_gb], key=int)
+        else:
+            ids = sorted([job_id for job_id, job in snapshot["jobs"].items()
+                          if job.get("membership") and job.get("status", job.get("state")) == "PEND"
+                          and job.get("queue") == request.selector.queue
+                          and job.get("pending_minutes", -1) > request.selector.min_pending_minutes], key=int)
+        refusals = self._control_refusals(request, ids, snapshot)
+        if refusals:
+            return {"status": "refused", "refusals": refusals, "job_ids": ids}
+        if not ids:
+            return {"status": "nothing_to_do", "job_ids": []}
+        bindings = {"job_ids": ids}
+        if request.operation == "modify" and request.memory_reservation_gb is not None:
+            bindings["resource_requirements"] = {job_id: snapshot["jobs"][job_id].get("combined_resreq", "")
+                                                for job_id in ids}
+        literal_commands = commands(request, ids, bindings.get("resource_requirements"))
+        proposal = {"status": "approval_required", "arguments": request.model_dump(),
+                    "bindings": bindings, "command": literal_commands[0], "commands": literal_commands,
+                    "job_ids": ids, "notebook_hash": digest(nb) if book.path.exists() else None}
+        proposal["fingerprint"] = approval_fingerprint(proposal["arguments"], bindings)
+        return proposal
+
+    @staticmethod
+    def _control_refusals(request, ids, snapshot):
+        refusals = []
+        for job_id in ids:
+            job = snapshot["jobs"].get(job_id, {})
+            reason = None
+            if not job.get("membership"):
+                reason = job.get("membership_reason", "job is outside this run's receipts, wrappers and task directories")
+            elif job.get("status", job.get("state")) not in {"PEND", "RUN", "PSUSP", "USUSP", "SSUSP", "WAIT"}:
+                reason = "job has no live controllable LSF state"
+            elif request.operation in {"suspend_pending", "resume_pending"}:
+                expected = "PEND" if request.operation == "suspend_pending" else "PSUSP"
+                if job.get("status", job.get("state")) != expected or job.get("queue") != "express":
+                    reason = f"pending-worker control requires express {expected} jobs"
+                elif job.get("kind") == "controller":
+                    reason = "pending-worker control excludes controllers"
+            if reason:
+                refusals.append({"job_id": job_id, "reason": reason})
+        return refusals
+
+    def control_run(self, proposal, approval=None):
+        if proposal.get("status") != "approval_required":
+            return proposal
+        if not approval or approval.get("fingerprint") != proposal["fingerprint"]:
+            raise ValueError("job control approval required")
+        request = ControlRun.model_validate(proposal["arguments"])
+        bindings = proposal["bindings"]
+        if approval_fingerprint(proposal["arguments"], bindings) != proposal["fingerprint"]:
+            raise ValueError("stale job control approval")
+        book = self._control_notebook(request.notebook)
+        with book.locked():
+            nb = book.read()
+            if (digest(nb) if book.path.exists() else None) != proposal["notebook_hash"]:
+                raise ValueError("notebook changed while awaiting approval; request approval again")
+            # Recheck the frozen list; a selector is never expanded after approval.
+            snapshot = (self._job_snapshot(nb, request.dead_child_grace_minutes, bindings["job_ids"])
+                        if request.operation != "sweep" else {"scheduler_ok": True, "jobs": {}})
+            if not snapshot["scheduler_ok"]:
+                return {"status": "refused", "reason": "live run membership is unavailable"}
+            refusals = self._control_refusals(request, bindings["job_ids"], snapshot)
+            if refusals:
+                return {"status": "refused", "refusals": refusals}
+            self._control_resources(bindings, snapshot)
+            cell = book.append(nb, "control_run", {"arguments": copy.deepcopy(proposal["arguments"]), "bindings": bindings},
+                               self.deployment.identity(), uuid.uuid4().hex, approval=approval)
+            return self._execute(book, nb, cell)
+
+    @staticmethod
+    def _control_resources(bindings, snapshot):
+        for job_id, original in bindings.get("resource_requirements", {}).items():
+            if snapshot["jobs"].get(job_id, {}).get("combined_resreq") != original:
+                raise ValueError("live resource requirements changed; request approval again")
+
+    def validate_control_cell(self, nb, cell):
+        meta = cell.metadata.fungen
+        request = ControlRun.model_validate(meta.slots.arguments)
+        self._control_notebook(request.notebook)
+        if (meta.get("approval") or {}).get("fingerprint") != approval_fingerprint(
+                meta.slots.arguments, meta.slots.bindings):
+            raise ValueError("job control approval required for this exact command and IDs")
+        if request.operation == "sweep":
+            from .sweep import SweepPlan
+            plan = SweepPlan.model_validate_json(meta.slots.bindings.plan_text)
+            if (plan.run_root != self.deployment.run_root or plan.snakefile != self.deployment.snakefile
+                    or plan.deployment_file != self.deployment._deployment_file):
+                raise ValueError("sweep plan differs from the registered deployment")
+            return
+        snapshot = self._job_snapshot(nb, request.dead_child_grace_minutes, meta.slots.bindings.job_ids)
+        if not snapshot["scheduler_ok"]:
+            raise ValueError("live run membership is unavailable")
+        refusals = self._control_refusals(request, meta.slots.bindings.job_ids, snapshot)
+        if refusals:
+            raise ValueError("job control refused: " + json.dumps(refusals))
+        self._control_resources(meta.slots.bindings, snapshot)
+
+    def inspect(self, request):
+        book = Notebook(request.notebook, self.registry)
+        nb = book.read()
+        recovery = {'check_readiness': 'recover_readiness', 'initiate_run': 'recover_submission'}
+        interrupted = lambda cell: (cell.metadata.get('fungen', {}).get('action') in recovery
+                                    and (cell.metadata.fungen.get('status') in {'executing', 'unknown'}
+                                         or (cell.metadata.fungen.action == 'initiate_run'
+                                             and cell.metadata.fungen.get('status') == 'prepared'))
+                                    and hasattr(self.executor, recovery[cell.metadata.fungen.action]))
+        if any(interrupted(c) for c in nb.cells):
+            with book.locked():
+                nb = book.read()
+                changed = False
+                for cell in nb.cells:
+                    if not interrupted(cell):
+                        continue
+                    result = getattr(self.executor, recovery[cell.metadata.fungen.action])(cell)
+                    if result:
+                        meta = cell.metadata.fungen
+                        meta['result'] = result
+                        meta['status'] = result['status']
+                        meta['reconciled'] = now()
+                        cell.outputs.append(nbformat.v4.new_output(
+                            'stream', name='stdout', text='Recovered native ' + meta.action + ': ' + json.dumps(result) + '\n'))
+                        changed = True
+                if changed:
+                    book.save(nb)
+        if self.deployment.backend in ('lsf','sge','slurm'):
+            snapshot=self._job_snapshot(nb,request.dead_child_grace_minutes,require_coverage=True)
+        elif self.deployment.backend=='local':
+            snapshot={'count':None,'dead_children':[],'jobs':{},'scheduler_ok':None,
+                      'observations':['local synchronous execution; external scheduler inspection is not applicable']}
+        else:
+            snapshot={'count':0,'dead_children':[],'jobs':{},'scheduler_ok':True}
+        cells = []
+        for c in nb.cells:
+            if c.cell_type != "code":
+                continue
+            meta = c.metadata.fungen
+            entry = {"cell_id": c.id, "action": meta.action, "status": meta.status,
+                     "superseded": "superseded" in c.metadata.get("tags", []),
+                     "result": meta.get("result", {})}
+            job = entry["result"].get("job_id")
+            if job:
+                entry["scheduler"] = (snapshot["jobs"].get(str(job), {"status": "UNKNOWN"})
+                                      if self.deployment.backend in ("lsf","sge","slurm") else self.executor.scheduler(job))
+                entry["logs"] = (self.executor.live_logs(meta.slots.bindings.log_stem, job)
+                                 if hasattr(self.executor, "live_logs") else
+                                 self.executor.logs(meta.slots.bindings.log_stem, job))
+            cells.append(entry)
+        observations = {}
+        for name in request.paths:
+            p = Path(name)
+            record = {"exists": p.exists(), "is_file": p.is_file()}
+            if p.is_file():
+                record["size"] = p.stat().st_size
+                with p.open("rb") as stream:
+                    record["prefix"] = stream.read(request.max_bytes).decode("utf-8", errors="replace")
+            observations[name] = record
+        return {"cells": cells, "paths": observations, "active_cells_valid": True,
+                "dead_children": snapshot["dead_children"], "dead_child_count": snapshot["count"],
+                "scheduler_ok": snapshot["scheduler_ok"],
+                "inspection_status": ('verified' if snapshot.get('coverage',{}).get('verified') else
+                                      'not_verified' if self.deployment.backend in ('lsf','sge','slurm') else 'not_applicable'),
+                "scheduler_observations": snapshot.get("observations", []),
+                "discovery_coverage": snapshot.get("coverage"),
+                "jobs": {job:row for job,row in snapshot.get("jobs",{}).items() if row.get("membership")}}

@@ -1,0 +1,9 @@
+#!/bin/bash
+#BSUB -J fungen-container-smoke
+#BSUB -P acc_LOAD
+#BSUB -q premium
+#BSUB -n 4
+#BSUB -R "rusage[mem=4000] span[hosts=1]"
+#BSUB -W 04:00
+set -euo pipefail
+exec bash "${LS_SUBCWD:?}/container/smoke.sh"

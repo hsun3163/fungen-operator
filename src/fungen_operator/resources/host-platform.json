@@ -1,0 +1,9 @@
+{
+  "minimum_glibc": "2.28",
+  "architecture": "x86_64",
+  "python": "3.12",
+  "rationale": "RHEL, AlmaLinux and Rocky Linux 8 baseline. glibc 2.17 (RHEL 7) is outside the supported host baseline; 2.28 permits current binary dependencies without promising an untested legacy OS.",
+  "constraints": {
+    "debugpy": {"specifier": "==1.8.16", "reason": "PyPI CPython 3.12 x86_64 wheels from 1.8.17 through 1.8.22 require glibc 2.34; 1.8.16 provides manylinux_2_17 and satisfies ipykernel debugpy>=1.6.5."}
+  }
+}

@@ -1,0 +1,168 @@
+"""Small MCP adapter. Scientific confirmation is injected by the human client."""
+
+import asyncio
+import json
+import socket
+import sys
+from typing import Annotated, Any
+
+from mcp.server import MCPServer
+from mcp.server.elicitation import ElicitationResult
+from mcp.server.mcpserver import Elicit, Resolve
+from mcp.server.mcpserver.exceptions import ToolError
+from pydantic import BaseModel, ConfigDict
+
+from .actions import PrepareConfig, CheckReadiness, InitiateRun, InspectRun, digest
+from .harness import Harness
+from .live_control import ControlRun
+from .notebook import now
+
+
+class Confirmation(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    approve: bool
+
+
+class OperatorServer(MCPServer):
+    async def call_tool(self, name, arguments, context=None):
+        if set(arguments) != {"request"}:
+            raise ToolError("Action tools accept only the structured request argument")
+        return await super().call_tool(name, arguments, context)
+
+
+def serve_stdio(harness: Harness):
+    # asyncio wakes its event loop from stdin worker threads through a local
+    # socket pair. Minerva's restricted sandbox allows creating that pair but
+    # rejects writes, which otherwise leaves MCP initialization waiting forever.
+    try:
+        reader, writer = socket.socketpair()
+        with reader, writer:
+            writer.send(b"\0")
+    except OSError as exc:
+        raise SystemExit(
+            "MCP stdio startup blocked: this environment cannot write to local "
+            "sockets required by the async runtime. Start the server through "
+            "the approved host execution path outside the sandbox. "
+            f"Underlying error: {exc}"
+        ) from exc
+    create_server(harness).run()
+
+
+def create_server(harness: Harness):
+    server = OperatorServer("Fungen Operator")
+    # Only in-flight approval proposals. The notebook owns all retained state.
+    proposals = {}
+
+    def confirmation(request: PrepareConfig):
+        try:
+            proposal = harness.propose_config(request)
+        except ValueError as exc:
+            raise ToolError(str(exc)) from exc
+        proposals[digest(request.model_dump())] = proposal
+        if not proposal["scientific_changes"]:
+            return Confirmation(approve=True)
+        return Elicit(
+            "Human approval is required before configuration or notebook materialization.\n"
+            + json.dumps({"scientific_changes": proposal["scientific_changes"],
+                          "proposal_fingerprint": proposal["fingerprint"],
+                          "configfile": request.configfile}, indent=2), Confirmation)
+
+    def control_proposal(request: ControlRun):
+        try:
+            return harness.propose_control(request)
+        except ValueError as exc:
+            raise ToolError(str(exc)) from exc
+
+    def control_confirmation(
+        proposal: Annotated[dict[str, Any], Resolve(control_proposal)],
+    ):
+        if proposal["status"] != "approval_required":
+            return Confirmation(approve=True)
+        import shlex
+        return Elicit("Approve this exact run job control command and IDs:\n"
+                      + proposal.get("source", "\n".join(shlex.join(c) for c in proposal.get("commands", [proposal["command"]]))) + "\n"
+                      + json.dumps({"job_ids": proposal["job_ids"],
+                                    "proposal_fingerprint": proposal["fingerprint"],
+                                    "sweep_spec": proposal.get("sweep_spec")}), Confirmation)
+
+    async def invoke(function, *args):
+        try:
+            return await asyncio.to_thread(function, *args)
+        except ValueError as exc:
+            raise ToolError(str(exc)) from exc
+
+    @server.tool()
+    async def prepare_config(
+        request: PrepareConfig,
+        confirmation_result: Annotated[ElicitationResult[Confirmation], Resolve(confirmation)],
+    ) -> dict[str, Any]:
+        """Prepare canonical config; scientific changes require client-mediated human approval."""
+        proposal = proposals.pop(digest(request.model_dump()))
+        if confirmation_result.action != "accept" or not confirmation_result.data.approve:
+            return {"status": "approval_declined", "materialized": False}
+        proof = None
+        if proposal["scientific_changes"]:
+            proof = {"fingerprint": proposal["fingerprint"], "scientific_changes": proposal["scientific_changes"],
+                     "channel": "mcp_human_elicitation", "time": now(),
+                     "backend": harness.deployment.backend}
+        return await invoke(harness.prepare_config, proposal, proof)
+
+    @server.tool()
+    async def check_readiness(request: CheckReadiness) -> dict[str, Any]:
+        """Execute the canonical dry-run and retain readiness or nothing-to-do evidence."""
+        return await invoke(harness.run, "check_readiness", request)
+
+    @server.tool()
+    async def initiate_run(request: InitiateRun) -> dict[str, Any]:
+        """Submit or normally resume the same graph through the fixed LSF/Snakemake cell."""
+        return await invoke(harness.run, "initiate_run", request)
+
+    @server.tool()
+    async def control_run(
+        request: ControlRun,
+        proposal: Annotated[dict[str, Any], Resolve(control_proposal)],
+        confirmation_result: Annotated[ElicitationResult[Confirmation], Resolve(control_confirmation)],
+    ) -> dict[str, Any]:
+        """Approve kill or switch_queue for a frozen, live-checked set of this run's jobs."""
+        # Resolve caches this proposal only within this call, including the
+        # confirmation dependency; concurrent selectors retain their own IDs.
+        if proposal["status"] != "approval_required":
+            return proposal
+        if confirmation_result.action != "accept" or not confirmation_result.data.approve:
+            return {"status": "approval_declined", "job_ids": proposal["job_ids"], "materialized": False}
+        proof = {"fingerprint": proposal["fingerprint"], "channel": "mcp_human_elicitation",
+                 "time": now(), "backend": harness.deployment.backend}
+        return await invoke(harness.control_run, proposal, proof)
+
+    @server.tool(annotations={"readOnlyHint": True, "destructiveHint": False})
+    async def inspect_run(request: InspectRun) -> dict[str, Any]:
+        """Read action history, scheduler states, logs, and requested file observations."""
+        if harness.deployment.backend in {"lsf", "sge", "slurm"}:
+            # Native history discovery can outlast the MCP transport timeout.
+            # Keep it on the same reviewed host entrypoint as long-running actions.
+            if not harness.deployment_file:
+                raise ToolError("Cluster inspection requires a recorded deployment file")
+            command = [sys.executable, "-m", "fungen_operator", "inspect",
+                       "--deployment", str(harness.deployment_file),
+                       "--notebook", request.notebook,
+                       "--max-bytes", str(request.max_bytes),
+                       "--dead-child-grace-minutes", str(request.dead_child_grace_minutes)]
+            for path in request.paths:
+                command.extend(["--path", path])
+            return {"status": "host_approval_required", "host_command": command,
+                    "instruction": "Run this exact entrypoint through require_escalated; do not run it in the sandbox."}
+        return await invoke(harness.inspect, request)
+
+    for name, spec in harness.registry.specs.items():
+        if name in {"prepare_config", "check_readiness", "initiate_run", "control_run"}:
+            continue
+        def make_action(action, contract):
+            async def provided_action(request):
+                return await invoke(harness.run, action, request)
+            provided_action.__name__ = action
+            provided_action.__doc__ = contract.description or action.replace("_", " ")
+            provided_action.__annotations__ = {"request": contract.model, "return": dict[str, Any]}
+            return provided_action
+        server.tool(name=name)(make_action(name, spec))
+
+    return server
