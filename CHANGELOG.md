@@ -11,6 +11,30 @@ Commits, tags and releases below are in
 [fungen-operator-archive](https://github.com/hsun3163/fungen-operator-archive),
 the history of this repository before 2026-11-22.
 
+## [1.2.2] - Unreleased
+
+Source changes for the 1.2.1 BU SCC report (scc-219, A100 80GB,
+Exclusive_Process). No image has been built or published for this version yet.
+
+### Fixed
+
+- Request Default (shared) GPU compute mode for the SGE serve job with
+  `#$ -v COMPUTE_MODE=Default`. On BU SCC, job GPUs otherwise run in
+  Exclusive_Process mode, where Ollama's verify runner could not open the GPU
+  still held by its bootstrap runner and serve fell back to CPU. A serve-time
+  CUDA library override repeats the setting on the `qsub -v` command line.
+- Identify a path's mount by the last mount at its deepest mount point, so a
+  filesystem mounted over an automount (such as project space) is recognised,
+  and accept every shared filesystem type that model storage accepts.
+  The refusal now shows the mount it found.
+- Report `SGE unreachable` when `qconf -sc` returns no complex table, instead of
+  saying the saved GPU-memory complex is not requestable.
+- Show the install `bin` folder missing from PATH as an optional note, not a
+  failed check; every command also works by its full path.
+- Record why `fungen serve` stopped (for example, refusing CPU-only inference)
+  in `server.json`. `fungen check` reports that reason as a failure for the
+  ended launch instead of PENDING.
+
 ## [1.2.1] - 2026-11-17
 
 - Git tag `v1.2.1` identifies the release record.

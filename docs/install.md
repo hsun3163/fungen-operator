@@ -82,7 +82,14 @@ Setup suggests the install's `models` directory when it can verify shared
 storage. BU SCC's `/scratch` is node-local. Serve checks access to the selected
 model and its source store on the allocated host.
 
-Serve selects one CUDA library on the allocated GPU node to avoid competing
+Ollama opens the GPU twice at startup: a bootstrap runner finds the device and
+a second runner verifies it. In NVIDIA Exclusive_Process mode the second open can
+fail as "busy", and Ollama falls back to CPU, which serve refuses. BU SCC runs job
+GPUs in that mode unless the job sets `COMPUTE_MODE=Default`, so `serve.sge.sh`
+carries `#$ -v COMPUTE_MODE=Default`. The job still holds its GPU alone, as
+LSF's `mode=shared:j_exclusive=yes` does.
+
+Serve also selects one CUDA library on the allocated GPU node to avoid competing
 Ollama runner probes in NVIDIA Exclusive_Process mode. NVIDIA driver 580 or
 newer selects `cuda_v13`. Older drivers and an unavailable version probe use
 `cuda_v12`. Use `fungen serve --ollama-llm-library cuda_v12` or set
@@ -99,7 +106,7 @@ GPU capacity is derived once from the model plus context allowance (4 GB normall
 
 SGE host RAM starts at 64 GB and scales to the model/context GPU budget plus 16 GB when larger. The serve template uses `-pe omp N` and 8 GB per slot, increasing N to preserve that total budget (XS Q4 at 32768 context: eight slots, 64 GB). Set `--sge-parallel-environment NAME` / `FUNGEN_SGE_PARALLEL_ENVIRONMENT` and `--sge-memory-per-slot-gb GB` / `FUNGEN_SGE_MEMORY_PER_SLOT_GB` at setup; saved config keys are `sge_parallel_environment` and `sge_memory_per_slot_gb`. To update an existing 16 GB per-slot setting, pass `--sge-memory-per-slot-gb 8`. Discovery prefers `mem_per_core`, then `h_rss`, then `h_vmem`; `--sge-memory-complex NAME` selects a site's mechanism. A virtual-only `h_vmem` site retains 4 x the RAM budget, at least 256 GB aggregate, with 64 GB per slot by default.
 
-On BU SCC, the [GPU guide](https://www.bu.edu/tech/support/research/software-and-programming/programming/multiprocessor/gpu-computing/) defines `gpu_memory` as minimum RAM per GPU; the [RAM allocation guide](https://www.bu.edu/tech/support/research/system-usage/running-jobs/allocating-memory-for-your-job/) describes `mem_per_core` with the slot count for host RAM. The XS Q4 template requests `-pe omp 8` and `-l h_rt=12:00:00,mem_per_core=8G,gpu=1,gpu_memory=24G`. Larger models gain slots while retaining their existing GPU capacity and walltime requests. Confirm placement with SCC's queue policy.
+On BU SCC, the [GPU guide](https://www.bu.edu/tech/support/research/software-and-programming/programming/multiprocessor/gpu-computing/) defines `gpu_memory` as minimum RAM per GPU; the [RAM allocation guide](https://www.bu.edu/tech/support/research/system-usage/running-jobs/allocating-memory-for-your-job/) describes `mem_per_core` with the slot count for host RAM. The XS Q4 template requests `-pe omp 8`, `-l h_rt=12:00:00,mem_per_core=8G,gpu=1,gpu_memory=24G` and `-v COMPUTE_MODE=Default` (the GPU guide's switch from Exclusive to Default mode). Larger models gain slots while retaining their existing GPU capacity and walltime requests. Confirm placement with SCC's queue policy.
 
 Slurm has [no standard direct VRAM request](https://slurm.schedmd.com/sbatch.html): `--mem-per-gpu` requests host RAM. Setup and the script state the per-GPU requirement and this limitation. If a site advertises a GPU capacity node Feature, choose it with `--slurm-gpu-constraint FEATURE`; host `sinfo --format=%f` validates that name, and the script uses standard `--constraint=FEATURE`. Record the site-guaranteed VRAM per GPU with `--slurm-gpu-memory-gb GB`; rendering refuses a missing or insufficient guarantee against the same computed requirement. The site must document that Feature's GPU capacity. With `none`, the GPU count alone cannot enforce VRAM size. Slurm host RAM uses the same model-scaled budget as SGE.
 
@@ -304,13 +311,16 @@ A fresh installation has PENDING runtime rows and an overall **NOT VERIFIED**
 result with a nonzero exit status. Run `fungen serve`, then `fungen check`.
 Recorded scheduler failures, unreachable endpoints and failed API observations
 are failures. Empty or wrong-model GPU observations also block readiness.
+When the serve job stops, for example after refusing CPU-only inference, it
+writes its reason to `server.json`, and `fungen check` shows that reason on the
+server and GPU rows as FAIL.
 Old log text is diagnostic context; readiness follows the current launch receipt,
 endpoint and selected-model GPU observation.
 
 | Check | Exact action |
 |---|---|
 | Install writable | Rerun setup with `--install WRITABLE_FOLDER`. |
-| Install on PATH | Add `export PATH="$HOME/.fungen/bin:$PATH"` or confirm the setup PATH prompt. |
+| Install on PATH (note, never a failure) | Optional: run `~/.fungen/bin/fungen` by full path, or add `export PATH="$HOME/.fungen/bin:$PATH"`. |
 | Operator importable / skill visible | Rerun `apptainer run fungen.sif`. |
 | Codex recent enough | Rerun setup to install the bundled client. |
 | Internet reachable | Download on a login node or another machine; rerun with `--download no --models-dir FOLDER`. |

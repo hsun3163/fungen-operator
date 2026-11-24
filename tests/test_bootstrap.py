@@ -92,10 +92,10 @@ def test_codex_host_config_untouched(tmp_path,monkeypatch):
     assert not (tmp_path/'config.toml').exists()
 
 
-def test_no_gpu_fails_with_exact_fix(monkeypatch):
+def test_no_gpu_fails_with_exact_fix(tmp_path,monkeypatch):
     monkeypatch.setattr(b,'gpu_memory',lambda:[])
     with pytest.raises(ValueError,match='--nv'):
-        b.inside_serve(SimpleNamespace())
+        b.inside_serve(SimpleNamespace(state=str(tmp_path/'server.json')))
 
 
 def test_busy_port():
@@ -280,10 +280,10 @@ def test_atomic_install_keeps_live_mappings_and_identical_files(tmp_path):
     assert target.stat().st_mode&0o777==0o755
 
 
-def test_complete_read_only_reuse_never_repairs_download_state(monkeypatch):
+def test_complete_read_only_reuse_never_repairs_download_state(tmp_path,monkeypatch):
     monkeypatch.setattr(b,'gpu_memory',lambda:[])
     monkeypatch.setattr(b,'repair_pull_progress',Mock(side_effect=AssertionError('read-only state mutation')))
-    with pytest.raises(ValueError,match='GPU unavailable'):b.inside_serve(SimpleNamespace())
+    with pytest.raises(ValueError,match='GPU unavailable'):b.inside_serve(SimpleNamespace(state=str(tmp_path/'server.json')))
 
 
 @pytest.mark.parametrize('command',['codex','xqtl','check','backend'])
@@ -473,7 +473,10 @@ def test_cpu_only_load_refuses_to_serve(tmp_path,monkeypatch,capsys):
     assert b.main(args)==1
     err=capsys.readouterr().err
     assert err.startswith('fungen: GPU offload unavailable') and 'GPU job' in err and '--nv' in err
-    assert proc.terminate.called and not (tmp_path/'server.json').exists()
+    assert proc.terminate.called
+    # The refusal, not readiness, is what the job leaves for fungen check.
+    state=json.loads((tmp_path/'server.json').read_text())
+    assert state['ready'] is False and state['error'].startswith('GPU offload unavailable')
 
 
 def check_config(tmp_path,monkeypatch):
@@ -495,7 +498,7 @@ def check_config(tmp_path,monkeypatch):
     ('fresh','PENDING','PENDING',False),('ready','PASS','PASS',True),
     ('cpu','PASS','FAIL',False),('empty','PASS','FAIL',False),('wrong_model','PASS','FAIL',False),
     ('ps_error','PASS','FAIL',False),('tags_error','FAIL','PENDING',False),
-    ('failed_job','FAIL','PENDING',False),('status_error','FAIL','PENDING',False),
+    ('failed_job','FAIL','FAIL',False),('status_error','FAIL','PENDING',False),
     ('pending','PENDING','PENDING',False)])
 def test_check_requires_runtime_evidence(tmp_path,monkeypatch,capsys,scenario,server,gpu,ok):
     from fungen_operator import cluster
@@ -518,11 +521,12 @@ def test_check_requires_runtime_evidence(tmp_path,monkeypatch,capsys,scenario,se
     (tmp_path/'serve.123.log').write_text('fungen: old failure\nCUDA driver failure\n')
     assert b.check(c) is ok
     out=capsys.readouterr().out.splitlines()
-    assert all(x.startswith('PASS') for x in out[:10])
-    assert out[10].startswith(server+' server reachable') and out[11].startswith(gpu+' GPU offload')
+    assert all(x.startswith('PASS') for x in out[:9])
+    assert out[9].startswith(server+' server reachable') and out[10].startswith(gpu+' GPU offload')
     assert out[-1]==('VERIFIED' if ok else 'NOT VERIFIED: runtime verification is pending. Run fungen serve, then fungen check.' if scenario in ('fresh','pending') else 'NOT VERIFIED: correct failed checks; for local runtime run fungen serve, then fungen check.')
     if not ok:assert 'fungen serve, then fungen check' in out[-1]
-    if scenario=='ps_error':assert 'GPU status retrieval failed: native connection failed' in out[11]
+    if scenario=='ps_error':assert 'GPU status retrieval failed: native connection failed' in out[10]
+    if scenario=='failed_job':assert 'not running (failed)' in out[10]
 
 
 @pytest.mark.parametrize('content',[None,'invalid mountinfo','1 0 0:1 / / rw - overlay overlay rw\n'])
@@ -647,7 +651,7 @@ def test_host_setup_reuses_the_copied_bundle(tmp_path, monkeypatch):
 @pytest.mark.parametrize('quant,verified', [('Q4_K_M', True), ('Q8_0', True), ('Q8_0', False)])
 def test_check_validates_the_actual_codex_catalog(tmp_path,monkeypatch,capsys,quant,verified):
     c=check_config(tmp_path,monkeypatch)
-    monkeypatch.setattr(b,'runtime_status',lambda _: (True,{'endpoint':'http://gpu:1'},''))
+    monkeypatch.setattr(b,'runtime_observation',lambda _: b.RuntimeObservation(True,{'endpoint':'http://gpu:1'},'',None))
     def api(url,path='/api/tags',data=None,**kw):
         row,show=inventory_model(c['model'])
         if path=='/api/show':

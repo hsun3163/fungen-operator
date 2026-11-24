@@ -75,7 +75,7 @@ Each item reports PASS, FAIL or PENDING with the exact next action. PENDING runt
 
 | Check | Applies to |
 |---|---|
-| Install folder writable and on PATH; operator importable; skill visible to Codex | all |
+| Install folder writable (PATH is an optional note); operator importable; skill visible to Codex | all |
 | Codex present and recent enough | all |
 | Internet reachable (model registry or OpenAI API) | all |
 | Model folder writable; free space and quota enough for the tag; model present | local |
