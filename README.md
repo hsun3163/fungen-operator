@@ -12,6 +12,9 @@ It works through five operator actions, exposed as MCP tools:
 | `control_run` | Kills or moves this run's jobs to another queue, after approval |
 | `inspect_run` | Reads action history, scheduler states, logs and requested files |
 
+`supervise` checks submitted runs hourly, resumes a controller that hit its time limit and stops at
+verified completion ([details](docs/operator_prototype.md#hourly-supervision)).
+
 Each action appends a fixed cell to an operator notebook. The notebook is both the recipe and the history:
 `fungen-operator verify` re-renders every cell and fails if any differs. A scientific parameter changes only after
 an explicit human yes. The reasoning behind this design is in [Agents Toward Determinism](MANIFESTO.md).

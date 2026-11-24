@@ -230,6 +230,57 @@ canonical dry-run output; an explicit nonzero scheduler exit fails the action. L
 bounded recheck remains `unknown`, and the existing submission gate stays closed. Asynchronous
 production submissions retain their existing single-observation behavior.
 
+## Hourly supervision
+
+`supervise` checks assigned runs about once an hour and resumes the one interruption it knows
+how to repair, without a new prompt or a waiting agent. It is a host command, like `execute`
+and `replay`: the human starts the trigger once on the host, and every later pass runs through
+the same harness gates as the MCP tools. No client approval path is needed per pass, so it works
+the same whether the run was started from Codex or Claude Code.
+
+```bash
+python -m fungen_operator supervise --deployment DEPLOYMENT.json --state RUN_ROOT/supervision.json \
+  --assign RUN.ipynb [--max-attempts 3] [--max-walltime-minutes 2880]
+FUNGEN_DEPLOYMENT=DEPLOYMENT.json bsub < supervise.lsf   # once, from the folder with supervision.json
+```
+
+`--assign` records the notebook in the state file (inside the run root) with two limits the human
+authorizes: how many recoveries may run, and the highest controller walltime a recovery may request
+(default: the run's own walltime). Re-assigning re-arms a blocked or finished run.
+
+Each pass takes a lock on the state file; a pass that finds it held exits 4 and changes nothing.
+For every watched notebook it runs `inspect` and then:
+
+| Observed | Decision |
+|---|---|
+| Controller pending or running, or run jobs still active | Leave alone |
+| Active conclusion check reports nothing to do | Completed: record a short report, stop watching |
+| Controller ended; `check_readiness` (conclusion) reports nothing to do | Completed |
+| Controller ended with work remaining; its logs show a time limit (`TERM_RUNLIMIT`, Slurm `DUE TO TIME LIMIT`) | Resume: `check_readiness`, then the same `initiate_run` with walltime doubled up to the authorized ceiling |
+| Permission error, failed workflow step, no decisive error, changed source/runtime, unconfirmed submission receipt, unverified child coverage, failed check, operator refusal, or the recovery limit reached | Blocked: record the reason and next action, stop watching until re-assigned |
+
+A resume keeps the configuration, targets and every other run setting; walltime is outside the run
+fingerprint, so the readiness gate still matches. Snakemake reuses finished outputs. The attempt is
+counted in the state file before any action runs, so a pass killed midway cannot retry without bound.
+Every check and resume is an ordinary notebook cell; interrupted attempts stay under Superseded
+attempts with their logs. The state file holds only assignments, status, blockers, reports and a
+short event record. A controller cannot be duplicated: passes do not overlap, and the harness
+refuses any run action while a controller of the notebook is pending or running.
+
+`supervise --watching` exits 0 while any run is watched and 3 otherwise. A pass exits 0 while runs
+remain watched and 3 when none are. `container/supervise.lsf` uses these: each job first queues the
+next job an hour later (`bsub -b`) if runs are watched and no next job is already pending, then runs
+one pass. The chain ends by itself one hour after the last watched run completes or blocks; a killed
+pass does not break it. Elsewhere, an hourly cron line does the same, minus the automatic stop:
+
+```bash
+0 * * * * cd RUN_ROOT && PYTHON -m fungen_operator supervise --deployment DEPLOYMENT.json --state supervision.json >> supervise.log 2>&1
+```
+
+On Slurm, replace the queueing line with `sbatch --begin=now+1hour` and the pending check with
+`squeue -n fungen-supervise -t PD -h`. Only the LSF script is tested, with a simulated scheduler.
+SGE time limits leave no log line, so they block as unexplained.
+
 ## Executed example and validation
 
 ```bash

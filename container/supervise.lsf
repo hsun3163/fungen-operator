@@ -1,0 +1,33 @@
+#!/bin/bash
+#BSUB -J fungen-supervise
+#BSUB -P acc_LOAD
+#BSUB -q premium
+#BSUB -n 1
+#BSUB -R "rusage[mem=4GB]"
+#BSUB -W 02:00
+#BSUB -oo fungen-supervise.%J.out
+# Hourly supervision of the runs assigned in supervision.json.
+#
+# Copy this file into the run folder that holds supervision.json, set your
+# project and queue above, then submit it once from that folder:
+#   FUNGEN_DEPLOYMENT=/path/to/deployment.json bsub < supervise.lsf
+# FUNGEN_SUPERVISION (default supervision.json) and FUNGEN_PYTHON (default the
+# installed operator Python) are optional. LSF passes them on to later jobs.
+#
+# Each job first queues the next one for an hour later while any run is still
+# watched, so a killed pass cannot end supervision, then runs one pass. With no
+# watched run left the chain ends by itself. To end it early:
+#   bkill -J fungen-supervise
+set -u
+python=${FUNGEN_PYTHON:-$HOME/.fungen/python/bin/python3}
+deployment=${FUNGEN_DEPLOYMENT:?}
+state=${FUNGEN_SUPERVISION:-supervision.json}
+
+if "$python" -m fungen_operator supervise --deployment "$deployment" --state "$state" --watching &&
+   ! bjobs -J fungen-supervise -p -o jobid -noheader 2>/dev/null | grep -q .; then
+    bsub -b "$(date -d '+1 hour' +%H:%M)" < supervise.lsf
+fi
+"$python" -m fungen_operator supervise --deployment "$deployment" --state "$state"
+status=$?
+# 3: nothing left to watch; 4: another pass was already running.
+case $status in 3|4) exit 0 ;; *) exit $status ;; esac

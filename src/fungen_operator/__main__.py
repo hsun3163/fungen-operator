@@ -31,6 +31,15 @@ def main():
     check = subs.add_parser("verify")
     check.add_argument("notebook")
     check.add_argument("--deployment", help="Validate against a deployment file at any path")
+    sup = subs.add_parser("supervise", help="One supervision pass over assigned runs (host command)")
+    sup.add_argument("--deployment", required=True)
+    sup.add_argument("--state", required=True, help="Supervision JSON state file inside the run root")
+    mode = sup.add_mutually_exclusive_group()
+    mode.add_argument("--assign", metavar="NOTEBOOK", help="Watch this notebook's run instead of checking")
+    mode.add_argument("--watching", action="store_true", help="Exit 0 if any run is watched, else 3")
+    sup.add_argument("--max-attempts", type=int, default=3, help="With --assign: recoveries allowed")
+    sup.add_argument("--max-walltime-minutes", type=int,
+                     help="With --assign: highest controller walltime a recovery may request")
     schemas = subs.add_parser("schemas")
     schemas.add_argument("--deployment", help="Include actions from this deployment provider")
     demo = subs.add_parser("demo")
@@ -53,6 +62,21 @@ def main():
         from .demo import run_demo
         print(json.dumps(run_demo(Path(args.root).resolve()), indent=2))
         return
+    if args.command == "supervise":
+        from . import supervise
+        if args.watching:
+            raise SystemExit(0 if supervise.watching(args.state) else supervise.EXIT_NOTHING_WATCHED)
+        deployment = Deployment.load(args.deployment)
+        if args.assign:
+            print(json.dumps(supervise.assign(deployment, args.state, args.assign,
+                                              max_attempts=args.max_attempts,
+                                              max_walltime_minutes=args.max_walltime_minutes), indent=2))
+            return
+        # A pass is itself a host command, like execute and replay.
+        harness = Harness(deployment, Executor(deployment, host_approved=True), str(Path(args.deployment).resolve()))
+        code, decisions = supervise.supervise(harness, args.state)
+        print(json.dumps({"time": supervise.now(), "decisions": decisions}, indent=2))
+        raise SystemExit(code)
     deployment = Deployment.load(args.deployment)
     # These commands must themselves be launched through host approval on Minerva.
     executor = Executor(deployment, host_approved=args.command in {"execute", "replay", "inspect"},
