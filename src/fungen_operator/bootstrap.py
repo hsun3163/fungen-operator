@@ -545,13 +545,9 @@ def render_serve(config, *, announce=False):
     elif sched == 'sge':
         configure_sge(config, announce=announce)
         gpu_request = '' if config['sge_gpu_memory_complex']=='none' else f",{config['sge_gpu_memory_complex']}={gpu_gb}G"
-        # BU SCC runs job GPUs in Exclusive_Process mode unless the job sets COMPUTE_MODE=Default.
-        # Ollama opens the GPU from a bootstrap runner and then a verify runner; in that mode
-        # the second open can fail as "busy". The job still owns its GPU, as with LSF's
-        # mode=shared:j_exclusive=yes.
         directives = (f"#$ -N fungen-serve\n#$ -S /bin/bash\n"+(f"#$ -P {config['account']}\n" if config.get('account') else '')+f"#$ -pe {config['sge_parallel_environment']} {sge_serve_slots(config)}\n"
                       f"#$ -l h_rt=12:00:00,{config['sge_memory_complex']}={config['sge_memory_per_slot_gb']}G,gpu={config['gpus']}{gpu_request}\n"
-                      "#$ -v COMPUTE_MODE=Default\n#$ -j y\n"
+                      "#$ -j y\n"
                       f"#$ -o {shlex.quote(str(root))}/serve.$JOB_ID.log\n")
     if sched == 'sge' and config['sge_gpu_memory_complex'] == 'none':
         directives += '# GPU-memory complex: explicit none; site cannot constrain per-GPU VRAM.\n'
@@ -796,6 +792,8 @@ def serve_ollama(args):
     env['OLLAMA_LLM_LIBRARY'] = ollama_library(library_override(getattr(args, 'ollama_llm_library', None)))
     print('FUNGEN_GPU_LIBRARY '+env['OLLAMA_LLM_LIBRARY'], flush=True)
     env['OLLAMA_DEBUG'] = '2'
+    # The image's llama-server wrapper points Ollama's GPU check at these GPUs.
+    env['FUNGEN_JOB_CUDA_VISIBLE_DEVICES'] = os.environ.get('CUDA_VISIBLE_DEVICES', '')
     runtime_requirements()
     process = subprocess.Popen(['ollama', 'serve'], env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
     discovery = DiscoveryLog(process.stdout)
@@ -1017,8 +1015,7 @@ def serve(config, library=None):
     elif sched in ('slurm','sge'):
         command = ['sbatch','--parsable'] if sched=='slurm' else ['qsub','-terse']
         if sched=='sge' and override:
-            # Repeat the script's COMPUTE_MODE in case the site's qsub lets a command-line -v replace it.
-            command += ['-v', 'OLLAMA_LLM_LIBRARY='+override+',COMPUTE_MODE=Default']
+            command += ['-v', 'OLLAMA_LLM_LIBRARY='+override]
         r=run(command+[script],capture_output=True,text=True,**launch_env)
         match=re.fullmatch(r'(\d+)(?:;[^\s]+)?\s*',r.stdout) if sched=='slurm' else re.fullmatch(r'(\d+)\s*',r.stdout)
     else:

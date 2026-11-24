@@ -1,0 +1,66 @@
+#!/bin/bash
+#BSUB -J fungen-gpu-check
+#BSUB -P acc_LOAD
+#BSUB -q gpuexpress
+#BSUB -n 4
+#BSUB -R "rusage[mem=16000] span[hosts=1]"
+#BSUB -gpu "num=2:mode=exclusive_process"
+#BSUB -W 01:00
+#BSUB -o fungen-gpu-check.%J.log
+# Does serve get the GPU when GPU 0 belongs to someone else?
+#
+# BU SCC jobs see every GPU on the node. Ollama 0.40.6 checks the job's GPU by
+# opening CUDA device 0, which there is often another job's GPU in
+# Exclusive_Process mode. This job recreates that on Minerva: it takes two
+# GPUs in Exclusive_Process, holds the first with a bare CUDA context (standing
+# in for the other job) and starts serve on the second, once per image.
+# Expected: the old image falls back to CPU, the new one gets the GPU.
+#
+# Submit from the repository root:
+#   FUNGEN_OLD_IMAGE=/path/to/1.2.1.sif FUNGEN_NEW_IMAGE=/path/to/1.2.2.sif \
+#   FUNGEN_MODELS=/path/to/models bsub < container/gpu-check.lsf
+# FUNGEN_MODEL defaults to laguna-xs-2.1:q4_K_M.
+set -uo pipefail
+old=${FUNGEN_OLD_IMAGE:?} new=${FUNGEN_NEW_IMAGE:?} models=${FUNGEN_MODELS:?}
+model=${FUNGEN_MODEL:-laguna-xs-2.1:q4_K_M}
+out=${LS_SUBCWD:?}/fungen-gpu-check.${LSB_JOBID:?}
+mkdir -p "$out"
+
+nvidia-smi --query-gpu=index,name,driver_version,compute_mode --format=csv
+echo "LSF CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-}"
+# CUDA device 0 must be this job's first GPU, so the hold touches nobody else.
+if [[ $(nvidia-smi -L | wc -l) != 2 || ${CUDA_VISIBLE_DEVICES:-} != 0,1 ]]; then
+    echo 'Needs a node that shows only this job'"'"'s two GPUs as 0,1. Resubmit.'
+    exit 2
+fi
+held=0 mine=1
+
+# Stand-in for another user's job on GPU 0.
+CUDA_VISIBLE_DEVICES=$held setsid singularity exec --nv "$old" /opt/python/bin/python3 -c '
+import ctypes, time
+cuda = ctypes.CDLL("libcuda.so.1")
+device, context = ctypes.c_int(), ctypes.c_void_p()
+assert cuda.cuInit(0) == 0 and cuda.cuDeviceGet(ctypes.byref(device), 0) == 0
+assert cuda.cuDevicePrimaryCtxRetain(ctypes.byref(context), device) == 0
+print("holding GPU", flush=True); time.sleep(3600)' &
+holder=$!
+sleep 20
+nvidia-smi --query-compute-apps=pid,gpu_bus_id --format=csv
+
+for name in old new; do
+    image=${!name} log=$out/$name.log
+    # Its own process group, so stopping it also stops Ollama and frees the GPU.
+    CUDA_VISIBLE_DEVICES=$mine setsid singularity run --nv --home "$HOME:$HOME" --bind "$models:/models" "$image" \
+        serve --models-dir /models --model "$model" --port 11434 --state "$out/$name.json" --context 32768 > "$log" 2>&1 &
+    serve=$!
+    for _ in $(seq 120); do
+        kill -0 $serve 2>/dev/null || break
+        grep -q '^FUNGEN_READY' "$log" && break
+        sleep 5
+    done
+    kill -- -$serve 2>/dev/null; sleep 10; kill -9 -- -$serve 2>/dev/null; wait $serve 2>/dev/null
+    echo "=== $name image: $image (serve on CUDA_VISIBLE_DEVICES=$mine)"
+    grep -E 'FUNGEN_GPU_LIBRARY|verifying if device is supported|cudaMemGetInfo|busy or unavailable|filtering device|inference compute|refusing|FUNGEN_READY' "$log"
+    if grep -q '^FUNGEN_READY' "$log"; then echo "RESULT $name: GPU"; else echo "RESULT $name: no GPU (full log: $log)"; fi
+done
+kill -- -$holder 2>/dev/null

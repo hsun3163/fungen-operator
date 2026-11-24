@@ -53,6 +53,8 @@ exclusive-process serve scenario uses `FUNGEN_SCENARIO=gpu-serve`,
 `bsub -gpu "num=1:mode=exclusive_process" < container/acceptance.lsf` with a
 fresh evidence root and the shared staged XS model. The driver records the GPU
 mode, NVIDIA driver, selected CUDA library, offloaded layers and generation.
+`gpu-check.lsf` compares two images on a node where CUDA device 0 is another
+job's GPU in Exclusive_Process mode, as on BU SCC; its header gives the command.
 The full operator suite runs on the host through `.venv/bin/python -m pytest -q tests`, with htslib (`bgzip`, `tabix`), SoS/sos-pbs and bundled host Codex 0.155.1. See the root README's host test environment. Missing required tools fail loudly. Tests are excluded from the image context; image validation covers installer copying and model serving/downloads. Native logs,
 job IDs, exact scenario outcomes, image hash and remaining limitations belong in [VALIDATION.md](https://github.com/hsun3163/fungen-operator-archive/blob/main/container/VALIDATION.md).
 

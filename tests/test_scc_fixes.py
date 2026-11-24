@@ -40,6 +40,7 @@ def test_serve_pins_one_library_and_preserves_allocated_gpu(tmp_path, monkeypatc
     env = launch.call_args.kwargs['env']
     assert env['OLLAMA_LLM_LIBRARY'] == expected
     assert env['CUDA_VISIBLE_DEVICES'] == 'GPU-allocated'
+    assert env['FUNGEN_JOB_CUDA_VISIBLE_DEVICES'] == 'GPU-allocated'
     assert json.loads((tmp_path/'state.json').read_text())['ready']
 
 
@@ -123,7 +124,7 @@ def test_host_serve_flag_precedes_environment_and_reaches_sge(tmp_path, monkeypa
     monkeypatch.setattr(b, 'run', run)
     monkeypatch.setattr(b, 'configure_sge', lambda *a, **k: None)
     b.serve(c, 'cuda_v13')
-    assert run.call_args.args[0] == ['qsub', '-terse', '-v', 'OLLAMA_LLM_LIBRARY=cuda_v13,COMPUTE_MODE=Default', tmp_path/'serve.sge.sh']
+    assert run.call_args.args[0] == ['qsub', '-terse', '-v', 'OLLAMA_LLM_LIBRARY=cuda_v13', tmp_path/'serve.sge.sh']
     assert run.call_args.kwargs['env']['OLLAMA_LLM_LIBRARY'] == 'cuda_v13'
     assert c['ollama_llm_library'] == 'cuda_v12'
 
