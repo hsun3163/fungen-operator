@@ -43,15 +43,26 @@ def run(tmp_path):
 
 
 def cells(notebook, action):
-    return [c for c in Notebook(notebook).read().cells
-            if c.metadata.get("fungen", {}).get("action") == action]
+    """Cells of one action in execution order (the notebook lists active cells first)."""
+    return sorted((c for c in Notebook(notebook).read().cells
+                   if c.metadata.get("fungen", {}).get("action") == action),
+                  key=lambda c: c.metadata.fungen.sequence)
 
 
-def set_job(deployment, job, status):
+def set_job(deployment, job, status, notebook=None):
+    """Make the simulated controller live. The fixture's bsub is synchronous, so
+    a live controller also needs the receipt a real bsub records while pending."""
     path = Path(deployment.conda_env, "scheduler.json")
     jobs = json.loads(path.read_text())
     jobs[job]["STAT"] = status
     path.write_text(json.dumps(jobs))
+    if notebook:
+        import nbformat
+        nb = nbformat.read(notebook, as_version=4)
+        for cell in nb.cells:
+            if cell.metadata.get("fungen", {}).get("result", {}).get("job_id") == job:
+                cell.metadata.fungen.result.scheduler.status = "PEND"
+        nbformat.write(nb, notebook)
 
 
 def test_time_limit_is_resumed_without_redoing_work_then_completion_stops(run):
@@ -125,7 +136,7 @@ def test_pass_killed_mid_recovery_restores_state_and_stays_bounded(run, monkeypa
 def test_healthy_controller_is_left_alone_and_no_second_controller_starts(run):
     harness, deployment, paths, state, submit = run
     job = submit()["job_id"]
-    set_job(deployment, job, "RUN")
+    set_job(deployment, job, "RUN", paths["notebook"])
     supervise.assign(deployment, state, paths["notebook"])
     before = Notebook(paths["notebook"]).read()
     for _ in range(2):
