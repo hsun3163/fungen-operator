@@ -16,16 +16,19 @@
 #
 # Each job first queues the next one for an hour later while any run is still
 # watched, so a killed pass cannot end supervision, then runs one pass. With no
-# watched run left the chain ends by itself. To end it early:
-#   bkill -J fungen-supervise
+# watched run left the chain ends by itself. Later jobs are named for the
+# folder, so chains in different run folders do not see each other. To end
+# this folder's chain early, from that folder:
+#   bkill -J fungen-supervise-$(pwd | cksum | cut -d' ' -f1)
 set -u
 python=${FUNGEN_PYTHON:-$HOME/.fungen/python/bin/python3}
 deployment=${FUNGEN_DEPLOYMENT:?}
 state=${FUNGEN_SUPERVISION:-supervision.json}
+name=fungen-supervise-$(pwd | cksum | cut -d' ' -f1)
 
 if "$python" -m fungen_operator supervise --deployment "$deployment" --state "$state" --watching &&
-   ! bjobs -J fungen-supervise -p -o jobid -noheader 2>/dev/null | grep -q .; then
-    bsub -b "$(date -d '+1 hour' +%H:%M)" < supervise.lsf
+   ! bjobs -J "$name" -p -o jobid -noheader 2>/dev/null | grep -q .; then
+    bsub -b "$(date -d '+1 hour' +%H:%M)" -J "$name" < supervise.lsf
 fi
 "$python" -m fungen_operator supervise --deployment "$deployment" --state "$state"
 status=$?

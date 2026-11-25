@@ -248,3 +248,33 @@ def test_trigger_queues_the_next_hourly_pass(run, tmp_path, watched, pending, qu
         assert (lsf / "bsub.args").read_text().split()[0] == "-b"
         assert (lsf / "bsub.args").read_text().split()[1] in {later, (datetime.now() + timedelta(hours=1)).strftime("%H:%M")}
         assert (lsf / "bsub.stdin").read_text() == (ROOT / "container/supervise.lsf").read_text()
+
+
+@pytest.mark.parametrize("text", [
+    "Error in rule artifact:\nTERM_RUNLIMIT: job killed after reaching LSF run time limit.",
+    "TERM_RUNLIMIT: job killed after reaching LSF run time limit.\nError in rule artifact:"])
+def test_failed_rule_is_not_resumed_as_a_time_limit(text):
+    assert supervise.diagnose(text)[0] == "workflow_error"
+
+
+def test_scheduler_outage_is_retried_before_blocking(run, monkeypatch):
+    harness, deployment, paths, state, submit = run
+    submit()
+    supervise.assign(deployment, state, paths["notebook"])
+    def outage(request):
+        raise RuntimeError("LSF inspection failed for job 7: mbatchd not responding")
+    monkeypatch.setattr(harness, "inspect", outage)
+    for _ in range(supervise.UNKNOWN_LIMIT - 1):
+        assert supervise.supervise(harness, state)[1][paths["notebook"]]["decision"] == "left_alone"
+    decision = supervise.supervise(harness, state)[1][paths["notebook"]]
+    assert decision["decision"] == "blocked" and decision["kind"] == "scheduler_unknown"
+
+
+def test_unexpected_error_blocks_one_run_without_ending_the_pass(run, monkeypatch):
+    harness, deployment, paths, state, submit = run
+    submit()
+    supervise.assign(deployment, state, paths["notebook"])
+    monkeypatch.setattr(supervise, "check", lambda *a: (_ for _ in ()).throw(KeyError("job_name")))
+    code, decisions = supervise.supervise(harness, state)
+    assert decisions[paths["notebook"]]["decision"] == "blocked"
+    assert oct(Path(state).stat().st_mode & 0o777) == "0o644"

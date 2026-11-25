@@ -249,14 +249,15 @@ authorizes: how many recoveries may run, and the highest controller walltime a r
 (default: the run's own walltime). Re-assigning re-arms a blocked or finished run.
 
 Each pass takes a lock on the state file; a pass that finds it held exits 4 and changes nothing.
-For every watched notebook it runs `inspect` and then:
+For every watched notebook it runs `inspect` (a scheduler that does not answer is retried on the next
+pass, up to three times, before the run blocks) and then:
 
 | Observed | Decision |
 |---|---|
 | Controller pending or running, or run jobs still active | Leave alone |
 | Active conclusion check reports nothing to do | Completed: record a short report, stop watching |
 | Controller ended; `check_readiness` (conclusion) reports nothing to do | Completed |
-| Controller ended with work remaining; its logs show a time limit (`TERM_RUNLIMIT`, Slurm `DUE TO TIME LIMIT`) | Resume: `check_readiness`, then the same `initiate_run` with walltime doubled up to the authorized ceiling |
+| Controller ended with work remaining; its logs show a time limit (`TERM_RUNLIMIT`, Slurm `DUE TO TIME LIMIT`) and no failed rule (`Error in rule`) | Resume: `check_readiness`, then the same `initiate_run` with walltime doubled up to the authorized ceiling |
 | Permission error, failed workflow step, no decisive error, changed source/runtime, unconfirmed submission receipt, unverified child coverage, failed check, operator refusal, or the recovery limit reached | Blocked: record the reason and next action, stop watching until re-assigned |
 
 A resume keeps the configuration, targets and every other run setting; walltime is outside the run
@@ -269,8 +270,8 @@ refuses any run action while a controller of the notebook is pending or running.
 
 `supervise --watching` exits 0 while any run is watched and 3 otherwise. A pass exits 0 while runs
 remain watched and 3 when none are. `container/supervise.lsf` uses these: each job first queues the
-next job an hour later (`bsub -b`) if runs are watched and no next job is already pending, then runs
-one pass. The chain ends by itself one hour after the last watched run completes or blocks; a killed
+next job an hour later (`bsub -b`) if runs are watched and no next job for this folder is already
+pending, then runs one pass. Each folder's jobs are named `fungen-supervise-` plus a checksum of the folder path. The chain ends by itself one hour after the last watched run completes or blocks; a killed
 pass does not break it. Elsewhere, an hourly cron line does the same, minus the automatic stop:
 
 ```bash
@@ -278,7 +279,7 @@ pass does not break it. Elsewhere, an hourly cron line does the same, minus the 
 ```
 
 On Slurm, replace the queueing line with `sbatch --begin=now+1hour` and the pending check with
-`squeue -n fungen-supervise -t PD -h`. Only the LSF script is tested, with a simulated scheduler.
+`squeue -n "$name" -t PD -h`. Only the LSF script is tested, with a simulated scheduler.
 SGE time limits leave no log line, so they block as unexplained.
 
 ## Executed example and validation

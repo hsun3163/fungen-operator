@@ -34,6 +34,7 @@ ENDED = {"DONE", "EXIT"}
 UNKNOWN_LIMIT = 3
 EVENT_LIMIT = 200
 
+RULE_FAILURE = re.compile(r"Error in rule")
 TIME_LIMIT = re.compile(r"TERM_RUNLIMIT|DUE TO TIME LIMIT")
 PERMISSION = re.compile(r"permission denied|PermissionError|not authorized", re.I)
 FAILURE = re.compile(r"Error in rule|Traceback|Exception|Error:|error:")
@@ -86,6 +87,7 @@ def load(state_path):
 def save(state_path, state):
     path = Path(state_path)
     fd, temporary = tempfile.mkstemp(dir=path.parent, prefix=".supervision-")
+    os.chmod(temporary, path.stat().st_mode & 0o777 if path.exists() else 0o644)  # mkstemp makes 0600
     with os.fdopen(fd, "w") as stream:
         json.dump(state, stream, indent=2, sort_keys=True)
         stream.write("\n")
@@ -137,7 +139,7 @@ def supervise(harness, state_path):
                 decision = check(harness, notebook, run, progress)
             except PermissionError as exc:
                 decision = blocked("permission", str(exc))
-            except (ValueError, OSError, RuntimeError) as exc:
+            except Exception as exc:  # One run's failure must not stop the pass for the others.
                 live = re.match(r"controller (\S+) is (\w+); inspect before changing the run", str(exc))
                 decision = ({"decision": "left_alone", "reason": str(exc)} if live and live[2] in RUNNING
                             else blocked("refused", str(exc)))
@@ -164,7 +166,9 @@ def _plain(node):
 def diagnose(text):
     """Return the class and line of the decisive native error in controller logs."""
     lines = text.splitlines()
-    for kind, pattern in (("time_limit", TIME_LIMIT), ("permission", PERMISSION), ("workflow_error", FAILURE)):
+    # A failed rule comes first: more controller walltime does not repair it.
+    for kind, pattern in (("workflow_error", RULE_FAILURE), ("time_limit", TIME_LIMIT),
+                          ("permission", PERMISSION), ("workflow_error", FAILURE)):
         line = next((line.strip() for line in lines if pattern.search(line)), None)
         if line:
             return kind, line[:2000]
@@ -182,7 +186,13 @@ def check(harness, notebook, run, progress):
         return blocked("not_submitted", "The notebook has no initiate_run.")
     latest = max(submissions, key=lambda c: c.metadata.fungen.sequence)
 
-    observed = harness.inspect(InspectRun(notebook=notebook))
+    try:
+        observed = harness.inspect(InspectRun(notebook=notebook))
+    except RuntimeError as exc:  # The scheduler did not answer; count it like an unknown state.
+        run["unknown_checks"] = run.get("unknown_checks", 0) + 1
+        if run["unknown_checks"] >= UNKNOWN_LIMIT:
+            return blocked("scheduler_unknown", f"inspection failed for {run['unknown_checks']} checks: {exc}")
+        return {"decision": "left_alone", "reason": f"inspection failed; checking again next pass: {exc}"}
     entry = next(e for e in observed["cells"] if e["cell_id"] == latest.id)
     job = entry["result"].get("job_id")
     if entry["status"] in {"prepared", "host_approval_required", "executing", "unknown"}:
@@ -223,7 +233,7 @@ def check(harness, notebook, run, progress):
     if latest.metadata.fungen.identity != harness.deployment.identity():
         return blocked("source_changed", f"Implementation identity differs from submission cell {latest.id}.")
     logs = entry.get("logs", {})
-    text = "\n".join([*(str(v) for v in logs.values()), str(observed["jobs"].get(str(job), {}).get("exit_reason", ""))])
+    text = "\n".join([*(str(v) for v in logs.values()), str(entry.get("scheduler", {}).get("exit_reason", ""))])
     kind, line = diagnose(text)
     if kind != "time_limit":
         return blocked(kind, line or f"controller {job} ended {state} with work remaining and no decisive error in its logs")
