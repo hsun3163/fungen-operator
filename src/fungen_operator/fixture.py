@@ -103,7 +103,9 @@ def main(program):
         target.write_text(signature)
         print(f"SYNTHETIC produced {target}")
         if interrupt.exists():
+            # The file may hold a native-style reason, such as an LSF TERM_RUNLIMIT line.
+            reason = interrupt.read_text().strip()
             interrupt.unlink()
-            print("SYNTHETIC controller interruption after first output", file=sys.stderr)
+            print(reason or "SYNTHETIC controller interruption after first output", file=sys.stderr)
             sys.exit(17)
     print("SYNTHETIC workflow finished")

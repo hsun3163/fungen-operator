@@ -33,6 +33,15 @@ invoke scheduler clients. Never add a persistent interpreter/script rule. If rev
 the command or escalation is unavailable, report an approval-path failure and stop that action.
 The host entrypoint validates the saved cell and current state again before executing it.
 
+After `initiate_run` returns a receipt, offer hourly supervision. With the user's yes, assign the
+notebook and ask the user to start the trigger once on the host (both are host commands):
+`python -m fungen_operator supervise --deployment D --state RUN_ROOT/supervision.json --assign NOTEBOOK`,
+then, after copying `container/supervise.lsf` into RUN_ROOT and setting its `#BSUB -P`/`-q` lines,
+`FUNGEN_DEPLOYMENT=D bsub < supervise.lsf` from that folder. Supervision resumes only
+controller time limits, within the walltime ceiling and attempt count given at assignment;
+without `--max-walltime-minutes` a resume keeps the old walltime. Read
+`supervision.json` for its blockers; each names its reason and next action. Re-assign after resolving one.
+
 Inspect operational failures and change only exposed configuration/resources through these
 tools. A source defect or an unsupported recovery operation is a developer handoff. The current
 catalog contains no source-edit, harmonization, unlock, cancellation, force, or composition tool.

@@ -11,6 +11,23 @@ Commits, tags and releases below are in
 [fungen-operator-archive](https://github.com/hsun3163/fungen-operator-archive),
 the history of this repository before 2026-11-22.
 
+## [Unreleased]
+
+### Added
+
+- Hourly supervision of submitted runs: `python -m fungen_operator supervise`.
+  `--assign NOTEBOOK` records a run in a JSON state file with the recovery
+  count and walltime ceiling the user allows. Each pass inspects every watched
+  run, leaves pending and running work alone, records completion only from a
+  conclusion `check_readiness` that reports nothing to do, and resumes a
+  controller stopped by its time limit through `check_readiness` and the same
+  `initiate_run`, reusing finished work. Anything else stops with a reason and
+  next action. Passes never overlap, and attempts are counted before acting.
+- `container/supervise.lsf`: an LSF job that runs one pass and queues the next
+  an hour later while runs are watched, then stops by itself.
+- The synthetic fixture can end an interrupted controller with a given native
+  message, such as an LSF `TERM_RUNLIMIT` line.
+
 ## [1.2.2] - Unreleased
 
 Source changes for the 1.2.1 BU SCC report (scc-219, A100 80GB,
