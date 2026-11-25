@@ -24,9 +24,11 @@ the history of this repository before 2026-11-22.
 
 ### Fixed
 
-- Software setup no longer fails when a channel stops serving a locked package. It
-  pins that package to the newest version the channel serves, solves the environment
-  again, and records the new lock and the changed lines in the setup root and log.
+- Software setup no longer fails when a channel stops serving a locked package. When
+  an install from the lock fails, setup checks which locked packages are gone, pins
+  each to its old version or newer, solves the environment again in a scratch prefix,
+  installs from that solution, and records the new lock and the changed lines in the
+  setup root and log. A normal install makes no extra network requests.
 - `python -m fungen_operator.lock` writes the `@EXPLICIT` header itself. Mamba 2
   (the pinned Miniforge 26.7.2-0) lists explicit URLs without it.
 

@@ -1,5 +1,8 @@
 """The guided notebook records consent boundaries and native execution profiles."""
 from pathlib import Path
+import io
+import shutil
+import subprocess
 import json
 import nbformat
 import pytest
@@ -135,40 +138,69 @@ def test_software_install_uses_frozen_lock_and_detects_lock_changes(tmp_path,mon
     assert commands[0][1]=='install' and commands[0][-1]==str(installed)
 
 
-def test_unserved_pin_is_solved_again_with_the_newest_version_and_recorded(tmp_path,monkeypatch):
+def unserved_lock(tmp_path,monkeypatch):
     resources=tmp_path/'resources';resources.mkdir();monkeypatch.setattr(o,'RESOURCES',resources)
     (resources/'xqtl-mamba.yaml').write_text(yaml.safe_dump({'channels':['dnachun'],'dependencies':['r-pecotmr=0.9.5','r-susier=0.16.6']}))
     gone='https://conda.anaconda.org/dnachun/linux-64/r-pecotmr-0.9.5-r45h0489aeb_0.conda'
     kept='https://conda.anaconda.org/dnachun/linux-64/r-susier-0.16.6-h0489aeb_0.conda#s'
+    newer='https://conda.anaconda.org/dnachun/linux-64/r-pecotmr-0.9.6-r45h0489aeb_0.conda#new'
     source=resources/'xqtl-linux-64.lock';source.write_text('@EXPLICIT\n'+gone+'#old\n'+kept+'\n')
     monkeypatch.setattr(o,'served',lambda url:url!=gone)
-    monkeypatch.setattr(o,'repodata',lambda subdir:{
-        'r-pecotmr-0.9.4-r45h0489aeb_0.conda':{'name':'r-pecotmr','version':'0.9.4','timestamp':1},
-        'r-pecotmr-0.9.6-r45h0489aeb_0.conda':{'name':'r-pecotmr','version':'0.9.6','timestamp':3},
-        'r-susier-0.16.6-h0489aeb_0.conda':{'name':'r-susier','version':'0.16.6','timestamp':2}})
     solves=[]
-    def generate(mamba,prefix,output,spec,env=None):
-        solves.append(yaml.safe_load(Path(spec).read_text())['dependencies'])
-        Path(output).write_text('@EXPLICIT\nhttps://conda.anaconda.org/dnachun/linux-64/r-pecotmr-0.9.6-r45h0489aeb_0.conda#new\n'+kept+'\n')
+    def generate(mamba,prefix,output,spec,env=None,log=None):
+        solves.append((Path(prefix).name,yaml.safe_load(Path(spec).read_text())['dependencies']))
+        Path(output).write_text('@EXPLICIT\n'+newer+'\n'+kept+'\n')
     from fungen_operator import lock
     monkeypatch.setattr(lock,'generate',generate)
-    target=tmp_path/'root/xqtl-linux-64.lock';target.parent.mkdir()
-    removed,added=o.available_lock(source,target,'mamba',tmp_path/'software',{})
-    assert solves==[['r-pecotmr=0.9.6','r-susier=0.16.6']]
-    assert removed==[gone+'#old'] and added==['https://conda.anaconda.org/dnachun/linux-64/r-pecotmr-0.9.6-r45h0489aeb_0.conda#new']
-    assert '/r-pecotmr-0.9.6-' in target.read_text() and source.read_text().count('0.9.5')==1
-    # A rerun reuses the recorded solve instead of solving again.
-    assert o.available_lock(source,target,'mamba',tmp_path/'software',{})==[] and len(solves)==1
-    # A new release lock is checked again.
-    source.write_text(source.read_text()+'# new release\n')
-    o.available_lock(source,target,'mamba',tmp_path/'software',{});assert len(solves)==2
+    return source,gone,newer,solves
 
 
-def test_unserved_pin_with_no_replacement_names_the_fix(tmp_path,monkeypatch):
-    source=tmp_path/'pinned.lock';source.write_text('@EXPLICIT\nhttps://example.org/c/linux-64/gone-1.0-h_0.conda#x\n')
-    monkeypatch.setattr(o,'served',lambda url:False);monkeypatch.setattr(o,'repodata',lambda subdir:{})
-    with pytest.raises(ValueError,match='has no gone; choose a replacement'):
-        o.available_lock(source,tmp_path/'out.lock','mamba',tmp_path/'software',{})
+def test_unserved_pin_is_solved_again_in_scratch_and_recorded(tmp_path,monkeypatch):
+    source,gone,newer,solves=unserved_lock(tmp_path,monkeypatch)
+    target=tmp_path/'root/xqtl-linux-64.lock';target.parent.mkdir();shutil.copyfile(source,target)
+    log=io.StringIO()
+    assert o.available_lock(source,target,'mamba',tmp_path/'lock-solve',{},log)
+    assert solves==[('lock-solve',['r-susier=0.16.6','r-pecotmr>=0.9.5'])]
+    assert newer in target.read_text() and source.read_text().count('0.9.5')==1
+    assert '- '+gone+'#old' in log.getvalue() and '+ '+newer in log.getvalue()
+    # The root now holds its own solve of this release lock; a new release lock does not match it.
+    assert o.solved_here(source,target)
+    source.write_text(source.read_text()+'# new release\n');assert not o.solved_here(source,target)
+
+
+def test_install_failure_with_every_package_served_is_not_repaired(tmp_path,monkeypatch):
+    source,gone,newer,solves=unserved_lock(tmp_path,monkeypatch)
+    monkeypatch.setattr(o,'served',lambda url:True)
+    assert not o.available_lock(source,source,'mamba',tmp_path/'lock-solve',{},io.StringIO()) and solves==[]
+
+
+def test_failed_resolve_names_the_fix(tmp_path,monkeypatch):
+    source,gone,newer,solves=unserved_lock(tmp_path,monkeypatch)
+    from fungen_operator import lock
+    def fail(*a,**kw):raise subprocess.CalledProcessError(1,'mamba')
+    monkeypatch.setattr(lock,'generate',fail)
+    with pytest.raises(ValueError,match='r-pecotmr-0.9.5-r45h0489aeb_0.conda.*Choose replacements'):
+        o.available_lock(source,source,'mamba',tmp_path/'lock-solve',{},io.StringIO())
+
+
+def test_software_step_solves_again_only_after_a_failed_install(tmp_path,monkeypatch):
+    source,gone,newer,solves=unserved_lock(tmp_path,monkeypatch)
+    prefix=tmp_path/'software'
+    (tmp_path/'setup.json').write_text(json.dumps({'manager':'mamba','mamba':'/m/mamba','software':str(prefix)}))
+    (o.RESOURCES/'sos-pulse.patch').write_text('patch')
+    monkeypatch.setattr(o,'ask',lambda *a:'yes');monkeypatch.setattr(o,'check_step',lambda *a:None)
+    monkeypatch.setattr(o,'patch_sos',lambda c:None)
+    installs=[]
+    def run(cmd,**kw):
+        cmd=[str(x) for x in cmd]
+        if '--file' in cmd:
+            installs.append(Path(cmd[-1]).read_text())
+            if gone in installs[-1]:raise subprocess.CalledProcessError(1,cmd)
+    monkeypatch.setattr(o,'run',run)
+    o.perform(tmp_path,'software')
+    assert len(installs)==2 and newer in installs[1] and len(solves)==1
+    # A rerun keeps the root's solve and installs nothing.
+    installs.clear();o.perform(tmp_path,'software');assert installs==[] and len(solves)==1
 
 
 def test_only_a_missing_package_counts_as_unserved(monkeypatch):
