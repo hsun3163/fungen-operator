@@ -971,9 +971,10 @@ def runtime_observation(config):
         return RuntimeObservation(None,{},'Recorded launch is pending readiness.' if saved else 'Server has not been started.',launch)
     try:
         info=json.loads(state_path.read_text());model=config.get('serve_model',config['model'])
-        if info['model']!=model or not info['ready']:raise ValueError('server state does not match selected model/readiness')
         if saved and (state_path.stat().st_mtime_ns<request.stat().st_mtime_ns or str(info.get('job_id',''))!=str(saved.get('job_id',''))):
             return RuntimeObservation(None,{},'Current launch has not recorded readiness; previous server state is stale.',launch)
+        if info.get('ready') is not True:raise ValueError(info.get('error') or 'server state does not record readiness')
+        if info.get('model')!=model:raise ValueError('server state does not match selected model')
         models=api(info['endpoint'])['models']
         if not any(m['name']==model for m in models):raise ValueError('selected model is absent from server')
         return RuntimeObservation(True,info,'',launch)

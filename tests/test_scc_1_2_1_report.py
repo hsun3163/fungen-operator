@@ -130,3 +130,11 @@ def test_refusal_from_an_earlier_job_is_not_reported(tmp_path, monkeypatch):
     (tmp_path/'server-request.json').write_text(json.dumps(dict(scheduler='sge', job_id='5')))
     monkeypatch.setattr(cluster, 'job_status', lambda *a: 'failed')
     assert 'old refusal' not in b.runtime_observation(config(tmp_path)).detail
+
+
+def test_new_launch_after_a_refusal_is_pending(tmp_path, monkeypatch):
+    (tmp_path/'server.json').write_text(json.dumps(dict(ready=False, error='old refusal', job_id='5')))
+    (tmp_path/'server-request.json').write_text(json.dumps(dict(scheduler='sge', job_id='6')))
+    monkeypatch.setattr(cluster, 'job_status', lambda *a: 'running')
+    observed = b.runtime_observation(config(tmp_path))
+    assert observed.ready is None and 'stale' in observed.detail
