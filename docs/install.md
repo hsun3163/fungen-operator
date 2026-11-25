@@ -260,8 +260,15 @@ runtime contract.
 Setup registers the **Fungen Operator** Jupyter kernel using the installed host
 Python, so these cells import the operator even when Jupyter itself uses another environment.
 Resume with `--step workflow|software|reference|scheduler|fixture|test|handoff`.
-Mamba is the required route, using hash-pinned Miniforge 26.7.2-0 and the bundled version-pinned environment with its 800-package hash lock.
-The runtime dependency susieR is pinned to 0.16.6 for pecotmr 0.9.5.
+Mamba is the required route, using hash-pinned Miniforge 26.7.2-0 and the bundled version-pinned environment with its 807-package hash lock.
+The runtime dependency susieR is pinned to 0.16.6 for pecotmr 0.9.6.
+Software setup copies the lock to `xqtl-linux-64.lock` in the setup root and installs from that copy.
+Before installing, it checks that the channels still serve every locked package. If one is gone
+(as pecotmr 0.9.5 was from `dnachun`), setup pins that package to the newest version its
+channel serves, solves the environment again into the software folder, and writes the solution
+to the root's `xqtl-linux-64.lock`. The removed and added lock lines are written to
+`logs/software.log`, and the pins used for that solve to `xqtl-linux-64.yaml` in the root.
+Later reruns reuse that record until a new release lock arrives. Any other download error stops setup.
 The existing LSF software installer consumes that explicit lock. Regenerate it only
 when package pins change, using the YAML's channels in their declared order even
 when site/user condarc files configure strict channel priority:

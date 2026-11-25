@@ -32,3 +32,11 @@ def test_failed_solve_preserves_previous_lock(tmp_path,monkeypatch):
     with pytest.raises(lock.subprocess.CalledProcessError):
         lock.generate('mamba',tmp_path/'prefix',output)
     assert output.read_text()=='reviewed lock'
+
+
+def test_mamba2_list_without_header_still_writes_an_explicit_lock(tmp_path, monkeypatch):
+    spec=tmp_path/'spec.yaml';spec.write_text(yaml.safe_dump(dict(channels=['c'],dependencies=['p=1'])))
+    listing='List of packages in environment: "/x"\n\nhttps://example.org/p-1-h_0.conda#abc\n'
+    monkeypatch.setattr(lock.subprocess,'run',lambda cmd,**kw:SimpleNamespace(stdout=listing))
+    output=tmp_path/'out.lock';lock.generate('mamba',tmp_path/'prefix',output,spec)
+    assert output.read_text()=='@EXPLICIT\nhttps://example.org/p-1-h_0.conda#abc\n'

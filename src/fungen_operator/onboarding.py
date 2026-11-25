@@ -11,7 +11,9 @@ import shlex
 import shutil
 import subprocess
 import sys
+import urllib.error
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 import nbformat
 import yaml
 from .bootstrap import ask, read_config, run, scheduler
@@ -61,6 +63,54 @@ def patch_sos(c):
         return
     run(['git', '-C', directory, 'apply', '--check', patch])
     run(['git', '-C', directory, 'apply', patch])
+
+
+def served(url):
+    """True while the channel still serves this exact package; only a 404 means it is gone."""
+    try:
+        with urllib.request.urlopen(urllib.request.Request(url,method='HEAD'),timeout=60):return True
+    except urllib.error.HTTPError as exc:
+        if exc.code==404:return False
+        raise
+
+
+def repodata(subdir):
+    with urllib.request.urlopen(subdir+'/repodata.json',timeout=300) as response:
+        data=json.load(response)
+    return {**data.get('packages',{}),**data.get('packages.conda',{})}
+
+
+def available_lock(source,target,mamba,prefix,env):
+    """Write the lock to install into target. Normally it is the pinned release lock.
+    When the channel no longer serves a pinned package, pin that package to the
+    channel's newest version, solve the environment again
+    into prefix, and write that solution as the lock. Returns the lock lines that
+    changed, so the change is recorded in the setup log and the root's lock."""
+    from .lock import generate
+    lines=Path(source).read_text().splitlines()
+    urls=[line.split('#')[0] for line in lines if line.startswith('https://')]
+    with ThreadPoolExecutor(16) as pool:gone=[url for url,ok in zip(urls,pool.map(served,urls)) if not ok]
+    if not gone:
+        Path(target).write_text(Path(source).read_text());return []
+    solved=Path(target).with_suffix('.yaml');pinned=hashlib.sha256(Path(source).read_bytes()).hexdigest()
+    if Path(target).is_file() and solved.is_file() and yaml.safe_load(solved.read_text()).get('solved_from_lock_sha256')==pinned:
+        return []  # this release lock was already solved again here; reuse that record
+    spec=yaml.safe_load((RESOURCES/'xqtl-mamba.yaml').read_text())
+    spec['solved_from_lock_sha256']=pinned
+    for url in gone:
+        subdir,filename=url.rsplit('/',1)
+        name=filename.rsplit('-',2)[0]
+        records=[(r.get('timestamp',0),r['version']) for r in repodata(subdir).values() if r['name']==name]
+        if not records:
+            raise ValueError(f'{filename} is no longer served and {subdir} has no {name}; choose a replacement in xqtl-mamba.yaml and regenerate the lock with python -m fungen_operator.lock.')
+        pin=name+'='+max(records)[1]
+        spec['dependencies']=[pin if d.split('=')[0]==name else d for d in spec['dependencies']]
+        if pin not in spec['dependencies']:spec['dependencies'].append(pin)
+    generate_spec=solved.with_name(solved.name+'.part');generate_spec.write_text(yaml.safe_dump(spec,sort_keys=False))
+    generate(mamba,prefix,target,generate_spec,env=env)
+    generate_spec.replace(solved)
+    old,new=set(lines),set(Path(target).read_text().splitlines())
+    return sorted(old-new),sorted(new-old)
 
 
 def settings(root):
@@ -257,12 +307,20 @@ def perform(root,step):
                         c['mamba']=acquire_mamba(Path(c['software']).parent)
                         (root/'setup.json').write_text(json.dumps(c,indent=2)+'\n')
                     spec=RESOURCES/'xqtl-mamba.yaml'
-                    lock=RESOURCES/'xqtl-linux-64.lock'
+                    # The installed lock is the release pin, kept in the setup root as the record.
+                    lock=root/'xqtl-linux-64.lock'
+                    env=dict(os.environ,CONDA_PKGS_DIRS=str(Path(c['software']).parent/'package-cache'),MAMBA_DOWNLOAD_THREADS='2',MAMBA_EXTRACT_THREADS='2')
+                    changed=available_lock(RESOURCES/'xqtl-linux-64.lock',lock,c['mamba'],c['software'],env)
+                    if changed:
+                        removed,added=changed
+                        print('Pinned packages no longer served; solved again with the newest versions and wrote '+str(lock)+'\n'
+                              +''.join('- '+x+'\n' for x in removed)+''.join('+ '+x+'\n' for x in added),file=stream,flush=True)
+                        print(f'Some pinned packages are no longer served. The environment was solved again; {len(added)} lock lines changed, recorded in {lock} and {log}.',flush=True)
                     stamp=root/'software-spec.sha256'
                     identity=hashlib.sha256(spec.read_bytes()+b'\0'+lock.read_bytes()+b'\0'+(RESOURCES/'sos-pulse.patch').read_bytes()).hexdigest()
                     if not stamp.exists() or stamp.read_text()!=identity:
                         operation='install' if (Path(c['software'])/'conda-meta/history').exists() else 'create'
-                        command([c['mamba'],operation,'-y','-p',c['software'],'--file',lock],env=dict(os.environ,CONDA_PKGS_DIRS=str(Path(c['software']).parent/'package-cache'),MAMBA_DOWNLOAD_THREADS='2',MAMBA_EXTRACT_THREADS='2'))
+                        command([c['mamba'],operation,'-y','-p',c['software'],'--file',lock],env=env)
                     patch_sos(c)
                     (root/'software.applied.patch').write_bytes((RESOURCES/'sos-pulse.patch').read_bytes())
                     stamp.write_text(identity)
