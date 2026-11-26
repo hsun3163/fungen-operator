@@ -147,7 +147,7 @@ def gpu_serve_smoke(root, image, staged, expected_mode):
                 time.sleep(1)
             ready = json.loads(state.read_text())
             if ready.get('ready') is not True or ready.get('model') != model:
-                raise ValueError('Image reported invalid GPU readiness')
+                raise ValueError(f"Image reported invalid GPU readiness: {ready.get('error') or ready}. Inspect {log}")
             url = f'http://127.0.0.1:{ready["port"]}'
             answer = api(url, '/api/generate', {'model': model, 'prompt': 'Reply exactly: READY',
                          'stream': False, 'think': False, 'options': {'num_predict': 24}}, timeout=120)

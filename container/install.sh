@@ -52,5 +52,11 @@ mkdir -p /opt/fungen/docs
 cp /opt/fungen-operator/docs/operator_prototype.md /opt/fungen/docs/
 cp /opt/fungen-operator/README.md /opt/fungen/README.md
 chmod -R a+rX /opt/fungen
+# Ollama 0.40.6 checks a GPU with the job's GPU position as its device number;
+# the wrapper turns it back into the job's GPU (see container/llama-server.sh).
+if [[ ! -e /usr/lib/ollama/llama-server.ollama ]]; then
+    mv /usr/lib/ollama/llama-server /usr/lib/ollama/llama-server.ollama
+fi
+install -m 755 /opt/fungen-operator/container/llama-server.sh /usr/lib/ollama/llama-server
 mkdir -p /workspace
 chmod 755 /workspace

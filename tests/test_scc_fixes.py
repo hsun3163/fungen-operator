@@ -40,6 +40,7 @@ def test_serve_pins_one_library_and_preserves_allocated_gpu(tmp_path, monkeypatc
     env = launch.call_args.kwargs['env']
     assert env['OLLAMA_LLM_LIBRARY'] == expected
     assert env['CUDA_VISIBLE_DEVICES'] == 'GPU-allocated'
+    assert env['FUNGEN_JOB_CUDA_VISIBLE_DEVICES'] == 'GPU-allocated'
     assert json.loads((tmp_path/'state.json').read_text())['ready']
 
 

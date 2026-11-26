@@ -11,6 +11,33 @@ Commits, tags and releases below are in
 [fungen-operator-archive](https://github.com/hsun3163/fungen-operator-archive),
 the history of this repository before 2026-11-22.
 
+## [1.2.2] - Unreleased
+
+Source changes for the 1.2.1 BU SCC report (scc-219, A100 80GB,
+Exclusive_Process) and the earlier SCC reports (scc-503, scc-505, scc-605,
+scc-703). No image has been built or published for this version yet.
+
+### Fixed
+
+- Get the GPU on nodes where a job sees every GPU, as on BU SCC. Ollama 0.40.6
+  checks each GPU with `CUDA_VISIBLE_DEVICES` set to the GPU's position among the
+  job's GPUs, which CUDA reads as a physical GPU number, so a job given GPU 3 had
+  its check open GPU 0. When another job held GPU 0 in Exclusive_Process mode the
+  check failed as busy and serve fell back to CPU. The image now wraps
+  `llama-server` (`container/llama-server.sh`) to point that check at the job's
+  own GPU, and serve passes the job's GPU list to it.
+- Identify a path's mount by the last mount at its deepest mount point, so a
+  filesystem mounted over an automount (such as project space) is recognised,
+  and accept every shared filesystem type that model storage accepts.
+  The refusal now shows the mount it found.
+- Report `SGE unreachable` when `qconf -sc` returns no complex table, instead of
+  saying the saved GPU-memory complex is not requestable.
+- Show the install `bin` folder missing from PATH as an optional note, not a
+  failed check; every command also works by its full path.
+- Record why `fungen serve` stopped (for example, refusing CPU-only inference)
+  in `server.json`. `fungen check` reports that reason as a failure for the
+  ended launch instead of PENDING.
+
 ## [1.2.1] - 2026-11-17
 
 - Git tag `v1.2.1` identifies the release record.

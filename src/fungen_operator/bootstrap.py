@@ -57,8 +57,9 @@ def mount_info(path):
         return None
     if not matches:return None
     deepest=max(len(x['point']) for x in matches)
-    matches=[x for x in matches if len(x['point'])==deepest]
-    return matches[0] if len(matches)==1 else None
+    # Mounts stacked on one point (an automount and the filesystem over it) list in
+    # mount order; the last one is what the path shows.
+    return [x for x in matches if len(x['point'])==deepest][-1]
 
 
 def mount_type(path):
@@ -88,7 +89,7 @@ def host_visible(path):
         return False
     if info['fstype'] in ('tmpfs','overlay','squashfs','ramfs'):
         return False
-    shared=info['fstype'] in ('nfs','nfs4','gpfs','lustre','beegfs')
+    shared=info['fstype'] in SHARED_FILESYSTEMS
     return shared or (info['root']!='/' and host_disk_source(info))
 
 
@@ -400,10 +401,15 @@ def sge_complexes():
         raise ValueError('SGE resource discovery failed: qconf -sc must succeed on the host. '
                          'Load the site SGE environment and rerun host fungen setup/serve. '+str(exc)) from exc
     complexes = {}
-    for line in result.stdout.splitlines():
+    rows = [line for line in result.stdout.splitlines() if line.split() and not line.split()[0].startswith('#')]
+    types = ('INT', 'DOUBLE', 'TIME', 'MEMORY', 'BOOL', 'STRING', 'CSTRING', 'RESTRING', 'HOST')
+    # qconf can exit 0 without a complex table when it cannot reach qmaster.
+    if not any(len(line.split()) >= 8 and line.split()[2] in types for line in rows):
+        output = (result.stdout+(getattr(result, 'stderr', '') or '')).strip()[:500]
+        raise ValueError('SGE unreachable: qconf -sc returned no complex table. Check that qmaster is reachable '
+                         '(qstat works), then rerun host fungen setup/serve. qconf output: '+(output or '<empty>'))
+    for line in rows:
         fields = line.split()
-        if not fields or fields[0].startswith('#'):
-            continue
         if len(fields) < 8:
             raise ValueError('Invalid qconf -sc row: '+line)
         name, shortcut, kind, relation, requestable, consumable = fields[:6]
@@ -540,7 +546,8 @@ def render_serve(config, *, announce=False):
         configure_sge(config, announce=announce)
         gpu_request = '' if config['sge_gpu_memory_complex']=='none' else f",{config['sge_gpu_memory_complex']}={gpu_gb}G"
         directives = (f"#$ -N fungen-serve\n#$ -S /bin/bash\n"+(f"#$ -P {config['account']}\n" if config.get('account') else '')+f"#$ -pe {config['sge_parallel_environment']} {sge_serve_slots(config)}\n"
-                      f"#$ -l h_rt=12:00:00,{config['sge_memory_complex']}={config['sge_memory_per_slot_gb']}G,gpu={config['gpus']}{gpu_request}\n#$ -j y\n"
+                      f"#$ -l h_rt=12:00:00,{config['sge_memory_complex']}={config['sge_memory_per_slot_gb']}G,gpu={config['gpus']}{gpu_request}\n"
+                      "#$ -j y\n"
                       f"#$ -o {shlex.quote(str(root))}/serve.$JOB_ID.log\n")
     if sched == 'sge' and config['sge_gpu_memory_complex'] == 'none':
         directives += '# GPU-memory complex: explicit none; site cannot constrain per-GPU VRAM.\n'
@@ -593,7 +600,7 @@ def setup(args):
         return value if value is not None else (ask(prompt, default, choices) if interactive else default)
     install = Path(answer('install', 'Install folder', str(Path.home()/'.fungen'))).expanduser().resolve()
     if BUNDLE.is_dir() and not host_visible(install):
-        raise ValueError(f'Install folder {install} has unknown or private mount identity. Create the folder on the host, then run: '+shlex.join([launch,'run','--home',f'{Path.home()}:{Path.home()}','--bind',f'{install}:{install}',image or 'fungen.sif','setup','--install',str(install)]))
+        raise ValueError(f'Install folder {install} has unknown or private mount identity ({mount_info(install)}). Create the folder on the host, then run: '+shlex.join([launch,'run','--home',f'{Path.home()}:{Path.home()}','--bind',f'{install}:{install}',image or 'fungen.sif','setup','--install',str(install)]))
     if BUNDLE.is_dir():
         return copy_host_installer(install, args, image, launch)
     detected = scheduler()
@@ -757,7 +764,24 @@ def library_override(flag=None):
     return flag or os.environ.get('OLLAMA_LLM_LIBRARY') or os.environ.get('FUNGEN_OLLAMA_LLM_LIBRARY')
 
 
+def scheduler_job_id():
+    return os.environ.get('LSB_JOBID',os.environ.get('SLURM_JOB_ID',os.environ.get('JOB_ID','')))
+
+
 def inside_serve(args):
+    try:
+        return serve_ollama(args)
+    except Exception as exc:
+        # Keep the refusal reason where fungen check looks after the job has ended.
+        try:
+            Path(args.state).write_text(json.dumps({'ready':False,'error':str(exc),'node':socket.getfqdn(),
+                                                    'job_id':scheduler_job_id()},indent=2)+'\n')
+        except OSError:
+            pass
+        raise
+
+
+def serve_ollama(args):
     if not gpu_memory():
         raise ValueError('GPU unavailable: refusing CPU-only inference. Run fungen serve on the host to submit the GPU job; on a GPU node use apptainer run --nv fungen.sif serve.')
     port = available_port(args.port)
@@ -768,6 +792,8 @@ def inside_serve(args):
     env['OLLAMA_LLM_LIBRARY'] = ollama_library(library_override(getattr(args, 'ollama_llm_library', None)))
     print('FUNGEN_GPU_LIBRARY '+env['OLLAMA_LLM_LIBRARY'], flush=True)
     env['OLLAMA_DEBUG'] = '2'
+    # The image's llama-server wrapper points Ollama's GPU check at these GPUs.
+    env['FUNGEN_JOB_CUDA_VISIBLE_DEVICES'] = os.environ.get('CUDA_VISIBLE_DEVICES', '')
     runtime_requirements()
     process = subprocess.Popen(['ollama', 'serve'], env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
     discovery = DiscoveryLog(process.stdout)
@@ -791,7 +817,7 @@ def inside_serve(args):
         if not any(m.get('name')==model and m.get('size_vram',0)>0 for m in api(url,'/api/ps')['models']):
             raise RuntimeError('GPU offload unavailable for the selected model; refusing CPU-only model readiness. Run the server as a GPU job with --nv (fungen serve does both) and check the host NVIDIA driver/CUDA compatibility in this log.')
         state = {'endpoint':f'http://{socket.getfqdn()}:{port}','node':socket.getfqdn(),'port':port,
-                 'model':model,'job_id':os.environ.get('LSB_JOBID',os.environ.get('SLURM_JOB_ID',os.environ.get('JOB_ID',''))),
+                 'model':model,'job_id':scheduler_job_id(),
                  'pid':process.pid, 'ready':True}
         Path(args.state).write_text(json.dumps(state,indent=2)+'\n')
         print('FUNGEN_READY '+json.dumps(state),flush=True)
@@ -913,6 +939,16 @@ def local_process_identity(pid):
     return {'process_start':fields[19],'boot_id':Path('/proc/sys/kernel/random/boot_id').read_text().strip()}
 
 
+def refusal(state_path,request,saved):
+    """The reason the recorded launch gave for stopping, if it wrote one."""
+    try:
+        info=json.loads(state_path.read_text())
+        current=state_path.stat().st_mtime_ns>=request.stat().st_mtime_ns and str(info.get('job_id',''))==str(saved.get('job_id',''))
+        return ': '+info['error'] if current and isinstance(info.get('error'),str) else ''
+    except (OSError,ValueError,AttributeError):
+        return ''
+
+
 def runtime_observation(config):
     root=Path(config['install']);request=root/'server-request.json';state_path=root/'server.json'
     saved=None;launch=None
@@ -930,14 +966,15 @@ def runtime_observation(config):
         except (OSError,ValueError,KeyError,TypeError,RuntimeError,subprocess.SubprocessError) as exc:
             return RuntimeObservation(False,{},'Launch status retrieval failed: '+str(exc),'unknown')
         if launch!='running':
-            return RuntimeObservation(False,{},'Recorded server launch is not running ('+launch+'); inspect its job log.',launch)
+            return RuntimeObservation(False,{},'Recorded server launch is not running ('+launch+')'+refusal(state_path,request,saved)+'; inspect its job log.',launch)
     if not state_path.exists():
         return RuntimeObservation(None,{},'Recorded launch is pending readiness.' if saved else 'Server has not been started.',launch)
     try:
         info=json.loads(state_path.read_text());model=config.get('serve_model',config['model'])
-        if info['model']!=model or not info['ready']:raise ValueError('server state does not match selected model/readiness')
         if saved and (state_path.stat().st_mtime_ns<request.stat().st_mtime_ns or str(info.get('job_id',''))!=str(saved.get('job_id',''))):
             return RuntimeObservation(None,{},'Current launch has not recorded readiness; previous server state is stale.',launch)
+        if info.get('ready') is not True:raise ValueError(info.get('error') or 'server state does not record readiness')
+        if info.get('model')!=model:raise ValueError('server state does not match selected model')
         models=api(info['endpoint'])['models']
         if not any(m['name']==model for m in models):raise ValueError('selected model is absent from server')
         return RuntimeObservation(True,info,'',launch)
@@ -1219,7 +1256,9 @@ def check(config,online=True):
         print(('PENDING ' if good is None else 'PASS ' if good else 'FAIL ')+name+('' if good else ': '+fix))
     install=Path(config['install'])
     row('install writable',os.access(install,os.W_OK),'Choose setup --install WRITABLE_FOLDER.')
-    row('install on PATH',str(install/'bin') in os.environ.get('PATH','').split(':'),'export PATH='+shlex.quote(str(install/'bin'))+':"$PATH"')
+    # PATH is optional: every command works by its full path, so it never fails the check.
+    if str(install/'bin') not in os.environ.get('PATH','').split(':'):
+        print('NOTE install not on PATH (optional); run '+shlex.quote(str(install/'bin/fungen'))+' by full path, or: export PATH='+shlex.quote(str(install/'bin'))+':"$PATH"')
     try:
         imported=subprocess.run([install/'venv/bin/fungen-operator','--help'],capture_output=True,timeout=30).returncode==0
     except (OSError,subprocess.TimeoutExpired):
@@ -1251,7 +1290,8 @@ def check(config,online=True):
         row('model present',present,'Rerun setup --download yes to resume the selected model.')
         row('model folder writable or complete read-only reuse',present or os.access(folder,os.W_OK),'Choose a writable --models-dir for downloading.')
         row('model space and quota',present or (folder.exists() and shutil.disk_usage(folder).free>(MODELS[config['model']]*1.1+2)*1E9),'Free model storage and check your site quota; rerun setup --models-dir FOLDER.')
-        runtime_good,info,detail=runtime_status(config)
+        observed=runtime_observation(config)
+        runtime_good,info,detail=observed.ready,observed.info,observed.detail
         next_action='Run fungen serve, then fungen check.'
         row('server reachable; port selected',runtime_good,detail+' '+next_action)
         gpu=None
@@ -1267,6 +1307,10 @@ def check(config,online=True):
             except (OSError,ValueError,KeyError,TypeError,RuntimeError) as exc:
                 gpu=False
                 gpu_detail='GPU status retrieval failed: '+str(exc)+'. '+next_action
+        elif observed.launch in ('failed','success','not_running'):
+            # The recorded launch ended, for example after refusing CPU-only inference: report its reason.
+            gpu=False
+            gpu_detail=detail+' '+next_action
         row('GPU offload for selected model',gpu,gpu_detail)
         metadata=None
         metadata_detail='Local Codex model metadata not verified. '+next_action
