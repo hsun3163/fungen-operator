@@ -11,6 +11,27 @@ Commits, tags and releases below are in
 [fungen-operator-archive](https://github.com/hsun3163/fungen-operator-archive),
 the history of this repository before 2026-11-22.
 
+## [Unreleased]
+
+### Changed
+
+- The xQTL software lock pins pecotmr 0.9.6. The `dnachun` channel no longer serves
+  0.9.5, so every new software setup failed with a 404. The lock was regenerated
+  with `python -m fungen_operator.lock`. pecotmr 0.9.6 adds r-sparsevb,
+  r-selectiveinference, r-adaptmcmc, r-ramcmc, r-intervals and r-rcppensmallen. 67
+  other packages moved to newer versions, none of them a statistical package
+  pinned in `xqtl-mamba.yaml`; susieR stays at 0.16.6.
+
+### Fixed
+
+- Software setup no longer fails when a channel stops serving a locked package. When
+  an install from the lock fails, setup checks which locked packages are gone, pins
+  each to its old version or newer, solves the environment again in a scratch prefix,
+  installs from that solution, and records the new lock and the changed lines in the
+  setup root and log. A normal install makes no extra network requests.
+- `python -m fungen_operator.lock` writes the `@EXPLICIT` header itself. Mamba 2
+  (the pinned Miniforge 26.7.2-0) lists explicit URLs without it.
+
 ## [1.2.2] - Unreleased
 
 Source changes for the 1.2.1 BU SCC report (scc-219, A100 80GB,

@@ -7,11 +7,14 @@ import io
 import json
 import os
 from pathlib import Path
+import re
 import shlex
 import shutil
 import subprocess
 import sys
+import urllib.error
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 import nbformat
 import yaml
 from .bootstrap import ask, read_config, run, scheduler
@@ -61,6 +64,62 @@ def patch_sos(c):
         return
     run(['git', '-C', directory, 'apply', '--check', patch])
     run(['git', '-C', directory, 'apply', patch])
+
+
+def served(url):
+    """True while the channel still serves this exact package; only a 404 means it is gone."""
+    try:
+        with urllib.request.urlopen(urllib.request.Request(url,method='HEAD'),timeout=60):return True
+    except urllib.error.HTTPError as exc:
+        if exc.code==404:return False
+        raise
+
+
+def solved_here(source,target):
+    """True when target is this setup's own solve of the release lock source."""
+    record=Path(target).with_suffix('.yaml')
+    return (Path(target).is_file() and record.is_file() and yaml.safe_load(record.read_text()).get('solved_from_lock_sha256')
+            ==hashlib.sha256(Path(source).read_bytes()).hexdigest())
+
+
+def available_lock(source,target,mamba,scratch,env,log):
+    """After an install from target failed: if the channels no longer serve some of
+    its packages, solve the environment again without those exact pins and write the
+    solution to target. Returns False when every package is still served.
+
+    A gone package is pinned to its old version or newer. The solve runs in a
+    scratch prefix, so the installed environment is changed only by the normal
+    install from the new lock."""
+    from .lock import generate
+    lines=Path(target).read_text().splitlines()
+    urls=[line.split('#')[0] for line in lines if '://' in line]
+    with ThreadPoolExecutor(16) as pool:gone=[url for url,ok in zip(urls,pool.map(served,urls)) if not ok]
+    if not gone:return False
+    record=Path(target).with_suffix('.yaml')
+    spec=yaml.safe_load((record if solved_here(source,target) else RESOURCES/'xqtl-mamba.yaml').read_text())
+    spec['solved_from_lock_sha256']=hashlib.sha256(Path(source).read_bytes()).hexdigest()
+    for url in gone:
+        name,version,_=url.rsplit('/',1)[1].rsplit('-',2)
+        spec['dependencies']=[d for d in spec['dependencies'] if re.split(r'[=<>!~ ]',d.split('::')[-1])[0]!=name]
+        spec['dependencies'].append(name+'>='+version)
+    print('Locked packages no longer served:\n'+''.join('  '+u+'\n' for u in gone)
+          +'Solving again with: '+' '.join(spec['dependencies']),file=log,flush=True)
+    part=record.with_name(record.name+'.part');part.write_text(yaml.safe_dump(spec,sort_keys=False))
+    try:
+        generate(mamba,scratch,target,part,env=env,log=log)
+    except subprocess.CalledProcessError as exc:
+        raise ValueError('Locked packages are no longer served ('+', '.join(u.rsplit('/',1)[1] for u in gone)
+                         +') and solving again failed; see the setup log. Choose replacements in xqtl-mamba.yaml '
+                         'and regenerate the lock with python -m fungen_operator.lock.') from exc
+    finally:
+        shutil.rmtree(scratch,ignore_errors=True)
+    part.replace(record)
+    new=Path(target).read_text().splitlines()
+    removed,added=sorted(set(lines)-set(new)),sorted(set(new)-set(lines))
+    print('Solved again and wrote '+str(target)+'\n'+''.join('- '+x+'\n' for x in removed)+''.join('+ '+x+'\n' for x in added),file=log,flush=True)
+    print(f'Some locked packages are no longer served. The environment was solved again ({len(removed)} lock lines removed, '
+          f'{len(added)} added), recorded in {target}.',flush=True)
+    return True
 
 
 def settings(root):
@@ -257,15 +316,23 @@ def perform(root,step):
                         c['mamba']=acquire_mamba(Path(c['software']).parent)
                         (root/'setup.json').write_text(json.dumps(c,indent=2)+'\n')
                     spec=RESOURCES/'xqtl-mamba.yaml'
-                    lock=RESOURCES/'xqtl-linux-64.lock'
+                    # The installed lock is the release pin, or this root's own solve of it, kept in the setup root as the record.
+                    release=RESOURCES/'xqtl-linux-64.lock';lock=root/'xqtl-linux-64.lock'
+                    if not solved_here(release,lock):shutil.copyfile(release,lock)
+                    env=dict(os.environ,CONDA_PKGS_DIRS=str(Path(c['software']).parent/'package-cache'),MAMBA_DOWNLOAD_THREADS='2',MAMBA_EXTRACT_THREADS='2')
                     stamp=root/'software-spec.sha256'
-                    identity=hashlib.sha256(spec.read_bytes()+b'\0'+lock.read_bytes()+b'\0'+(RESOURCES/'sos-pulse.patch').read_bytes()).hexdigest()
-                    if not stamp.exists() or stamp.read_text()!=identity:
+                    identity=lambda:hashlib.sha256(spec.read_bytes()+b'\0'+lock.read_bytes()+b'\0'+(RESOURCES/'sos-pulse.patch').read_bytes()).hexdigest()
+                    if not stamp.exists() or stamp.read_text()!=identity():
                         operation='install' if (Path(c['software'])/'conda-meta/history').exists() else 'create'
-                        command([c['mamba'],operation,'-y','-p',c['software'],'--file',lock],env=dict(os.environ,CONDA_PKGS_DIRS=str(Path(c['software']).parent/'package-cache'),MAMBA_DOWNLOAD_THREADS='2',MAMBA_EXTRACT_THREADS='2'))
+                        install=lambda:command([c['mamba'],operation,'-y','-p',c['software'],'--file',lock],env=env)
+                        try:install()
+                        except subprocess.CalledProcessError:
+                            # Repair only a package the channels stopped serving; any other failure stands.
+                            if not available_lock(release,lock,c['mamba'],Path(c['software']).parent/'lock-solve',env,stream):raise
+                            install()
                     patch_sos(c)
                     (root/'software.applied.patch').write_bytes((RESOURCES/'sos-pulse.patch').read_bytes())
-                    stamp.write_text(identity)
+                    stamp.write_text(identity())
                     command([c['mamba'],'list','-p',c['software'],'--explicit'])
                 else:
                     path=root/'pixi-setup'

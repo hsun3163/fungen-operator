@@ -1,6 +1,7 @@
 """Regenerate the xQTL explicit lock using only its YAML channels, in order."""
 import argparse
 from pathlib import Path
+import re
 import subprocess
 
 import yaml
@@ -8,7 +9,7 @@ import yaml
 from .onboarding import RESOURCES
 
 
-def generate(mamba, prefix, output, spec=RESOURCES/'xqtl-mamba.yaml'):
+def generate(mamba, prefix, output, spec=RESOURCES/'xqtl-mamba.yaml', env=None, log=None):
     environment = yaml.safe_load(Path(spec).read_text())
     channels = environment['channels']
     packages = environment['dependencies']
@@ -19,12 +20,14 @@ def generate(mamba, prefix, output, spec=RESOURCES/'xqtl-mamba.yaml'):
     command = [str(mamba), 'create', '-y', '-p', str(prefix), '--override-channels']
     for channel in channels:
         command += ['-c', channel]
-    subprocess.run(command + packages, check=True)
+    subprocess.run(command + packages, check=True, env=env, stdout=log, stderr=subprocess.STDOUT if log else None)
     lock = subprocess.run([str(mamba), 'list', '-p', str(prefix), '--explicit', '--md5'],
-                          check=True, capture_output=True, text=True).stdout
-    if '@EXPLICIT' not in lock or not any(line.startswith('https://') for line in lock.splitlines()):
+                          check=True, capture_output=True, text=True, env=env).stdout
+    # Mamba 2 prints the URLs without the @EXPLICIT header that --file needs.
+    urls = [line for line in lock.splitlines() if re.match(r'[a-z+]+://', line)]
+    if not urls:
         raise ValueError('Mamba did not return an explicit package lock')
-    Path(output).write_text(lock)
+    Path(output).write_text('@EXPLICIT\n' + '\n'.join(urls) + '\n')
 
 
 def main(argv=None):

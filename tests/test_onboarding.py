@@ -1,5 +1,8 @@
 """The guided notebook records consent boundaries and native execution profiles."""
 from pathlib import Path
+import io
+import shutil
+import subprocess
 import json
 import nbformat
 import pytest
@@ -121,23 +124,101 @@ def test_software_install_uses_frozen_lock_and_detects_lock_changes(tmp_path,mon
     monkeypatch.setattr(o,'RESOURCES',resources)
     monkeypatch.setattr(o,'ask',lambda *a:'yes')
     monkeypatch.setattr(o,'check_step',lambda *a:None)
+    monkeypatch.setattr(o,'served',lambda url:True)
     commands=[];monkeypatch.setattr(o,'run',lambda cmd,**kw:commands.append([str(x) for x in cmd]))
     o.perform(tmp_path,'software')
-    assert commands[0]==['/managed/mamba','create','-y','-p',str(prefix),'--file',str(lock)]
+    installed=tmp_path/'xqtl-linux-64.lock'
+    assert commands[0]==['/managed/mamba','create','-y','-p',str(prefix),'--file',str(installed)]
+    assert installed.read_text()==lock.read_text()
     commands.clear();o.perform(tmp_path,'software')
     assert all('create' not in x and 'install' not in x for x in commands)
     (prefix/'conda-meta').mkdir(parents=True);(prefix/'conda-meta/history').touch()
     lock.write_text(lock.read_text()+'https://example.org/updated.conda#newhash\n')
     commands.clear();o.perform(tmp_path,'software')
-    assert commands[0][1]=='install' and commands[0][-1]==str(lock)
+    assert commands[0][1]=='install' and commands[0][-1]==str(installed)
+
+
+def unserved_lock(tmp_path,monkeypatch):
+    resources=tmp_path/'resources';resources.mkdir();monkeypatch.setattr(o,'RESOURCES',resources)
+    (resources/'xqtl-mamba.yaml').write_text(yaml.safe_dump({'channels':['dnachun'],'dependencies':['r-pecotmr=0.9.5','r-susier=0.16.6']}))
+    gone='https://conda.anaconda.org/dnachun/linux-64/r-pecotmr-0.9.5-r45h0489aeb_0.conda'
+    kept='https://conda.anaconda.org/dnachun/linux-64/r-susier-0.16.6-h0489aeb_0.conda#s'
+    newer='https://conda.anaconda.org/dnachun/linux-64/r-pecotmr-0.9.6-r45h0489aeb_0.conda#new'
+    source=resources/'xqtl-linux-64.lock';source.write_text('@EXPLICIT\n'+gone+'#old\n'+kept+'\n')
+    monkeypatch.setattr(o,'served',lambda url:url!=gone)
+    solves=[]
+    def generate(mamba,prefix,output,spec,env=None,log=None):
+        solves.append((Path(prefix).name,yaml.safe_load(Path(spec).read_text())['dependencies']))
+        Path(output).write_text('@EXPLICIT\n'+newer+'\n'+kept+'\n')
+    from fungen_operator import lock
+    monkeypatch.setattr(lock,'generate',generate)
+    return source,gone,newer,solves
+
+
+def test_unserved_pin_is_solved_again_in_scratch_and_recorded(tmp_path,monkeypatch):
+    source,gone,newer,solves=unserved_lock(tmp_path,monkeypatch)
+    target=tmp_path/'root/xqtl-linux-64.lock';target.parent.mkdir();shutil.copyfile(source,target)
+    log=io.StringIO()
+    assert o.available_lock(source,target,'mamba',tmp_path/'lock-solve',{},log)
+    assert solves==[('lock-solve',['r-susier=0.16.6','r-pecotmr>=0.9.5'])]
+    assert newer in target.read_text() and source.read_text().count('0.9.5')==1
+    assert '- '+gone+'#old' in log.getvalue() and '+ '+newer in log.getvalue()
+    # The root now holds its own solve of this release lock; a new release lock does not match it.
+    assert o.solved_here(source,target)
+    source.write_text(source.read_text()+'# new release\n');assert not o.solved_here(source,target)
+
+
+def test_install_failure_with_every_package_served_is_not_repaired(tmp_path,monkeypatch):
+    source,gone,newer,solves=unserved_lock(tmp_path,monkeypatch)
+    monkeypatch.setattr(o,'served',lambda url:True)
+    assert not o.available_lock(source,source,'mamba',tmp_path/'lock-solve',{},io.StringIO()) and solves==[]
+
+
+def test_failed_resolve_names_the_fix(tmp_path,monkeypatch):
+    source,gone,newer,solves=unserved_lock(tmp_path,monkeypatch)
+    from fungen_operator import lock
+    def fail(*a,**kw):raise subprocess.CalledProcessError(1,'mamba')
+    monkeypatch.setattr(lock,'generate',fail)
+    with pytest.raises(ValueError,match='r-pecotmr-0.9.5-r45h0489aeb_0.conda.*Choose replacements'):
+        o.available_lock(source,source,'mamba',tmp_path/'lock-solve',{},io.StringIO())
+
+
+def test_software_step_solves_again_only_after_a_failed_install(tmp_path,monkeypatch):
+    source,gone,newer,solves=unserved_lock(tmp_path,monkeypatch)
+    prefix=tmp_path/'software'
+    (tmp_path/'setup.json').write_text(json.dumps({'manager':'mamba','mamba':'/m/mamba','software':str(prefix)}))
+    (o.RESOURCES/'sos-pulse.patch').write_text('patch')
+    monkeypatch.setattr(o,'ask',lambda *a:'yes');monkeypatch.setattr(o,'check_step',lambda *a:None)
+    monkeypatch.setattr(o,'patch_sos',lambda c:None)
+    installs=[]
+    def run(cmd,**kw):
+        cmd=[str(x) for x in cmd]
+        if '--file' in cmd:
+            installs.append(Path(cmd[-1]).read_text())
+            if gone in installs[-1]:raise subprocess.CalledProcessError(1,cmd)
+    monkeypatch.setattr(o,'run',run)
+    o.perform(tmp_path,'software')
+    assert len(installs)==2 and newer in installs[1] and len(solves)==1
+    # A rerun keeps the root's solve and installs nothing.
+    installs.clear();o.perform(tmp_path,'software');assert installs==[] and len(solves)==1
+
+
+def test_only_a_missing_package_counts_as_unserved(monkeypatch):
+    import urllib.error
+    def refuse(code):
+        def urlopen(*a,**kw):raise urllib.error.HTTPError('u',code,'m',{},None)
+        return urlopen
+    monkeypatch.setattr(o.urllib.request,'urlopen',refuse(404));assert o.served('https://x/y.conda') is False
+    monkeypatch.setattr(o.urllib.request,'urlopen',refuse(503))
+    with pytest.raises(urllib.error.HTTPError):o.served('https://x/y.conda')
 
 
 def test_runtime_susier_requirement_is_pinned_in_both_specs():
     environment=yaml.safe_load((o.RESOURCES/'xqtl-mamba.yaml').read_text())
     assert o.COMMIT=='e1095f6354da6a4d2c43ef812eeb099a19fe93d2'
-    assert 'r-pecotmr=0.9.5' in environment['dependencies']
-    assert '/r-pecotmr-0.9.5-' in (o.RESOURCES/'xqtl-linux-64.lock').read_text()
-    assert sum(line.startswith('https://') for line in (o.RESOURCES/'xqtl-linux-64.lock').read_text().splitlines())==800
+    assert 'r-pecotmr=0.9.6' in environment['dependencies']
+    assert '/r-pecotmr-0.9.6-' in (o.RESOURCES/'xqtl-linux-64.lock').read_text()
+    assert sum(line.startswith('https://') for line in (o.RESOURCES/'xqtl-linux-64.lock').read_text().splitlines())==807
     assert 'r-susier=0.16.6' in environment['dependencies']
     assert '/r-susier-0.16.6-' in (o.RESOURCES/'xqtl-linux-64.lock').read_text()
 
